@@ -30,6 +30,8 @@ const KappDossier = (() => {
   const DB_NAME = 'kappgen-dossier';
   const STATE_FILE = '.kappgen-publications.json';
   const SIDE_FILE = '.kappgen.json';
+  // Visible in Finder: tells at a glance that the folder's video is on YouTube.
+  const MARKER_FILE = 'DEJA-PUBLIEE.txt';
   const CHANNEL_FILE = 'reglages-publication.json';
   const MIN_SIZE = 5 * 1024 * 1024;
   const SETTLE_MS = 10 * 60 * 1000;            // still being written if touched within 10 min
@@ -78,6 +80,18 @@ const KappDossier = (() => {
 
   const saveRoot = (handle) => kv('readwrite', (store) => store.put(handle, 'root'));
   const loadRoot = () => kv('readonly', (store) => store.get('root'));
+  // Second, optional folder: Facebook Reels and posts only. Paths inside it
+  // start with FB_PREFIX so every reader knows which folder they belong to.
+  const FB_PREFIX = 'fb:';
+  const saveFbRoot = (handle) => kv('readwrite', (store) => store.put(handle, 'fbroot'));
+  const loadFbRoot = () => kv('readonly', (store) => store.get('fbroot'));
+  const clearFbRoot = () => kv('readwrite', (store) => store.delete('fbroot'));
+
+  async function fbAccess() {
+    const handle = testFbRoot || await loadFbRoot();
+    if (!handle) return { state: 'none' };
+    return { state: testFbRoot ? 'granted' : await handle.queryPermission({ mode: 'readwrite' }), name: handle.name };
+  }
 
   // state: "granted", "prompt", "denied" or "none" (no folder chosen yet).
   async function access() {
@@ -87,6 +101,27 @@ const KappDossier = (() => {
   }
 
   let testRoot = null; // set by tests only
+  let testFbRoot = null;
+
+  async function fbRoot() {
+    if (testFbRoot) return testFbRoot;
+    const handle = await loadFbRoot();
+    if (!handle) return null;
+    if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+      throw new Error('Accès au dossier Facebook à autoriser : onglet Facebook → « Autoriser l’accès ».');
+    }
+    return handle;
+  }
+
+  // The folder a path belongs to, and the path inside it.
+  async function dirFor(relativePath) {
+    if (relativePath.startsWith(FB_PREFIX)) {
+      const handle = await fbRoot();
+      if (!handle) throw new Error('Aucun dossier Facebook choisi.');
+      return [handle, relativePath.slice(FB_PREFIX.length)];
+    }
+    return [await root(), relativePath];
+  }
 
   async function root() {
     if (testRoot) return testRoot;
@@ -99,8 +134,8 @@ const KappDossier = (() => {
   }
 
   async function fileAt(relativePath) {
-    let dir = await root();
-    const parts = relativePath.split('/');
+    let [dir, inside] = await dirFor(relativePath);
+    const parts = inside.split('/').filter(Boolean);
     const name = parts.pop();
     for (const part of parts) dir = await dir.getDirectoryHandle(part);
     return (await dir.getFileHandle(name)).getFile();
@@ -128,6 +163,23 @@ const KappDossier = (() => {
     const handle = await dir.getFileHandle(SIDE_FILE, { create: true });
     const writable = await handle.createWritable();
     await writable.write(JSON.stringify(side, null, 2));
+    await writable.close();
+  }
+
+  async function writeMarker(dir, side) {
+    const lines = Object.entries(side).filter(([, r]) => r && r.status === 'published').map(([name, r]) => [
+      `${name} : déjà publiée, ne pas la renvoyer.`,
+      r.youtubeId ? `YouTube : https://youtu.be/${r.youtubeId}${r.visibility ? ` (${r.visibility})` : ''}` : null,
+      r.facebookPublishedAt ? `Facebook : ${r.facebookPublishedAt}` : null,
+      `Date : ${r.date || ''}`,
+    ].filter(Boolean).join('\n'));
+    if (!lines.length) {
+      await dir.removeEntry(MARKER_FILE).catch(() => {});
+      return;
+    }
+    const handle = await dir.getFileHandle(MARKER_FILE, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(`${lines.join('\n\n')}\n`);
     await writable.close();
   }
 
@@ -444,6 +496,7 @@ const KappDossier = (() => {
           force_update: !!record.forceUpdate, update_error: record.updateError || null,
           vertical_path: vertical && vertical.path, vertical_size_bytes: vertical && vertical.size,
           short_youtube_id: record.shortYoutubeId || null, facebook_published_at: record.facebookPublishedAt || null,
+          facebook_error: record.facebookError || null, published_at: record.publishedAt || null,
           channel_config: fileConfig });
         continue;
       }
@@ -498,6 +551,23 @@ const KappDossier = (() => {
       const key = unit.channel.path || `./${tree.name}`;
       if (!channels.has(key)) channels.set(key, { key, name: unit.channel.path ? unit.channel.name : tree.name, videos: 0, config: await configFor(unit.channel) });
     }
+    // A re-render or a renamed file is not the same name+size, but the same
+    // title on the same channel is the same video: never send it again alone.
+    const titleKey = (key, title) => `${key}|${String(title || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()}`;
+    const sentTitles = new Map(sent.filter((s) => s.title).map((s) => [titleKey(s.channel_key, s.title), s]));
+    for (const v of videos) {
+      const twin = v.has_sheet && sentTitles.get(titleKey(v.channel_key, v.title));
+      const node = units.find((u) => pathIn(u.node, u.video.name) === v.relative_path);
+      if (twin) {
+        v.already_sent = twin.youtube_id || true;
+        v.auto_ok = false;
+        v.auto_blocked = `déjà publiée sous le même titre (${twin.youtube_id ? `youtu.be/${twin.youtube_id}` : twin.relative_path}) : vérifie avant de la renvoyer à la main`;
+      } else if (node && node.node.files.has(MARKER_FILE)) {
+        v.already_sent = true;
+        v.auto_ok = false;
+        v.auto_blocked = `dossier marqué ${MARKER_FILE} : vidéo déjà publiée, vérifie avant de la renvoyer à la main`;
+      }
+    }
     videos.sort((a, b) => a.channel_key.localeCompare(b.channel_key) || a.relative_path.localeCompare(b.relative_path));
     return { folder: tree.name, videos, sent, channels: [...channels.values()].sort((a, b) => a.key.localeCompare(b.key)) };
   }
@@ -540,7 +610,10 @@ const KappDossier = (() => {
           Object.assign(record, { youtubeId: data.youtubeId, visibility: data.visibility || null, channel: data.channel || null, appliedHash: data.hash || null });
         }
         if (data.shortYoutubeId) record.shortYoutubeId = data.shortYoutubeId;
-        if (data.facebookPublishedAt) record.facebookPublishedAt = data.facebookPublishedAt;
+        // Link given by hand: the sheet and thumbnail of the folder must be applied.
+        if (data.forceUpdate) { record.forceUpdate = true; delete record.appliedHash; delete record.updateTriedHash; delete record.updateError; }
+        if (data.facebookPublishedAt) { record.facebookPublishedAt = data.facebookPublishedAt; delete record.facebookError; }
+        if (data.facebookError) record.facebookError = data.facebookError;
       }
       if (status === 'failed') record.error = data.error || 'Erreur inconnue';
       state[relativePath] = record;
@@ -549,6 +622,7 @@ const KappDossier = (() => {
     if (state[relativePath]) side[videoName] = state[relativePath];
     else delete side[videoName];
     await writeSide(videoDir, side);
+    await writeMarker(videoDir, side).catch(() => {});
     return state[relativePath] || null;
   }
 
@@ -587,21 +661,70 @@ const KappDossier = (() => {
     return new Date(y, m - 1, d, hh || 0, mm || 0).getTime();
   }
 
-  async function facebookPosts({ now = Date.now() } = {}) {
-    const rootHandle = await root();
+  // Where the posts are: with a Facebook folder chosen, only there (it may be
+  // a FACEBOOK folder, its A-PUBLIER, a folder of posts, or a folder holding
+  // FACEBOOK folders); otherwise the FACEBOOK folders of the videos folder.
+  async function postQueues() {
+    const fbHandle = await fbRoot();
+    const queues = [];
+    const join = (...parts) => parts.filter(Boolean).join('/');
+    if (!fbHandle) {
+      const dirs = [];
+      await findFacebookDirs(await root(), '', 0, dirs);
+      for (const fb of dirs) {
+        let queue;
+        try { queue = await fb.handle.getDirectoryHandle('A-PUBLIER'); } catch { continue; }
+        queues.push({ planningDir: fb.handle, queue, path: join(fb.path, 'A-PUBLIER'), channelKey: fb.channelPath || '.',
+          channelName: fb.channelPath ? fb.channelName : `${fb.channelName} (dossier principal)` });
+      }
+      return queues;
+    }
+    // Inside the videos folder? Then its channel (and its Page setting) is known.
+    let inside = null;
+    try {
+      const main = testRoot || await loadRoot();
+      if (main && (testRoot || await main.queryPermission({ mode: 'readwrite' }) === 'granted')) inside = await main.resolve(fbHandle);
+    } catch { inside = null; }
+    const channelOf = (facebookDirParts) => {
+      const full = inside ? [...inside, ...facebookDirParts] : null;
+      if (full && full.length >= 2) return { channelKey: full.slice(0, -1).join('/'), channelName: full[full.length - 2] };
+      return { channelKey: FB_PREFIX, channelName: fbHandle.name };
+    };
+    if (norm(fbHandle.name) === 'a publier') {
+      queues.push({ planningDir: null, queue: fbHandle, path: FB_PREFIX, ...(inside && inside.length >= 3
+        ? { channelKey: inside.slice(0, -2).join('/'), channelName: inside[inside.length - 3] }
+        : { channelKey: FB_PREFIX, channelName: fbHandle.name }) });
+      return queues;
+    }
+    try {
+      const queue = await fbHandle.getDirectoryHandle('A-PUBLIER');
+      queues.push({ planningDir: fbHandle, queue, path: `${FB_PREFIX}A-PUBLIER`, ...channelOf([]) });
+      return queues;
+    } catch { /* not a FACEBOOK folder itself */ }
     const dirs = [];
-    await findFacebookDirs(rootHandle, '', 0, dirs);
-    const posts = [];
+    await findFacebookDirs(fbHandle, '', 0, dirs);
     for (const fb of dirs) {
-      const planning = (await readJson(fb.handle, 'planning.json')) || {};
       let queue;
       try { queue = await fb.handle.getDirectoryHandle('A-PUBLIER'); } catch { continue; }
+      queues.push({ planningDir: fb.handle, queue, path: `${FB_PREFIX}${join(fb.path, 'A-PUBLIER')}`, ...channelOf(fb.path.split('/')) });
+    }
+    // A plain folder of posts (one sub-folder per post).
+    if (!queues.length) queues.push({ planningDir: fbHandle, queue: fbHandle, path: FB_PREFIX, ...channelOf([]) });
+    return queues;
+  }
+
+  async function facebookPosts({ now = Date.now() } = {}) {
+    const posts = [];
+    for (const fb of await postQueues()) {
+      const planning = (fb.planningDir && await readJson(fb.planningDir, 'planning.json')) || {};
+      const queue = fb.queue;
       for await (const [name, postDir] of queue.entries()) {
         if (postDir.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
         const info = (await readJson(postDir, 'publication.json')) || {};
         const files = [];
         for await (const [fileName, handle] of postDir.entries()) if (handle.kind === 'file') files.push(fileName);
-        const path = `${fb.path}/A-PUBLIER/${name}`;
+        if (!files.some((f) => /^texte.*\.txt$/i.test(f) || IMAGE_EXT.test(f) || VIDEO_EXT.test(f) || f === 'publication.json')) continue;
+        const path = fb.path === FB_PREFIX ? `${FB_PREFIX}${name}` : `${fb.path}/${name}`;
         const textName = info.texte && files.includes(info.texte) ? info.texte : files.find((f) => /^texte.*\.txt$/i.test(f));
         let text = '';
         if (textName) text = (await (await (await postDir.getFileHandle(textName)).getFile()).text()).trim();
@@ -612,8 +735,8 @@ const KappDossier = (() => {
         posts.push({
           id: path,
           path,
-          channel_key: fb.channelPath || '.',
-          channel_name: fb.channelPath ? fb.channelName : `${fb.channelName} (dossier principal)`,
+          channel_key: fb.channelKey,
+          channel_name: fb.channelName,
           page: info.page || planning.page || null,
           type: video ? 'reel' : image ? 'photo' : 'texte',
           text: text.slice(0, 63000),
@@ -624,7 +747,7 @@ const KappDossier = (() => {
           error: info.erreur || null,
           started_at: info.started_at || null,
           published_at: info.published_at || null,
-          ready: statut === 'a_publier' && !!due && due <= now && !!(text || image || video),
+          ready: statut === 'a_publier' && (!due || due <= now) && !!(text || image || video),
         });
       }
     }
@@ -634,8 +757,8 @@ const KappDossier = (() => {
 
   // Merges patch into the post's publication.json.
   async function markPost(path, patch) {
-    let dir = await root();
-    for (const part of path.split('/')) dir = await dir.getDirectoryHandle(part);
+    let [dir, inside] = await dirFor(path);
+    for (const part of inside.split('/').filter(Boolean)) dir = await dir.getDirectoryHandle(part);
     const info = (await readJson(dir, 'publication.json')) || {};
     Object.assign(info, patch);
     const handle = await dir.getFileHandle('publication.json', { create: true });
@@ -645,5 +768,6 @@ const KappDossier = (() => {
     return info;
   }
 
-  return { saveRoot, loadRoot, access, fileAt, scan, mark, facebookPosts, markPost, _setTestRoot: (h) => { testRoot = h; } };
+  return { saveRoot, loadRoot, access, saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost,
+    _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testFbRoot = h; } };
 })();

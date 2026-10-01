@@ -4,6 +4,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.target !== 'offscreen') return false;
   const handlers = {
     access: () => KappDossier.access(),
+    fbAccess: () => KappDossier.fbAccess(),
     scan: () => KappDossier.scan({ channels: message.channels || {}, autoSince: message.autoSince || 0 }),
     mark: () => KappDossier.mark(message.path, message.status, message.data || {}),
     posts: () => KappDossier.facebookPosts(),

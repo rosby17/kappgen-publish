@@ -77,7 +77,9 @@ async function ensureOffscreen() {
 const ASK_URL = chrome.runtime.getURL('autorisation.html');
 async function askAccess({ wait = false, force = false } = {}) {
   const access = await folder('access').catch(() => ({ state: 'none' }));
-  if (access.state !== 'prompt') return access.state === 'granted';
+  // The Facebook folder (Reels and posts) is asked in the same small window.
+  const fbAccess = await folder('fbAccess').catch(() => ({ state: 'none' }));
+  if (access.state !== 'prompt' && (fbAccess.state !== 'prompt' || wait)) return access.state === 'granted';
   const [open] = await chrome.tabs.query({ url: ASK_URL });
   if (open) {
     await chrome.windows.update(open.windowId, { focused: true, drawAttention: true }).catch(() => {});
@@ -194,13 +196,33 @@ async function closeStudioTab(tabId) {
   chrome.tabs.remove(tabId).catch(() => {});
 }
 
-// A click on "Envoyer" uses the YouTube Studio tab in front, or another
-// Studio tab of the window; a new tab only when there is none.
-async function studioTabToReuse() {
+// An already open tab of the site is used (the one in front first, then one
+// of the current window, then any window); a new tab only when there is none.
+async function tabToReuse(pattern, patterns) {
   const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (active && /^https:\/\/studio\.youtube\.com\//.test(active.url || '')) return active;
-  const others = await chrome.tabs.query({ url: 'https://studio.youtube.com/*', lastFocusedWindow: true });
-  return others[0] || null;
+  if (active && pattern.test(active.url || '')) return active;
+  const here = await chrome.tabs.query({ url: patterns, lastFocusedWindow: true });
+  if (here[0]) return here[0];
+  const anywhere = await chrome.tabs.query({ url: patterns });
+  return anywhere[0] || null;
+}
+const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
+const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
+  ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
+
+// Goes to url in an open tab of the site, or opens one. A tab that was
+// already open is "borrowed": it is never closed afterwards.
+async function reuseOrOpen(findTab, url, { sameIfStartsWith = null } = {}) {
+  let tab = await findTab();
+  if (tab) {
+    const current = tab.url || '';
+    if (!(sameIfStartsWith && current.startsWith(sameIfStartsWith))) tab = await chrome.tabs.update(tab.id, { url });
+    await setBorrowed(tab.id, true);
+  } else {
+    tab = await chrome.tabs.create({ url, active: false });
+  }
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  return tab;
 }
 
 // reuse: upload in the creator's own Studio tab (clicks); otherwise a tab of
@@ -208,16 +230,10 @@ async function studioTabToReuse() {
 // working in is never taken over).
 async function openStudioUpload(channelId, active = true, { reuse = false } = {}) {
   const url = channelId ? `https://studio.youtube.com/channel/${channelId}/videos/upload?d=ud` : 'https://www.youtube.com/upload';
-  let tab = reuse ? await studioTabToReuse() : null;
-  if (tab) {
-    tab = await chrome.tabs.update(tab.id, { url, active: true });
-    await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-  } else {
-    tab = await chrome.tabs.create({ url, active: reuse || active });
-  }
-  if (reuse) await setBorrowed(tab.id, true);
-  // Never let Chrome discard the tab: that would cancel the transfer.
-  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  // The YouTube Studio tab already open is used, for clicks and automatic
+  // uploads alike; a new tab only when none is open.
+  const tab = await reuseOrOpen(studioTabToReuse, url);
+  if (reuse || active) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
   const start = Date.now();
   while (Date.now() - start < 90000) {
     const current = await chrome.tabs.get(tab.id);
@@ -358,7 +374,8 @@ async function channelVideos(youtubeChannelId) {
 // which Page receives the post.
 async function openFacebookReel(pageUrl) {
   const safePage = /^https:\/\/(?:www\.)?facebook\.com\//i.test(String(pageUrl || '')) ? pageUrl : 'https://www.facebook.com/';
-  const tab = await chrome.tabs.create({ url: safePage, active: false });
+  // The Facebook tab already open is used (left as is if it already shows the page).
+  const tab = await reuseOrOpen(facebookTabToReuse, safePage, { sameIfStartsWith: safePage.replace(/\/+$/, '') });
   const start = Date.now();
   while (Date.now() - start < 90000) {
     const current = await chrome.tabs.get(tab.id);
@@ -430,7 +447,7 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
 
 // Same steps for both sources; only where the video comes from differs.
 async function publish(source, videoId, visibility, { auto = false } = {}) {
-  await chrome.storage.session.set({ job: { running: true, source, videoId, auto, message: 'Préparation…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ job: { running: true, source, kind: 'youtube', path: videoId, videoId, auto, message: 'Préparation…', startedAt: Date.now() } });
   let video;
   let channelId = null;
   let monetization = 'on';
@@ -683,7 +700,7 @@ async function resume() {
 // "Mettre à jour" on a video already sent: re-apply its sheet (title,
 // description, tags) and thumbnail from the folder on its YouTube edit page.
 async function updateVideo(relativePath, auto = false) {
-  await chrome.storage.session.set({ job: { running: true, source: 'folder', auto, message: 'Préparation de la mise à jour…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'update', path: relativePath, auto, message: 'Préparation de la mise à jour…', startedAt: Date.now() } });
   let tabId = null;
   let sentHash = null;
   try {
@@ -695,7 +712,7 @@ async function updateVideo(relativePath, auto = false) {
       throw new Error('Aucune fiche ni miniature trouvée pour cette vidéo dans le dossier.');
     }
     await setJob({ title: video.title || relativePath.split('/').pop(), channel: video.channel_name, message: 'Ouverture de la vidéo dans YouTube Studio…' });
-    const tab = await chrome.tabs.create({ url: `https://studio.youtube.com/video/${video.youtube_id}/edit`, active: false });
+    const tab = await reuseOrOpen(studioTabToReuse, `https://studio.youtube.com/video/${video.youtube_id}/edit`);
     tabId = tab.id;
     const start = Date.now();
     for (;;) {
@@ -720,7 +737,7 @@ async function updateVideo(relativePath, auto = false) {
       await setJob({ message: 'Enregistrement…' });
       await step(tabId, 'saveEdit');
     });
-    chrome.tabs.remove(tabId).catch(() => {});
+    closeStudioTab(tabId);
     await folder('mark', { path: relativePath, status: 'applied', data: { hash: video.hash } });
     await setJob({ running: false, done: true, error: null, youtubeUrl: `https://youtu.be/${video.youtube_id}`, message: 'Vidéo mise à jour sur YouTube.' });
   } catch (error) {
@@ -734,8 +751,8 @@ async function updateVideo(relativePath, auto = false) {
 // Publish only the detected Facebook derivative. This is deliberately an
 // explicit action from the Facebook tab because it opens Facebook and posts
 // externally; detecting a reel file must not publish it silently.
-async function publishFacebookOnly(relativePath) {
-  await chrome.storage.session.set({ job: { running: true, source: 'folder', message: 'Préparation du Reel Facebook…', startedAt: Date.now() } });
+async function publishFacebookOnly(relativePath, { auto = false } = {}) {
+  await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'facebook', path: relativePath, auto, message: 'Préparation de la publication Facebook…', startedAt: Date.now() } });
   try {
     const { sent } = await folderQueue();
     const video = sent.find((item) => item.relative_path === relativePath);
@@ -745,9 +762,11 @@ async function publishFacebookOnly(relativePath) {
     await setJob({ title: video.title, message: 'Ouverture de Facebook…' });
     await publishFacebookReel(video, video.channel_name, own.facebookPageUrl, file);
     await folder('mark', { path: relativePath, status: 'published', data: { facebookPublishedAt: new Date().toISOString() } });
-    await setJob({ running: false, done: true, error: null, message: 'Reel publié sur Facebook.' });
+    await setJob({ running: false, done: true, error: null, message: 'Publiée sur Facebook.' });
   } catch (error) {
     const message = friendly(error);
+    // Not retried on its own (never a double post): the panel offers « Réessayer ».
+    await folder('mark', { path: relativePath, status: 'published', data: { facebookError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -767,7 +786,7 @@ async function postPage(post) {
 async function publishFacebookPost(post, { auto = false } = {}) {
   const page = await postPage(post);
   if (!page) throw new Error(`${post.channel_name} : lien de la page Facebook à renseigner (planning.json ou reglages-publication.json).`);
-  await chrome.storage.session.set({ job: { running: true, source: 'facebook', auto, title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', channel: post.channel_name, message: 'Ouverture de Facebook…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ job: { running: true, source: 'facebook', kind: 'post', path: post.path, auto, title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', channel: post.channel_name, message: 'Ouverture de Facebook…', startedAt: Date.now() } });
   await folder('markPost', { path: post.path, patch: { statut: 'en_cours', started_at: new Date().toISOString() } });
   let tabId = null;
   try {
@@ -788,7 +807,7 @@ async function publishFacebookPost(post, { auto = false } = {}) {
         await setJob({ message: 'Publication…' });
         await step(tabId, 'sendPost');
       });
-      chrome.tabs.remove(tabId).catch(() => {});
+      closeStudioTab(tabId); // only a tab opened for this post is closed
     }
     await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null } });
     await setJob({ running: false, done: true, error: null, message: 'Post publié sur Facebook.' });
@@ -865,6 +884,7 @@ async function autoTick() {
   }
   chrome.action.setBadgeText({ text: '' });
   await chrome.storage.session.remove('permissionNotified');
+  if ((await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
   const { videos, sent } = await folderQueue();
   let next = null;
   for (const candidate of videos.filter((v) => v.auto_ok)) {
@@ -887,6 +907,15 @@ async function autoTick() {
   const post = await nextDuePost();
   if (post) {
     await publishFacebookPost(post, { auto: true });
+    return;
+  }
+  // Then a video already on YouTube, for a channel whose Facebook publishing
+  // is automatic (videos published on YouTube since it was switched on).
+  for (const v of sent) {
+    const own = ownOf(settings, v);
+    if (!own.facebook || !own.facebookPageUrl || v.facebook_published_at || v.facebook_error || !v.youtube_id) continue;
+    if (!v.published_at || v.published_at < (own.facebookSince || 0)) continue;
+    await publishFacebookOnly(v.relative_path, { auto: true });
     return;
   }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
@@ -945,7 +974,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       const post = (await folder('posts')).find((p) => p.path === message.path);
       if (!post) throw new Error('Post introuvable (déplacé ?).');
-      publishFacebookPost(post); // runs on; the panel follows chrome.storage
+      if (!await postPage(post)) throw new Error('Ajoute d’abord le lien de ta page Facebook (étape 1, en haut de l’onglet Facebook).');
+      publishFacebookPost(post).catch(() => {}); // runs on; the panel follows chrome.storage
       return { started: true };
     },
     autoNow: async () => { autoTick().catch(() => {}); return {}; },
@@ -965,8 +995,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     facebook: async () => {
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      const { sent } = await folderQueue();
+      const video = sent.find((item) => item.relative_path === message.path);
+      if (video && !ownOf(await folderSettings(), video).facebookPageUrl) {
+        throw new Error('Ajoute d’abord le lien de ta page Facebook (étape 1, en haut de l’onglet Facebook).');
+      }
       publishFacebookOnly(message.path);
       return { started: true };
+    },
+    // The video is on YouTube but its link was not recorded: record it, then
+    // the sheet and thumbnail of the folder are applied to it.
+    linkYoutube: async () => {
+      const id = String(message.url || '').match(/(?:youtu\.be\/|[?&]v=|\/video\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{11})/) || String(message.url || '').match(/^([A-Za-z0-9_-]{11})$/);
+      if (!id) throw new Error('Lien YouTube non reconnu : colle le lien de la vidéo (youtu.be/… ou studio.youtube.com/video/…).');
+      await folder('mark', { path: message.path, status: 'published', data: { youtubeId: id[1], forceUpdate: true } });
+      autoTick().catch(() => {});
+      return { youtubeId: id[1] };
+    },
+    // Send the video again, with the sheet and thumbnail of the folder.
+    republish: async () => {
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Un envoi est déjà en cours.');
+      await folder('mark', { path: message.path, status: 'reset' });
+      publish('folder', message.path, 'CHANNEL');
+      return { started: true };
+    },
+    // A job that never finished (tab closed, Facebook stuck) must not block everything.
+    unblockJob: async () => {
+      await chrome.storage.session.set({ job: { running: false, done: false, error: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.', message: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.' } });
+      return {};
     },
     clearJob: async () => {
       const { job } = await chrome.storage.session.get('job');

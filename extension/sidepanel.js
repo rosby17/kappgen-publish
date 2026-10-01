@@ -40,6 +40,47 @@ function button(label, className, onClick) {
   return node;
 }
 
+// Small status line with a coloured dot: ok, warn, info, busy (spinner).
+function pill(kind, text) {
+  return el('div', `pill ${kind}`, text);
+}
+
+// One card: thumbnail, title, details, status and a row of actions.
+function card({ path, preview, emptyLabel, title, details = [], status, actions = [], extra = [] }) {
+  const item = el('li', 'item');
+  if (path) item.dataset.path = path;
+  const box = preview !== undefined ? thumb(preview) : el('div', 'thumb empty', emptyLabel || '');
+  if (preview === undefined && emptyLabel) box.textContent = emptyLabel;
+  const info = el('div', 'info');
+  info.append(el('div', 'title', title));
+  for (const line of details.filter(Boolean)) info.append(el('div', 'meta', line));
+  const live = el('div', 'live');
+  if (status) live.append(status);
+  info.append(live);
+  item.append(box, info);
+  for (const node of extra) item.append(node);
+  if (actions.length) {
+    const row = el('div', 'actions-row');
+    row.append(...actions);
+    item.append(row);
+  }
+  item.say = (kind, text) => live.replaceChildren(pill(kind, text));
+  return item;
+}
+
+// What a click returns: an error is shown on the card itself.
+async function act(item, buttonNode, message, busyText) {
+  buttonNode.disabled = true;
+  const reply = await send(message);
+  if (!reply || !reply.ok) {
+    buttonNode.disabled = false;
+    item.say('warn', reply ? reply.error : 'Action impossible.');
+    return null;
+  }
+  if (busyText) item.say('busy', busyText);
+  return reply.data || {};
+}
+
 async function settings() {
   const { folder } = await chrome.storage.local.get('folder');
   const current = { channels: {}, ...(folder || {}) };
@@ -65,21 +106,27 @@ for (const tab of document.querySelectorAll('.tabs button')) {
 
 // ---------------------------------------------------------------- folder
 
+// A chosen folder shows as "✓ Dossier sélectionné : NAME" and its big button
+// disappears; "changer" stays available. Same for the Facebook folder.
+function showFolder(prefix, access) {
+  const granted = access.state === 'granted';
+  $(`${prefix}folder-chosen`).hidden = !granted;
+  $(`${prefix}folder-name`).textContent = access.name || '';
+  $(`${prefix}folder-actions`).hidden = granted;
+  $(`${prefix}folder-hint`).hidden = granted;
+  $(`${prefix}pick`).hidden = access.state === 'prompt';
+  $(`${prefix}grant`).hidden = access.state !== 'prompt';
+  const status = $(`${prefix}folder-status`);
+  status.hidden = access.state !== 'prompt';
+  status.className = 'status error';
+  status.textContent = access.state === 'prompt'
+    ? `« ${access.name} » : Chrome redemande l’accès. Clique « Autoriser l’accès » puis « Autoriser à chaque visite ».`
+    : '';
+}
+
 async function renderAccess() {
   const access = await KappDossier.access();
-  const status = $('folder-status');
-  $('grant').hidden = access.state !== 'prompt';
-  $('pick').textContent = access.state === 'none' ? 'Choisir le dossier' : 'Changer de dossier';
-  if (access.state === 'none') {
-    status.className = 'status';
-    status.textContent = 'Choisis le dossier qui contient tes vidéos.';
-  } else if (access.state === 'granted') {
-    status.className = 'status ok';
-    status.textContent = `Dossier : ${access.name}`;
-  } else {
-    status.className = 'status error';
-    status.textContent = `« ${access.name} » : Chrome redemande l’accès. Clique « Autoriser l’accès » puis choisis « Autoriser à chaque visite ».`;
-  }
+  showFolder('', access);
   return access.state === 'granted';
 }
 
@@ -94,36 +141,24 @@ const VISIBILITY_LABELS = {
 const visibilityOf = (key) => VISIBILITY_LABELS[autoVisibility.get(key)] ? autoVisibility.get(key) : 'UNLISTED';
 
 function videoItem(video) {
-  const item = el('li', 'video');
-  const info = el('div', 'info');
-  const title = el('div', 'title', video.title);
-  title.title = video.relative_path;
-  info.append(title, el('div', 'file', `Fichier : ${video.relative_path.split('/').pop()}`), el('div', 'meta', [size(video.size_bytes), 'YouTube',
-    video.thumbnail_path ? 'miniature' : 'sans miniature', video.vertical_path ? 'vertical prêt' : null,
-    video.tags.length ? `${video.tags.length} mots-clés` : null].filter(Boolean).join(' · ')));
-  const problem = video.last_error || video.thumbnail_warning;
-  info.append(el('div', video.auto_ok ? 'ok' : problem ? 'warn' : 'meta',
-    video.last_error || (video.auto_ok ? `Partira toute seule, ${VISIBILITY_LABELS[visibilityOf(video.channel_key)]}.` : video.auto_blocked)));
-  if (video.thumbnail_warning && !video.last_error) info.append(el('div', 'warn', video.thumbnail_warning));
-  const buttons = el('div', 'buttons');
-  const go = button('Publier sur YouTube', 'publish', async () => {
-    go.disabled = true;
-    const reply = await send({ type: 'publish', source: 'folder', videoId: video.id, visibility: 'CHANNEL' });
-    if (!reply || !reply.ok) {
-      go.disabled = false;
-      info.append(el('div', 'warn', reply ? reply.error : 'Envoi impossible.'));
-    }
-  });
-  go.disabled = jobRunning || video.running;
-  go.title = 'Envoie maintenant cette vidéo sur YouTube. La miniature et la fiche viennent du même dossier.';
-  if (video.vertical_path) go.title += ' Le format vertical associé est détecté dans l’onglet Facebook.';
-  const already = button('Déjà publiée', 'secondary', async () => {
+  const status = video.last_error ? pill('warn', video.last_error)
+    : video.auto_ok ? pill('ok', `Partira toute seule (${VISIBILITY_LABELS[visibilityOf(video.channel_key)]}).`)
+      : pill('neutral', video.auto_blocked || 'Envoi manuel.');
+  const go = button('Publier sur YouTube', 'btn primary', () => act(item, go,
+    { type: 'publish', source: 'folder', videoId: video.id, visibility: 'CHANNEL' }, 'Envoi vers YouTube en cours…'));
+  go.dataset.publish = '1';
+  const already = button('Déjà publiée', 'btn ghost', async () => {
     await KappDossier.mark(video.relative_path, 'ignored');
     renderFolder();
   });
   already.title = 'Elle est déjà sur YouTube : la retirer de la liste sans l’envoyer.';
-  buttons.append(go, already);
-  item.append(thumb(video.preview_path), info, buttons);
+  const item = card({
+    path: video.relative_path, preview: video.preview_path, title: video.title,
+    details: [video.channel_name, [size(video.size_bytes), video.thumbnail_path ? 'miniature' : 'sans miniature',
+      video.tags.length ? `${video.tags.length} mots-clés` : null].filter(Boolean).join(' · ')],
+    status, actions: [already, go],
+  });
+  if (video.thumbnail_warning && !video.last_error) item.querySelector('.info').append(pill('warn', video.thumbnail_warning));
   return item;
 }
 
@@ -181,12 +216,15 @@ function channelItem(channel, panelOwn) {
   });
   const facebookPage = document.createElement('input');
   facebookPage.type = 'url';
-  facebookPage.placeholder = 'URL de la page Facebook (facultatif)';
+  // Always visible: the Page is also needed by the scheduled posts of
+  // FACEBOOK/A-PUBLIER, even when the videos do not go to Facebook.
+  facebookPage.placeholder = 'Lien de ta page Facebook, ex. https://www.facebook.com/MaPage';
   facebookPage.value = own.facebookPageUrl || '';
-  facebookPage.title = 'Ouvre directement cette page Facebook pour que son sélecteur de Reel soit présélectionné.';
-  facebookPage.hidden = !social.checked;
-  facebookPage.addEventListener('change', () => saveChannel(channel.key, { facebookPageUrl: facebookPage.value.trim() || null }));
-  social.addEventListener('change', () => { facebookPage.hidden = !social.checked; });
+  facebookPage.title = 'Page Facebook de cette chaîne : posts programmés (FACEBOOK/A-PUBLIER) et vidéos si « Facebook aussi » est coché.';
+  facebookPage.addEventListener('change', async () => {
+    await saveChannel(channel.key, { facebookPageUrl: facebookPage.value.trim() || null });
+    send({ type: 'autoNow' });
+  });
   const visibility = document.createElement('select');
   visibility.title = 'Comment chaque vidéo de cette chaîne arrive sur YouTube.';
   for (const [value, text] of [
@@ -232,35 +270,48 @@ function channelItem(channel, panelOwn) {
 }
 
 function sentItem(video) {
-  const item = el('li', 'video');
-  const info = el('div', 'info');
-  info.append(el('div', 'title', video.title || video.relative_path.split('/').pop()),
-    el('div', 'file', `Fichier : ${video.relative_path.split('/').pop()}`),
-    el('div', 'meta', ['YouTube', size(video.size_bytes), video.date ? new Date(video.date).toLocaleString('fr-FR') : null].filter(Boolean).join(' · ')));
-  let state;
-  if (!video.has_content) state = ['meta', 'Aucune fiche ni miniature dans le dossier.'];
-  else if (video.applied_hash === video.hash) state = ['ok', 'À jour sur YouTube.'];
-  else if (video.update_error && video.update_tried_hash === video.hash) state = ['warn', `Mise à jour échouée : ${video.update_error}`];
-  else state = ['meta', 'Mise à jour automatique en attente (au prochain passage, 5 min).'];
-  info.append(el('div', state[0], state[1]));
-  const buttons = el('div', 'buttons');
-  if (video.youtube_id) {
-    const link = el('a', 'secondary', 'Ouvrir dans Studio');
+  const actions = [];
+  const extra = [];
+  let status;
+  let item;
+  if (!video.youtube_id) {
+    // Sent, but its YouTube link is unknown: give it, or send it again.
+    status = pill('warn', 'Le lien YouTube de cette vidéo n’a pas été enregistré.');
+    const group = el('div', 'input-group');
+    const input = document.createElement('input');
+    input.type = 'url';
+    input.placeholder = 'Colle le lien YouTube de la vidéo';
+    const save = button('Enregistrer', 'btn secondary', async () => {
+      const data = await act(item, save, { type: 'linkYoutube', path: video.relative_path, url: input.value.trim() });
+      if (data) { item.say('busy', 'Lien enregistré : titre, description et miniature vont être appliqués…'); setTimeout(renderFolder, 1500); }
+    });
+    group.append(input, save);
+    const field = el('div', 'field');
+    field.append(el('label', null, 'Elle est déjà sur YouTube ? Colle son lien pour la mettre à jour :'), group);
+    extra.push(field);
+    const again = button('Republier avec les infos à jour', 'btn ghost', async () => {
+      if (!confirm('La vidéo sera envoyée de nouveau sur YouTube, avec le titre, la description et la miniature du dossier.\n\nPense à supprimer l’ancienne version dans YouTube Studio.')) return;
+      await act(item, again, { type: 'republish', path: video.relative_path }, 'Nouvel envoi vers YouTube en cours…');
+    });
+    actions.push(again);
+  } else {
+    if (!video.has_content) status = pill('neutral', 'Aucune fiche ni miniature dans le dossier.');
+    else if (video.applied_hash === video.hash) status = pill('ok', 'À jour sur YouTube.');
+    else if (video.update_error && video.update_tried_hash === video.hash) status = pill('warn', `Mise à jour échouée : ${video.update_error}`);
+    else status = pill('neutral', 'Modifications à envoyer : mise à jour toute seule dans 5 à 10 min.');
+    const link = el('a', 'btn ghost', 'Ouvrir dans Studio');
     link.href = `https://studio.youtube.com/video/${video.youtube_id}/edit`;
     link.target = '_blank';
-    const update = button('Mettre à jour maintenant', 'publish secondary', async () => {
-      update.disabled = true;
-      const reply = await send({ type: 'update', path: video.relative_path });
-      if (!reply || !reply.ok) {
-        update.disabled = false;
-        info.append(el('div', 'warn', reply ? reply.error : 'Mise à jour impossible.'));
-      }
-    });
-    update.title = 'Remet sur YouTube le titre, la description, les mots-clés et la miniature de la fiche du dossier';
-    update.disabled = jobRunning;
-    buttons.append(update, link);
+    const update = button('Mettre à jour maintenant', 'btn primary', () => act(item, update,
+      { type: 'update', path: video.relative_path }, 'Mise à jour sur YouTube en cours…'));
+    update.dataset.publish = '1';
+    actions.push(link, update);
   }
-  item.append(thumb(video.preview_path), info, buttons);
+  item = card({
+    path: video.relative_path, preview: video.preview_path, title: video.title || video.relative_path.split('/').pop(),
+    details: [video.channel_name, [size(video.size_bytes), video.date ? new Date(video.date).toLocaleDateString('fr-FR') : null].filter(Boolean).join(' · ')],
+    status, actions, extra,
+  });
   return item;
 }
 
@@ -269,39 +320,113 @@ function sentItem(video) {
 const POST_STATES = { a_publier: 'prévu', en_cours: 'en cours', publie: 'publié', echec: 'échec' };
 const POST_TYPES = { photo: 'Photo', texte: 'Texte', reel: 'Reel' };
 
-// Today's posts of FACEBOOK/A-PUBLIER (and failures of any day), by time.
+let lastScan = null;  // last scan of the videos folder
+let lastPosts = [];   // last list of Facebook posts
+
+// Facebook folder (Reels and posts), chosen apart from the videos folder.
+async function renderFbAccess() {
+  const access = await KappDossier.fbAccess().catch(() => ({ state: 'none' }));
+  showFolder('fb-', access);
+  $('fb-forget').hidden = access.state === 'none';
+  return access;
+}
+
+// Today's posts (and failures of any day, and posts without a date), by time.
 async function renderPosts() {
+  const access = await renderFbAccess();
   const reply = await send({ type: 'facebookPosts' });
   const posts = reply && reply.ok ? reply.data : [];
+  lastPosts = posts;
   const today = new Date().toDateString();
-  const shown = posts.filter((p) => (p.due_at && new Date(p.due_at).toDateString() === today) || p.statut === 'echec' || (p.ready));
-  $('fb-block').hidden = !posts.length;
+  const shown = posts.filter((p) => !p.due_at || new Date(p.due_at).toDateString() === today || p.statut === 'echec' || p.ready);
   const count = (state) => shown.filter((p) => p.statut === state).length;
   const config = await settings();
   const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl);
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
-  $('fb-summary').textContent = `Aujourd’hui : ${count('publie')} publié(s), ${count('a_publier')} prévu(s)${count('echec') ? `, ${count('echec')} en échec` : ''}. Un post part à son heure, toutes les 5 min au plus.`
-    + (missingPage ? ' Lien de la page Facebook à renseigner : onglet Chaînes → « URL de la page Facebook ». En attendant, les posts restent en attente.' : '');
+  const summary = $('fb-summary');
+  if (reply && !reply.ok) {
+    summary.className = 'warn';
+    summary.textContent = reply.error;
+  } else if (!posts.length) {
+    summary.className = 'muted small';
+    summary.textContent = access.state === 'granted' ? 'Aucun post ni Reel dans ce dossier.' : '';
+  } else {
+    summary.className = 'muted small';
+    summary.textContent = `Aujourd’hui : ${count('publie')} publié(s), ${count('a_publier')} à publier${count('echec') ? `, ${count('echec')} en échec` : ''}. Les posts programmés partent à leur heure (un toutes les 5 min au plus).`
+      + (missingPage ? ' Il manque le lien de la page Facebook (étape 1, en haut).' : '');
+  }
   $('fb-posts').replaceChildren(...shown.map((post) => {
-    const item = el('li', 'video');
-    const info = el('div', 'info');
-    const when = post.due_at ? new Date(post.due_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
-    info.append(el('div', 'title', `${when} · ${post.text.split('\n')[0] || '(sans texte)'}`),
-      el('div', 'meta', [POST_TYPES[post.type], post.channel_name, POST_STATES[post.statut] || post.statut].join(' · ')));
-    if (post.error && post.statut === 'echec') info.append(el('div', 'warn', post.error));
-    item.append(post.image_path ? thumb(post.image_path) : el('div', 'thumb empty', POST_TYPES[post.type]), info);
+    const when = post.due_at ? new Date(post.due_at).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sans heure prévue';
+    const states = { a_publier: pill('neutral', post.due_at ? `Prévu ${when}` : 'Prêt à publier'), en_cours: pill('busy', 'Publication en cours…'),
+      publie: pill('ok', 'Publié sur Facebook.'), echec: pill('warn', post.error || 'Échec de la publication.') };
+    const actions = [];
+    let item;
     if (post.statut === 'a_publier' || post.statut === 'echec') {
-      const go = button('Publier maintenant', 'publish secondary', async () => {
-        go.disabled = true;
-        const r = await send({ type: 'postNow', path: post.path });
-        if (!r || !r.ok) { go.disabled = false; info.append(el('div', 'warn', r ? r.error : 'Publication impossible.')); }
-      });
-      go.disabled = jobRunning;
-      const buttons = el('div', 'buttons');
-      buttons.append(go);
-      item.append(buttons);
+      const go = button(post.statut === 'echec' ? 'Réessayer' : 'Publier maintenant', 'btn primary', () => act(item, go,
+        { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
+      go.dataset.publish = '1';
+      actions.push(go);
     }
+    item = card({
+      path: post.path, preview: post.image_path || undefined, emptyLabel: POST_TYPES[post.type],
+      title: post.text.split('\n')[0] || '(sans texte)', details: [[POST_TYPES[post.type], post.channel_name].join(' · ')],
+      status: states[post.statut] || pill('neutral', post.statut), actions,
+    });
     return item;
+  }));
+  applyJob();
+  renderPages();
+}
+
+// Step 1 of the Facebook tab: one Page link per channel that has something
+// for Facebook (videos already on YouTube, or posts).
+async function renderPages() {
+  const config = await settings();
+  const channels = new Map();
+  for (const v of (lastScan && lastScan.sent) || []) channels.set(v.channel_key, { name: v.channel_name, file: v.channel_config || {} });
+  for (const p of lastPosts) if (!channels.has(p.channel_key)) channels.set(p.channel_key, { name: p.channel_name, file: {}, page: p.page });
+  $('no-fb-pages').hidden = channels.size > 0;
+  $('fb-pages').replaceChildren(...[...channels].map(([key, channel]) => {
+    const own = { ...(config.channels[key] || {}), ...channel.file };
+    const current = own.facebookPageUrl || channel.page || '';
+    const row = el('div', 'field page-field');
+    const head = el('div', 'field-head');
+    head.append(el('strong', null, channel.name), pill(current ? 'ok' : 'warn', current ? 'Page enregistrée' : 'Lien à coller'));
+    const group = el('div', 'input-group');
+    const input = document.createElement('input');
+    input.type = 'url';
+    input.value = current;
+    input.placeholder = 'https://www.facebook.com/ta-page';
+    const save = button('Enregistrer', 'btn secondary', async () => {
+      const url = input.value.trim();
+      if (url && !/^https?:\/\/(www\.|m\.|web\.|business\.)?(facebook|fb)\.com\//i.test(url)) {
+        input.setCustomValidity('Colle un lien du type https://www.facebook.com/ta-page');
+        input.reportValidity();
+        return;
+      }
+      // First page saved: Facebook publishing becomes automatic (box below).
+      const first = url && !own.facebookPageUrl && own.facebook === undefined;
+      await saveChannel(key, { facebookPageUrl: url || null, ...(first ? { facebook: true, facebookSince: Date.now() } : {}) });
+      send({ type: 'autoNow' });
+      renderPosts();
+      if (lastScan) renderFacebook(lastScan);
+    });
+    input.addEventListener('input', () => input.setCustomValidity(''));
+    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
+    group.append(input, save);
+    const autoLabel = el('label', 'check-line');
+    const autoBox = document.createElement('input');
+    autoBox.type = 'checkbox';
+    autoBox.checked = own.facebook === true;
+    autoLabel.append(autoBox, document.createTextNode('Automatique : chaque nouvelle vidéo publiée sur YouTube part aussi sur cette page'));
+    autoBox.addEventListener('change', async () => {
+      await saveChannel(key, { facebook: autoBox.checked, ...(autoBox.checked ? { facebookSince: Date.now() } : {}) });
+      if (autoBox.checked) send({ type: 'autoNow' });
+    });
+    if (channel.file.facebookPageUrl) { input.disabled = true; save.disabled = true; input.title = 'Fixé par reglages-publication.json dans le dossier de la chaîne.'; }
+    if ('facebook' in channel.file) autoBox.disabled = true;
+    row.append(head, group, autoLabel);
+    return row;
   }));
 }
 
@@ -317,49 +442,52 @@ async function renderFolder() {
   try {
     data = await KappDossier.scan({ channels: config.channels, autoSince: config.autoSince });
   } catch (error) {
+    $('folder-status').hidden = false;
     $('folder-status').className = 'status error';
     $('folder-status').textContent = String(error.message || error);
     return;
   }
+  lastScan = data;
   for (const [key, own] of Object.entries(config.channels)) autoVisibility.set(key, own.visibility);
   $('videos').replaceChildren(...data.videos.map(videoItem));
+  queueMicrotask(applyJob);
   $('no-videos').hidden = data.videos.length > 0;
   const total = data.sent.reduce((sum, v) => sum + v.size_bytes, 0);
-  $('sent-summary').textContent = data.sent.length
-    ? `${data.sent.length} vidéo(s) envoyée(s) par KappGen : si tu modifies leur fiche ou leur miniature dans le dossier, elles sont mises à jour sur YouTube toutes seules. Elles prennent encore ${size(total)} sur ton disque.`
-    : '';
+  $('sent-summary').textContent = '';
   renderOnYoutube(data, config);
   renderFacebook(data);
+  renderPages();
 }
 
-function facebookItem(video, sent = false) {
-  const item = el('li', 'video');
-  const info = el('div', 'info');
-  info.append(el('div', 'title', video.title || video.relative_path),
-    el('div', 'meta', [video.vertical_path ? 'Format vertical' : 'Vidéo longue', video.vertical_path || video.relative_path].join(' · ')));
-  info.append(el('div', sent && video.facebook_published_at ? 'ok' : 'meta',
-    sent && video.facebook_published_at ? 'Publié sur Facebook.' : sent ? 'Sur YouTube, pas encore sur Facebook.' : 'Partira sur Facebook juste après YouTube.'));
-  const buttons = el('div', 'buttons');
-  if (sent && !video.facebook_published_at) {
-    const publish = button('Publier sur Facebook', 'publish secondary', async () => {
-      publish.disabled = true;
-      const reply = await send({ type: 'facebook', path: video.relative_path });
-      if (!reply || !reply.ok) publish.disabled = false;
-    });
-    publish.disabled = jobRunning;
-    buttons.append(publish);
+function facebookItem(video, page) {
+  const actions = [];
+  let status;
+  let item;
+  if (video.facebook_published_at) {
+    status = pill('ok', `Publiée sur Facebook le ${new Date(video.facebook_published_at).toLocaleDateString('fr-FR')}.`);
+  } else {
+    status = video.facebook_error ? pill('warn', `Échec sur Facebook : ${video.facebook_error}`)
+      : page ? pill('neutral', 'Prête à partir sur Facebook.') : pill('warn', 'Ajoute le lien de la page Facebook (étape 1) pour la publier.');
+    const publish = button(video.facebook_error ? 'Réessayer' : 'Publier sur Facebook', 'btn primary', () => act(item, publish,
+      { type: 'facebook', path: video.relative_path }, 'Publication sur Facebook en cours… (un onglet Facebook s’ouvre)'));
+    publish.dataset.publish = '1';
+    actions.push(publish);
   }
-  item.append(info, buttons);
+  item = card({
+    path: video.relative_path, preview: video.preview_path, title: video.title || video.relative_path.split('/').pop(),
+    details: [[video.channel_name, video.vertical_path ? 'version verticale (Reel)' : 'vidéo longue'].filter(Boolean).join(' · ')],
+    status, actions,
+  });
   return item;
 }
 
-function renderFacebook(data) {
-  const wantsFacebook = (video) => video.vertical_path || (video.channel_config && video.channel_config.facebook);
-  const sent = data.sent.filter(wantsFacebook);
-  const waiting = data.videos.filter(wantsFacebook);
-  const list = $('facebook');
-  list.replaceChildren(...sent.map((video) => facebookItem(video, true)), ...waiting.map((video) => facebookItem(video)));
-  $('no-facebook').hidden = sent.length + waiting.length > 0;
+async function renderFacebook(data) {
+  const config = await settings();
+  const pageOf = (v) => ({ ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) }).facebookPageUrl;
+  const sent = [...data.sent].sort((a, b) => Number(!!a.facebook_published_at) - Number(!!b.facebook_published_at));
+  $('facebook').replaceChildren(...sent.map((video) => facebookItem(video, pageOf(video))));
+  applyJob();
+  $('no-facebook').hidden = sent.length > 0;
 }
 
 // What KappGen sent from the selected publication folder. No channel
@@ -367,6 +495,7 @@ function renderFacebook(data) {
 // publication.
 async function renderOnYoutube(data, config) {
   $('sent').replaceChildren(...data.sent.map(sentItem));
+  applyJob();
   if (!data.sent.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';
 }
 
@@ -388,15 +517,51 @@ function youtubeItem(video) {
   return item;
 }
 
-$('pick').addEventListener('click', async () => {
+async function pickFolder() {
   try {
     rootHandle = await window.showDirectoryPicker({ id: 'kappgen-videos', mode: 'readwrite' });
     await KappDossier.saveRoot(rootHandle);
     send({ type: 'autoNow' }); // a chosen folder is published right away
   } catch (error) {
-    if (!error || error.name !== 'AbortError') $('folder-status').textContent = String((error && error.message) || error);
+    if (!error || error.name !== 'AbortError') {
+      $('folder-status').hidden = false;
+      $('folder-status').textContent = String((error && error.message) || error);
+    }
   }
   renderFolder();
+  renderPosts();
+}
+$('pick').addEventListener('click', pickFolder);
+$('pick-change').addEventListener('click', pickFolder);
+
+let fbRootHandle = null;
+KappDossier.loadFbRoot().then((handle) => { fbRootHandle = handle; }).catch(() => {});
+
+async function pickFbFolder() {
+  try {
+    fbRootHandle = await window.showDirectoryPicker({ id: 'kappgen-facebook', mode: 'readwrite' });
+    await KappDossier.saveFbRoot(fbRootHandle);
+    send({ type: 'autoNow' });
+  } catch (error) {
+    if (!error || error.name !== 'AbortError') {
+      $('fb-folder-status').hidden = false;
+      $('fb-folder-status').textContent = String((error && error.message) || error);
+    }
+  }
+  renderPosts();
+}
+$('fb-pick').addEventListener('click', pickFbFolder);
+$('fb-pick-change').addEventListener('click', pickFbFolder);
+$('fb-forget').addEventListener('click', async () => {
+  await KappDossier.clearFbRoot();
+  fbRootHandle = null;
+  renderPosts();
+});
+$('fb-grant').addEventListener('click', async () => {
+  const handle = fbRootHandle || await KappDossier.loadFbRoot();
+  if (handle) await handle.requestPermission({ mode: 'readwrite' }).catch(() => {});
+  renderPosts();
+  send({ type: 'autoNow' });
 });
 
 // Loaded in advance so the click calls requestPermission straight away
@@ -495,7 +660,7 @@ async function renderApp() {
     const info = el('div', 'info');
     info.append(el('div', 'title', video.title), el('div', 'meta', [video.channel_name, size(video.size_bytes)].filter(Boolean).join(' · ')));
     if (video.last_error) info.append(el('div', 'warn', video.last_error));
-    const go = button('Envoyer (non répertoriée)', 'publish', async () => {
+    const go = button('Envoyer (non répertoriée)', 'btn primary', async () => {
       go.disabled = true;
       // Videos of the KappGen app are handed to Studio by path, which needs
       // the optional "debugger" permission: asked once, on this click.
@@ -514,22 +679,48 @@ async function renderApp() {
 
 // ------------------------------------------------------------- the job
 
+let currentJob = null;
+
+// The running job, on its own card (and the other publish buttons wait).
+function applyJob() {
+  const job = currentJob;
+  for (const node of document.querySelectorAll('[data-publish]')) node.disabled = !!(job && job.running);
+  if (!job || !job.path) return;
+  for (const item of document.querySelectorAll('li.item')) {
+    if (item.dataset.path !== job.path || !item.say) continue;
+    if (job.running) item.say('busy', job.message || 'En cours…');
+    else if (job.error) item.say('warn', job.error);
+    else if (job.done) item.say('ok', job.message || 'Terminé.');
+  }
+}
+
 function renderJob(job) {
   const box = $('job');
   const wasRunning = jobRunning;
+  currentJob = job || null;
   jobRunning = !!(job && job.running);
   box.hidden = !job;
   if (job) {
-    box.className = job.error ? 'job error' : 'job';
-    $('job-title').textContent = [job.auto ? 'Envoi automatique' : null, job.title || 'Envoi YouTube'].filter(Boolean).join(' : ');
-    $('job-message').textContent = [job.channel, job.message].filter(Boolean).join(' — ');
+    box.className = `job ${job.running ? 'running' : job.error ? 'error' : 'done'}`;
+    $('job-title').textContent = job.running ? `En cours : ${job.title || 'publication'}` : job.error ? 'Échec' : 'Terminé';
+    $('job-message').textContent = [job.channel, job.message].filter(Boolean).join(' — ')
+      + (job.running ? ' Les autres boutons « Publier » attendent la fin.' : '');
     $('job-link').hidden = !job.youtubeUrl;
     if (job.youtubeUrl) $('job-link').href = job.youtubeUrl;
     $('job-clear').hidden = jobRunning;
+    // Stuck for more than 5 minutes without news: offer to unblock.
+    const quiet = Date.now() - (job.updatedAt || job.startedAt || Date.now());
+    $('job-unblock').hidden = !(job.running && quiet > 5 * 60 * 1000);
   }
-  for (const node of document.querySelectorAll('button.publish')) node.disabled = jobRunning;
+  applyJob();
   if (wasRunning && !jobRunning) { renderFolder(); renderApp(); renderPosts(); }
 }
+
+$('job-unblock').addEventListener('click', async () => {
+  if (!confirm('Arrêter le suivi de cet envoi ? Vérifie ensuite sur YouTube / Facebook s’il est parti avant de relancer.')) return;
+  await send({ type: 'unblockJob' });
+});
+setInterval(() => { if (currentJob && currentJob.running) renderJob(currentJob); }, 30000);
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'session' && changes.job) renderJob(changes.job.newValue);

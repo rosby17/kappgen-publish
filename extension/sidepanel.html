@@ -37,8 +37,11 @@
   <section id="job" class="job" hidden>
     <strong id="job-title"></strong>
     <p id="job-message"></p>
-    <a id="job-link" target="_blank" hidden>Ouvrir sur YouTube</a>
-    <button id="job-clear" class="link" hidden>Masquer</button>
+    <a id="job-link" class="btn ghost" target="_blank" hidden>Ouvrir sur YouTube</a>
+    <div class="job-actions">
+      <button id="job-unblock" class="btn ghost" hidden>Débloquer</button>
+      <button id="job-clear" class="btn ghost" hidden>Masquer</button>
+    </div>
   </section>
 
   <nav class="tabs">
@@ -48,25 +51,27 @@
     <button data-tab="help">Aide</button>
   </nav>
 
-  <section class="card">
-    <p id="folder-status" class="status">Vérification…</p>
-    <p class="muted small">Choisis le dossier qui contient toutes tes chaînes (ex. <code>YOUTUBE</code>) ou le dossier d’une chaîne : chaque vidéo finie y est rangée dans <code>VIDEO/&lt;NN&gt;-&lt;sujet&gt;/</code> avec sa fiche <code>publication.md</code> et <code>miniature.jpg</code>.</p>
-    <div class="actions">
-      <button id="pick" class="secondary" title="Choisir le dossier de toutes tes chaînes, ou celui d’une chaîne">Choisir le dossier</button>
-      <button id="grant" class="primary" hidden>Autoriser l’accès</button>
-      <button id="rescan" class="secondary" title="Relit le dossier tout de suite (sinon c’est fait automatiquement toutes les 5 minutes)">↻ Actualiser</button>
-    </div>
-  </section>
-
   <div id="tab-videos" class="tab">
-    <h2>À envoyer</h2>
-    <ul id="videos"></ul>
-    <p id="no-videos" class="muted" hidden>Aucune vidéo en attente dans le dossier.</p>
-    <div id="fb-block" hidden>
-      <h2>Posts Facebook</h2>
-      <p id="fb-summary" class="muted small"></p>
-      <ul id="fb-posts"></ul>
+    <section class="card">
+      <h2>Dossier des vidéos</h2>
+      <div id="folder-chosen" class="chosen" hidden>
+        <span class="check">✓</span>
+        <div><div class="small muted">Dossier sélectionné</div><strong id="folder-name"></strong></div>
+        <button id="pick-change" class="link" title="Choisir un autre dossier">changer</button>
+      </div>
+      <p id="folder-status" class="status" hidden></p>
+      <div id="folder-actions" class="actions">
+        <button id="pick" class="btn primary wide">Choisir le dossier des vidéos</button>
+        <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
+      </div>
+      <p id="folder-hint" class="muted small">Choisis le dossier <code>YOUTUBE</code> (toutes tes chaînes) ou le dossier d’une chaîne.</p>
+    </section>
+    <div class="list-head">
+      <h2>Prêtes à partir sur YouTube</h2>
+      <button id="rescan" class="link" title="Relit le dossier tout de suite (sinon toutes les 5 minutes)">↻ Actualiser</button>
     </div>
+    <ul id="videos"></ul>
+    <p id="no-videos" class="muted" hidden>Aucune vidéo en attente : tout ce qui est dans le dossier est déjà publié (voir l’onglet YouTube).</p>
     <div id="app-block" hidden>
       <h2>Vidéos KappGen</h2>
       <ul id="app-videos"></ul>
@@ -74,15 +79,41 @@
   </div>
 
   <div id="tab-sent" class="tab" hidden>
-    <p id="sent-summary" class="muted"></p>
+    <h2>Déjà publiées sur YouTube</h2>
+    <p class="muted small">Tu as changé le titre, la description ou la miniature dans le dossier ? Clique « Mettre à jour maintenant ». Sinon, KappGen le fait tout seul dans les 5 à 10 minutes.</p>
+    <p id="sent-summary" class="muted small"></p>
     <ul id="sent"></ul>
   </div>
 
   <div id="tab-facebook" class="tab" hidden>
-    <h2>Facebook</h2>
-    <p class="muted">Chaînes avec « Facebook aussi » (ou <code>"facebook"</code> dans <code>reglages-publication.json</code>) : la vidéo part sur la page Facebook juste après YouTube. Un fichier vertical <code>short.mp4</code> / <code>reel.mp4</code> / <code>vertical.mp4</code> est publié à la place en Reel (+ Short YouTube).</p>
+    <section class="card">
+      <h2>1. Ta page Facebook</h2>
+      <p class="muted small">Colle le lien de ta page Facebook puis « Enregistrer ». Ensuite tout part tout seul : les nouvelles vidéos YouTube et les posts de ton dossier Facebook.</p>
+      <div id="fb-pages"></div>
+      <p id="no-fb-pages" class="muted small" hidden>Choisis d’abord le dossier des vidéos (onglet Vidéos) ou un dossier Facebook (plus bas).</p>
+    </section>
+
+    <h2>2. Vidéos YouTube à partager sur Facebook</h2>
     <ul id="facebook"></ul>
-    <p id="no-facebook" class="muted" hidden>Aucune vidéo pour Facebook : coche « Facebook aussi » sur une chaîne, ou ajoute un fichier vertical.</p>
+    <p id="no-facebook" class="muted" hidden>Aucune vidéo publiée sur YouTube pour l’instant.</p>
+
+    <section class="card">
+      <h2>3. Dossier Facebook (Reels et posts)</h2>
+      <div id="fb-folder-chosen" class="chosen" hidden>
+        <span class="check">✓</span>
+        <div><div class="small muted">Dossier Facebook sélectionné</div><strong id="fb-folder-name"></strong></div>
+        <button id="fb-pick-change" class="link" title="Choisir un autre dossier Facebook">changer</button>
+        <button id="fb-forget" class="link" title="Ne plus utiliser de dossier Facebook à part">retirer</button>
+      </div>
+      <p id="fb-folder-status" class="status" hidden></p>
+      <div id="fb-folder-actions" class="actions">
+        <button id="fb-pick" class="btn primary wide">Choisir le dossier Facebook</button>
+        <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
+      </div>
+      <p id="fb-folder-hint" class="muted small">Importe le dossier où tu ranges tes Reels et posts : un sous-dossier par post, avec <code>texte.txt</code> et une image ou une vidéo verticale. Chaque post part tout seul (à son heure s’il en a une).</p>
+      <p id="fb-summary" class="muted small"></p>
+      <ul id="fb-posts"></ul>
+    </section>
   </div>
 
   <div id="tab-help" class="tab" hidden>
@@ -96,7 +127,7 @@
         <h3>En 3 étapes</h3>
         <ol class="steps">
           <li><strong>Choisis le dossier de tes chaînes</strong> (ex. <code>YOUTUBE</code>) ou celui d’une chaîne.</li>
-          <li><strong>Range chaque vidéo finie</strong> dans <code>VIDEO/&lt;NN&gt;-&lt;sujet&gt;/</code> avec <code>publication.md</code> et <code>miniature.jpg</code>. Facebook : coche « Facebook aussi » sur la chaîne (ou <code>reglages-publication.json</code>).</li>
+          <li><strong>Range chaque vidéo finie</strong> dans <code>VIDEO/&lt;NN&gt;-&lt;sujet&gt;/</code> avec <code>publication.md</code> et <code>miniature.jpg</code>. Facebook : onglet Facebook, colle le lien de ta page puis « Enregistrer ».</li>
           <li><strong>Laisse Chrome ouvert.</strong> Toutes les 5 minutes, les nouvelles vidéos prêtes partent toutes seules.</li>
         </ol>
       </section>
@@ -138,8 +169,8 @@ mot 1, mot 2, mot 3</pre>
         <dl class="glossary">
           <dt>↻ Actualiser</dt><dd>Relit le dossier tout de suite au lieu d’attendre 5 minutes.</dd>
           <dt>Publier sur YouTube</dt><dd>Envoie le MP4 long avec la fiche et la miniature du même dossier.</dd>
-          <dt>YouTube</dt><dd>Affiche les vidéos déjà publiées détectées grâce au manifeste.</dd>
-          <dt>Facebook</dt><dd>Affiche les formats verticaux détectés comme Shorts/Reels.</dd>
+          <dt>YouTube</dt><dd>Les vidéos déjà publiées, avec « Mettre à jour maintenant » (sinon mise à jour toute seule en 5 à 10 min).</dd>
+          <dt>Facebook</dt><dd>1. ta page Facebook, 2. les vidéos YouTube à y partager, 3. ton dossier de Reels et posts, chacun avec « Publier ».</dd>
           <dt>Mettre à jour</dt><dd>Recopie sur YouTube le titre, la description, les mots-clés et la miniature modifiés dans le dossier.</dd>
         </dl>
       </section>
