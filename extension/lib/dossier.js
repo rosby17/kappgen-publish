@@ -552,5 +552,98 @@ const KappDossier = (() => {
     return state[relativePath] || null;
   }
 
-  return { saveRoot, loadRoot, access, fileAt, scan, mark, _setTestRoot: (h) => { testRoot = h; } };
+  // ------------------------------------------------------ Facebook posts
+  //
+  // <CHAÎNE>/FACEBOOK/A-PUBLIER/<YYYY-MM-DD-HHMM-sujet>/ holds one post:
+  // publication.json (date_locale, heure_prevue, statut, page…), texte.txt
+  // and, for a photo post, an image (image.jpg…) or, for a Reel, a vertical
+  // .mp4. A post is due once its date and time are reached; it is published
+  // once ("statut": "publie" is written back into publication.json).
+  // The page comes from publication.json, then FACEBOOK/planning.json.
+
+  async function readJson(dir, name) {
+    try {
+      return JSON.parse(await (await (await dir.getFileHandle(name)).getFile()).text());
+    } catch {
+      return null;
+    }
+  }
+
+  async function findFacebookDirs(dir, path, depth, out) {
+    for await (const [name, child] of dir.entries()) {
+      if (child.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
+      const childPath = path ? `${path}/${name}` : name;
+      if (norm(name) === 'facebook') out.push({ handle: child, path: childPath, channelPath: path, channelName: dir.name });
+      else if (depth < 4 && !SKIP.has(norm(name))) await findFacebookDirs(child, childPath, depth + 1, out);
+    }
+  }
+
+  function dueTime(info, folderName) {
+    const date = info.date_locale || (folderName.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1];
+    const time = info.heure_prevue || ((folderName.match(/^\d{4}-\d{2}-\d{2}-(\d{2})(\d{2})/) || []).slice(1).join(':')) || '00:00';
+    if (!date) return null;
+    const [y, m, d] = date.split('-').map(Number);
+    const [hh, mm] = time.split(':').map(Number);
+    return new Date(y, m - 1, d, hh || 0, mm || 0).getTime();
+  }
+
+  async function facebookPosts({ now = Date.now() } = {}) {
+    const rootHandle = await root();
+    const dirs = [];
+    await findFacebookDirs(rootHandle, '', 0, dirs);
+    const posts = [];
+    for (const fb of dirs) {
+      const planning = (await readJson(fb.handle, 'planning.json')) || {};
+      let queue;
+      try { queue = await fb.handle.getDirectoryHandle('A-PUBLIER'); } catch { continue; }
+      for await (const [name, postDir] of queue.entries()) {
+        if (postDir.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
+        const info = (await readJson(postDir, 'publication.json')) || {};
+        const files = [];
+        for await (const [fileName, handle] of postDir.entries()) if (handle.kind === 'file') files.push(fileName);
+        const path = `${fb.path}/A-PUBLIER/${name}`;
+        const textName = info.texte && files.includes(info.texte) ? info.texte : files.find((f) => /^texte.*\.txt$/i.test(f));
+        let text = '';
+        if (textName) text = (await (await (await postDir.getFileHandle(textName)).getFile()).text()).trim();
+        const image = info.image && files.includes(info.image) ? info.image : files.find((f) => IMAGE_EXT.test(f));
+        const video = files.find((f) => VIDEO_EXT.test(f));
+        const due = dueTime(info, name);
+        const statut = info.statut || 'a_publier';
+        posts.push({
+          id: path,
+          path,
+          channel_key: fb.channelPath || '.',
+          channel_name: fb.channelPath ? fb.channelName : `${fb.channelName} (dossier principal)`,
+          page: info.page || planning.page || null,
+          type: video ? 'reel' : image ? 'photo' : 'texte',
+          text: text.slice(0, 63000),
+          image_path: image ? `${path}/${image}` : null,
+          video_path: video ? `${path}/${video}` : null,
+          due_at: due,
+          statut,
+          error: info.erreur || null,
+          started_at: info.started_at || null,
+          published_at: info.published_at || null,
+          ready: statut === 'a_publier' && !!due && due <= now && !!(text || image || video),
+        });
+      }
+    }
+    posts.sort((a, b) => (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
+    return posts;
+  }
+
+  // Merges patch into the post's publication.json.
+  async function markPost(path, patch) {
+    let dir = await root();
+    for (const part of path.split('/')) dir = await dir.getDirectoryHandle(part);
+    const info = (await readJson(dir, 'publication.json')) || {};
+    Object.assign(info, patch);
+    const handle = await dir.getFileHandle('publication.json', { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(info, null, 2));
+    await writable.close();
+    return info;
+  }
+
+  return { saveRoot, loadRoot, access, fileAt, scan, mark, facebookPosts, markPost, _setTestRoot: (h) => { testRoot = h; } };
 })();

@@ -92,3 +92,19 @@ Ordre : YouTube d'abord ; Facebook juste après, une fois l'envoi YouTube termin
 - Choisir le dossier = publier ce qu'il contient : toute vidéo prête part toute seule, ancienne ou nouvelle, sans question. Une vidéo dont le titre existe déjà sur la chaîne (page publique) est reconnue comme déjà publiée et n'est pas renvoyée.
 - Un envoi interrompu (Studio fermé, extension rechargée) n'est **jamais** relancé tout seul : la vidéo affiche « envoi précédent interrompu ». Vérifie dans YouTube Studio qu'elle n'y est pas déjà, puis relance-la à la main.
 - Chrome doit rester ouvert, connecté au bon compte YouTube (et à Facebook si la chaîne publie sur Facebook). L'onglet YouTube Studio ouvert par l'extension ne doit pas être fermé pendant l'envoi.
+
+## 5. Posts Facebook (photo, texte, Reel) à heure fixe
+
+```
+<CHAÎNE>/FACEBOOK/
+├── planning.json            ← "page": lien de la page Facebook ; créneaux du jour
+└── A-PUBLIER/
+    └── 2026-10-02-0800-sujet/
+        ├── publication.json ← {"date_locale": "2026-10-02", "heure_prevue": "08:00", "statut": "a_publier"}
+        ├── texte.txt        ← le texte du post
+        └── image.jpg        ← facultatif : post photo (sinon post texte ; un .mp4 vertical = Reel)
+```
+
+- L'extension publie chaque post **à son heure** (au plus un toutes les 5 minutes), sur la page de `planning.json` (ou de `publication.json`, ou du réglage `facebook.page` de la chaîne).
+- Après publication, elle écrit `"statut": "publie"` et `published_at` dans `publication.json`. Un post en échec passe en `"statut": "echec"` avec l'erreur, et n'est **jamais** relancé tout seul (pas de double post) : bouton « Publier maintenant » dans le panneau.
+- Les vidéos YouTube passent avant les posts quand les deux sont prêts en même temps.

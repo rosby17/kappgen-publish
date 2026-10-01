@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "KappGen Uploader",
-  "version": "1.7.6",
+  "version": "1.8.0",
   "description": "Publie automatiquement tes vidéos finies sur YouTube (et Facebook) depuis un dossier de ton ordinateur.",
   "icons": {
     "16": "icons/icon16.png",

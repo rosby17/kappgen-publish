@@ -264,6 +264,45 @@ function sentItem(video) {
   return item;
 }
 
+// ------------------------------------------------------ Facebook posts
+
+const POST_STATES = { a_publier: 'prévu', en_cours: 'en cours', publie: 'publié', echec: 'échec' };
+const POST_TYPES = { photo: 'Photo', texte: 'Texte', reel: 'Reel' };
+
+// Today's posts of FACEBOOK/A-PUBLIER (and failures of any day), by time.
+async function renderPosts() {
+  const reply = await send({ type: 'facebookPosts' });
+  const posts = reply && reply.ok ? reply.data : [];
+  const today = new Date().toDateString();
+  const shown = posts.filter((p) => (p.due_at && new Date(p.due_at).toDateString() === today) || p.statut === 'echec' || (p.ready));
+  $('fb-block').hidden = !posts.length;
+  const count = (state) => shown.filter((p) => p.statut === state).length;
+  const missingPage = posts.some((p) => !p.page);
+  $('fb-summary').textContent = `Aujourd’hui : ${count('publie')} publié(s), ${count('a_publier')} prévu(s)${count('echec') ? `, ${count('echec')} en échec` : ''}. Un post part à son heure, toutes les 5 min au plus.`
+    + (missingPage ? ' Lien de la page Facebook à renseigner (planning.json) pour certains posts.' : '');
+  $('fb-posts').replaceChildren(...shown.map((post) => {
+    const item = el('li', 'video');
+    const info = el('div', 'info');
+    const when = post.due_at ? new Date(post.due_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
+    info.append(el('div', 'title', `${when} · ${post.text.split('\n')[0] || '(sans texte)'}`),
+      el('div', 'meta', [POST_TYPES[post.type], post.channel_name, POST_STATES[post.statut] || post.statut].join(' · ')));
+    if (post.error && post.statut === 'echec') info.append(el('div', 'warn', post.error));
+    item.append(post.image_path ? thumb(post.image_path) : el('div', 'thumb empty', POST_TYPES[post.type]), info);
+    if (post.statut === 'a_publier' || post.statut === 'echec') {
+      const go = button('Publier maintenant', 'publish secondary', async () => {
+        go.disabled = true;
+        const r = await send({ type: 'postNow', path: post.path });
+        if (!r || !r.ok) { go.disabled = false; info.append(el('div', 'warn', r ? r.error : 'Publication impossible.')); }
+      });
+      go.disabled = jobRunning;
+      const buttons = el('div', 'buttons');
+      buttons.append(go);
+      item.append(buttons);
+    }
+    return item;
+  }));
+}
+
 async function renderFolder() {
   const lists = ['videos', 'sent', 'facebook'].map($);
   if (!(await renderAccess())) {
@@ -370,7 +409,7 @@ $('grant').addEventListener('click', async () => {
   send({ type: 'autoNow' });
 });
 
-$('rescan').addEventListener('click', () => { renderFolder(); renderApp(); });
+$('rescan').addEventListener('click', () => { renderFolder(); renderApp(); renderPosts(); });
 
 // --------------------------------------------------------------- account
 
@@ -487,7 +526,7 @@ function renderJob(job) {
     $('job-clear').hidden = jobRunning;
   }
   for (const node of document.querySelectorAll('button.publish')) node.disabled = jobRunning;
-  if (wasRunning && !jobRunning) { renderFolder(); renderApp(); }
+  if (wasRunning && !jobRunning) { renderFolder(); renderApp(); renderPosts(); }
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -512,6 +551,7 @@ async function start() {
   renderJob(job);
   renderFolder();
   renderApp();
+  renderPosts();
 }
 start();
 

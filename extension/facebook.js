@@ -20,8 +20,15 @@
   const buttons = 'button, [role="button"], a[role="button"]';
   const byText = (pattern) => [...document.querySelectorAll(buttons)].find((node) => visible(node) && pattern.test(textOf(node)));
 
-  async function receiveFile({ src, path }) {
-    const input = await waitFor(() => [...document.querySelectorAll('input[type="file"]')].find(visible), 60000, 'le sélecteur de fichier du Reel');
+  // kind "image": the photo input of the post composer is usually hidden,
+  // so any file input accepting images is used.
+  async function receiveFile({ src, path, kind }) {
+    const pick = () => {
+      const inputs = [...document.querySelectorAll('input[type="file"]')];
+      if (kind === 'image') return inputs.filter((i) => /image|\*/.test(i.accept || '*')).pop();
+      return inputs.find(visible);
+    };
+    const input = await waitFor(pick, 60000, kind === 'image' ? 'l’ajout de photo' : 'le sélecteur de fichier du Reel');
     const file = await new Promise((resolve, reject) => {
       const frame = document.createElement('iframe');
       frame.style.display = 'none';
@@ -56,7 +63,7 @@
 
   async function fillCaption({ caption }) {
     if (!caption) return true;
-    const field = await waitFor(() => [...document.querySelectorAll('textarea, [contenteditable="true"]')].find(visible), 30000, 'le champ de description');
+    const field = await waitFor(() => [...document.querySelectorAll('[role="dialog"] [contenteditable="true"], textarea, [contenteditable="true"]')].find(visible), 30000, 'le champ de texte');
     field.focus();
     if (field.isContentEditable) {
       document.execCommand('selectAll', false, null);
@@ -76,5 +83,32 @@
     return true;
   }
 
-  window.__kappgen = { openReel, receiveFile, fillCaption, publish };
+  // Opens the "Create post" composer of the Page (text, with or without photo).
+  async function openPost({ photo }) {
+    const create = await waitFor(
+      () => byText(/^(create post|cr[eé]er une publication|cr[eé]er un post|nouvelle publication)$/i)
+        || [...document.querySelectorAll('[role="button"]')].find((n) => visible(n) && /what'?s on your mind|que voulez-vous dire|exprimez-vous|[àa] quoi pensez-vous/i.test(textOf(n))),
+      45000, 'le bouton Créer une publication');
+    click(create);
+    await waitFor(() => [...document.querySelectorAll('[role="dialog"] [contenteditable="true"], [contenteditable="true"][role="textbox"]')].find(visible), 30000, 'la fenêtre de publication');
+    if (photo) {
+      const add = byText(/^(photo\/vid[eé]o|photo\/video|photo|ajouter des photos|add photos)/i)
+        || [...document.querySelectorAll('[aria-label]')].find((n) => visible(n) && /photo/i.test(n.getAttribute('aria-label')));
+      if (add) { click(add); await sleep(1200); }
+    }
+    return true;
+  }
+
+  // Posts the composer: "Next" first when Facebook shows it, then "Post".
+  async function sendPost() {
+    const next = byText(/^(next|suivant)$/i);
+    if (next) { click(next); await sleep(2000); }
+    const button = await waitFor(() => byText(/^(post|publier|share now|partager maintenant|publier maintenant)$/i), 60000, 'le bouton Publier');
+    click(button);
+    await waitFor(() => !byText(/^(post|publier)$/i), 60000, 'la fin de la publication');
+    await sleep(2000);
+    return true;
+  }
+
+  window.__kappgen = { openReel, openPost, receiveFile, fillCaption, publish, sendPost };
 })();

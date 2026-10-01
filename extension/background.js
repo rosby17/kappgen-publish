@@ -752,6 +752,59 @@ async function publishFacebookOnly(relativePath) {
   }
 }
 
+// ------------------------------------------------------ Facebook posts
+
+// The Page of a post: its own publication.json / planning.json, otherwise the
+// channel's Facebook page (reglages-publication.json or the side panel).
+async function postPage(post) {
+  if (post.page) return post.page;
+  return ownOf(await folderSettings(), { channel_key: post.channel_key }).facebookPageUrl || null;
+}
+
+// Publishes one ready post (photo, text or Reel) on its Page, then writes
+// "statut": "publie" into its publication.json. A failed post is not retried
+// on its own (never a double post): it shows in the panel with its error.
+async function publishFacebookPost(post, { auto = false } = {}) {
+  const page = await postPage(post);
+  if (!page) throw new Error(`${post.channel_name} : lien de la page Facebook à renseigner (planning.json ou reglages-publication.json).`);
+  await chrome.storage.session.set({ job: { running: true, source: 'facebook', auto, title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', channel: post.channel_name, message: 'Ouverture de Facebook…', startedAt: Date.now() } });
+  await folder('markPost', { path: post.path, patch: { statut: 'en_cours', started_at: new Date().toISOString() } });
+  let tabId = null;
+  try {
+    if (post.type === 'reel') {
+      await publishFacebookReel({ title: '', description: post.text }, post.channel_name, page, post.video_path);
+    } else {
+      tabId = await openFacebookReel(page);
+      await whileShown(tabId, async () => {
+        await step(tabId, 'openPost', { photo: post.type === 'photo' });
+        if (post.image_path) {
+          await setJob({ message: 'Photo…' });
+          await step(tabId, 'receiveFile', { kind: 'image', path: post.image_path,
+            src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(post.image_path)}`) });
+          await sleep(2500);
+        }
+        await setJob({ message: 'Texte…' });
+        await step(tabId, 'fillCaption', { caption: post.text });
+        await setJob({ message: 'Publication…' });
+        await step(tabId, 'sendPost');
+      });
+      chrome.tabs.remove(tabId).catch(() => {});
+    }
+    await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null } });
+    await setJob({ running: false, done: true, error: null, message: 'Post publié sur Facebook.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('markPost', { path: post.path, patch: { statut: 'echec', erreur: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// Next post whose time has come (one per pass, so posts stay spread out).
+async function nextDuePost() {
+  const posts = await folder('posts').catch(() => []);
+  return posts.find((p) => p.ready) || null;
+}
+
 // Last uploads of this profile, shown in the popup.
 async function remember(entry) {
   const { history } = await chrome.storage.local.get('history');
@@ -828,6 +881,12 @@ async function autoTick() {
     autoTick(); // more may be waiting
     return;
   }
+  // No video to send: a Facebook post whose time has come.
+  const post = await nextDuePost();
+  if (post) {
+    await publishFacebookPost(post, { auto: true });
+    return;
+  }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
   let stale = null;
   for (const v of sent) {
@@ -878,6 +937,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     folderQueue: () => folderQueue(),
     folderMark: () => folder('mark', { path: message.path, status: message.status }),
     channelVideos: () => channelVideos(message.channelId),
+    facebookPosts: () => folder('posts'),
+    postNow: async () => {
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Un envoi est déjà en cours.');
+      const post = (await folder('posts')).find((p) => p.path === message.path);
+      if (!post) throw new Error('Post introuvable (déplacé ?).');
+      publishFacebookPost(post); // runs on; the panel follows chrome.storage
+      return { started: true };
+    },
     autoNow: async () => { autoTick().catch(() => {}); return {}; },
     publish: async () => {
       const { job } = await chrome.storage.session.get('job');

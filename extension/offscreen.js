@@ -6,6 +6,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     access: () => KappDossier.access(),
     scan: () => KappDossier.scan({ channels: message.channels || {}, autoSince: message.autoSince || 0 }),
     mark: () => KappDossier.mark(message.path, message.status, message.data || {}),
+    posts: () => KappDossier.facebookPosts(),
+    markPost: () => KappDossier.markPost(message.path, message.patch || {}),
   };
   const handler = handlers[message.type];
   if (!handler) return false;
