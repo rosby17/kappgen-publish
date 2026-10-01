@@ -802,7 +802,9 @@ async function publishFacebookPost(post, { auto = false } = {}) {
 // Next post whose time has come (one per pass, so posts stay spread out).
 async function nextDuePost() {
   const posts = await folder('posts').catch(() => []);
-  return posts.find((p) => p.ready) || null;
+  // A post without a known Page waits (no failure) until the link is given.
+  for (const post of posts.filter((p) => p.ready)) if (await postPage(post)) return post;
+  return null;
 }
 
 // Last uploads of this profile, shown in the popup.
