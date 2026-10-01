@@ -341,7 +341,7 @@ async function renderPosts() {
   const shown = posts.filter((p) => !p.due_at || new Date(p.due_at).toDateString() === today || p.statut === 'echec' || p.ready);
   const count = (state) => shown.filter((p) => p.statut === state).length;
   const config = await settings();
-  const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl);
+  const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl) || config.facebookPageUrl;
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
   const summary = $('fb-summary');
   if (reply && !reply.ok) {
@@ -353,7 +353,7 @@ async function renderPosts() {
   } else {
     summary.className = 'muted small';
     summary.textContent = `Aujourd’hui : ${count('publie')} publié(s), ${count('a_publier')} à publier${count('echec') ? `, ${count('echec')} en échec` : ''}. Les posts programmés partent à leur heure (un toutes les 5 min au plus).`
-      + (missingPage ? ' Il manque le lien de la page Facebook (étape 1, en haut).' : '');
+      + (missingPage ? ' Il manque le lien de la page Facebook (en haut).' : '');
   }
   $('fb-posts').replaceChildren(...shown.map((post) => {
     const when = post.due_at ? new Date(post.due_at).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sans heure prévue';
@@ -378,57 +378,36 @@ async function renderPosts() {
   renderPages();
 }
 
-// Step 1 of the Facebook tab: one Page link per channel that has something
-// for Facebook (videos already on YouTube, or posts).
+// Step 1 of the Facebook tab: the link of the Facebook Page, one for all.
 async function renderPages() {
   const config = await settings();
-  const channels = new Map();
-  for (const v of (lastScan && lastScan.sent) || []) channels.set(v.channel_key, { name: v.channel_name, file: v.channel_config || {} });
-  for (const p of lastPosts) if (!channels.has(p.channel_key)) channels.set(p.channel_key, { name: p.channel_name, file: {}, page: p.page });
-  $('no-fb-pages').hidden = channels.size > 0;
-  $('fb-pages').replaceChildren(...[...channels].map(([key, channel]) => {
-    const own = { ...(config.channels[key] || {}), ...channel.file };
-    const current = own.facebookPageUrl || channel.page || '';
-    const row = el('div', 'field page-field');
-    const head = el('div', 'field-head');
-    head.append(el('strong', null, channel.name), pill(current ? 'ok' : 'warn', current ? 'Page enregistrée' : 'Lien à coller'));
-    const group = el('div', 'input-group');
-    const input = document.createElement('input');
-    input.type = 'url';
-    input.value = current;
-    input.placeholder = 'https://www.facebook.com/ta-page';
-    const save = button('Enregistrer', 'btn secondary', async () => {
-      const url = input.value.trim();
-      if (url && !/^https?:\/\/(www\.|m\.|web\.|business\.)?(facebook|fb)\.com\//i.test(url)) {
-        input.setCustomValidity('Colle un lien du type https://www.facebook.com/ta-page');
-        input.reportValidity();
-        return;
-      }
-      // First page saved: Facebook publishing becomes automatic (box below).
-      const first = url && !own.facebookPageUrl && own.facebook === undefined;
-      await saveChannel(key, { facebookPageUrl: url || null, ...(first ? { facebook: true, facebookSince: Date.now() } : {}) });
-      send({ type: 'autoNow' });
-      renderPosts();
-      if (lastScan) renderFacebook(lastScan);
-    });
-    input.addEventListener('input', () => input.setCustomValidity(''));
-    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') save.click(); });
-    group.append(input, save);
-    const autoLabel = el('label', 'check-line');
-    const autoBox = document.createElement('input');
-    autoBox.type = 'checkbox';
-    autoBox.checked = own.facebook === true;
-    autoLabel.append(autoBox, document.createTextNode('Automatique : chaque nouvelle vidéo publiée sur YouTube part aussi sur cette page'));
-    autoBox.addEventListener('change', async () => {
-      await saveChannel(key, { facebook: autoBox.checked, ...(autoBox.checked ? { facebookSince: Date.now() } : {}) });
-      if (autoBox.checked) send({ type: 'autoNow' });
-    });
-    if (channel.file.facebookPageUrl) { input.disabled = true; save.disabled = true; input.title = 'Fixé par reglages-publication.json dans le dossier de la chaîne.'; }
-    if ('facebook' in channel.file) autoBox.disabled = true;
-    row.append(head, group, autoLabel);
-    return row;
-  }));
+  const current = config.facebookPageUrl || '';
+  $('fb-page').value = current;
+  const state = $('fb-page-state');
+  state.className = `pill ${current ? 'ok' : 'warn'}`;
+  state.textContent = current ? 'Page enregistrée' : 'Lien à coller';
 }
+
+$('fb-page-save').addEventListener('click', async () => {
+  const input = $('fb-page');
+  const url = input.value.trim();
+  if (url && !/^https?:\/\/(www\.|m\.|web\.|business\.)?(facebook|fb)\.com\//i.test(url)) {
+    input.setCustomValidity('Colle un lien du type https://www.facebook.com/ta-page');
+    input.reportValidity();
+    return;
+  }
+  const current = await settings();
+  current.facebookPageUrl = url || null;
+  // One page for everything: links saved per channel by older versions go.
+  for (const own of Object.values(current.channels)) { delete own.facebookPageUrl; delete own.facebook; delete own.facebookSince; }
+  await chrome.storage.local.set({ folder: current });
+  send({ type: 'autoNow' });
+  renderPages();
+  renderPosts();
+  if (lastScan) renderFacebook(lastScan);
+});
+$('fb-page').addEventListener('input', () => $('fb-page').setCustomValidity(''));
+$('fb-page').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('fb-page-save').click(); });
 
 async function renderFolder() {
   const lists = ['videos', 'sent', 'facebook'].map($);
@@ -467,7 +446,7 @@ function facebookItem(video, page) {
     status = pill('ok', `Publiée sur Facebook le ${new Date(video.facebook_published_at).toLocaleDateString('fr-FR')}.`);
   } else {
     status = video.facebook_error ? pill('warn', `Échec sur Facebook : ${video.facebook_error}`)
-      : page ? pill('neutral', 'Prête à partir sur Facebook.') : pill('warn', 'Ajoute le lien de la page Facebook (étape 1) pour la publier.');
+      : page ? pill('neutral', 'Prête à partir sur Facebook.') : pill('warn', 'Colle le lien de ta page Facebook en haut pour la publier.');
     const publish = button(video.facebook_error ? 'Réessayer' : 'Publier sur Facebook', 'btn primary', () => act(item, publish,
       { type: 'facebook', path: video.relative_path }, 'Publication sur Facebook en cours… (un onglet Facebook s’ouvre)'));
     publish.dataset.publish = '1';
@@ -483,7 +462,7 @@ function facebookItem(video, page) {
 
 async function renderFacebook(data) {
   const config = await settings();
-  const pageOf = (v) => ({ ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) }).facebookPageUrl;
+  const pageOf = (v) => ({ ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) }).facebookPageUrl || config.facebookPageUrl;
   const sent = [...data.sent].sort((a, b) => Number(!!a.facebook_published_at) - Number(!!b.facebook_published_at));
   $('facebook').replaceChildren(...sent.map((video) => facebookItem(video, pageOf(video))));
   applyJob();

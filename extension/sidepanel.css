@@ -133,3 +133,5 @@ footer details summary { cursor: pointer; }
 details input { width: 100%; margin: 6px 0; }
 .check-line input[type="checkbox"] { width: 15px; height: 15px; padding: 0; border-radius: 4px; flex: none; }
 .check-line input[type="checkbox"] { margin-right: 2px; }
+.card > .field-head { margin-bottom: 10px; }
+.card > .field-head h2 { margin: 0; }

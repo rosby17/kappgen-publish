@@ -286,8 +286,14 @@ async function whileShown(tabId, fn) {
 
 // Settings of one channel: the side panel's, overridden by what the channel
 // folder itself says (reglages-publication.json, ADN/chaine.json).
+// The Facebook Page is one link for the whole panel (settings.facebookPageUrl);
+// publishing a YouTube video on Facebook automatically is only decided by the
+// channel's own file (reglages-publication.json), never by the panel.
 function ownOf(settings, video) {
-  return { ...((settings.channels || {})[video.channel_key] || {}), ...((video && video.channel_config) || {}) };
+  const { facebook, ...panel } = (settings.channels || {})[video.channel_key] || {};
+  const own = { ...panel, ...((video && video.channel_config) || {}) };
+  if (!own.facebookPageUrl && settings.facebookPageUrl) own.facebookPageUrl = settings.facebookPageUrl;
+  return own;
 }
 
 // ------------------------------------------------- visibility & schedule
@@ -974,7 +980,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       const post = (await folder('posts')).find((p) => p.path === message.path);
       if (!post) throw new Error('Post introuvable (déplacé ?).');
-      if (!await postPage(post)) throw new Error('Ajoute d’abord le lien de ta page Facebook (étape 1, en haut de l’onglet Facebook).');
+      if (!await postPage(post)) throw new Error('Ajoute d’abord le lien de ta page Facebook (en haut de l’onglet Facebook).');
       publishFacebookPost(post).catch(() => {}); // runs on; the panel follows chrome.storage
       return { started: true };
     },
@@ -998,7 +1004,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const { sent } = await folderQueue();
       const video = sent.find((item) => item.relative_path === message.path);
       if (video && !ownOf(await folderSettings(), video).facebookPageUrl) {
-        throw new Error('Ajoute d’abord le lien de ta page Facebook (étape 1, en haut de l’onglet Facebook).');
+        throw new Error('Ajoute d’abord le lien de ta page Facebook (en haut de l’onglet Facebook).');
       }
       publishFacebookOnly(message.path);
       return { started: true };

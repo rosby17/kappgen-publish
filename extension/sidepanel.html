@@ -87,18 +87,19 @@
 
   <div id="tab-facebook" class="tab" hidden>
     <section class="card">
-      <h2>1. Ta page Facebook</h2>
-      <p class="muted small">Colle le lien de ta page Facebook puis « Enregistrer ». Ensuite tout part tout seul : les nouvelles vidéos YouTube et les posts de ton dossier Facebook.</p>
-      <div id="fb-pages"></div>
-      <p id="no-fb-pages" class="muted small" hidden>Choisis d’abord le dossier des vidéos (onglet Vidéos) ou un dossier Facebook (plus bas).</p>
+      <div class="field-head"><h2>Page Facebook</h2><span id="fb-page-state" class="pill warn">Lien à coller</span></div>
+      <div class="input-group">
+        <input id="fb-page" type="url" placeholder="https://www.facebook.com/ta-page">
+        <button id="fb-page-save" class="btn secondary">Enregistrer</button>
+      </div>
     </section>
 
-    <h2>2. Vidéos YouTube à partager sur Facebook</h2>
+    <h2>Vidéos YouTube à partager sur Facebook</h2>
     <ul id="facebook"></ul>
     <p id="no-facebook" class="muted" hidden>Aucune vidéo publiée sur YouTube pour l’instant.</p>
 
     <section class="card">
-      <h2>3. Dossier Facebook (Reels et posts)</h2>
+      <h2>Dossier des Reels et posts</h2>
       <div id="fb-folder-chosen" class="chosen" hidden>
         <span class="check">✓</span>
         <div><div class="small muted">Dossier Facebook sélectionné</div><strong id="fb-folder-name"></strong></div>
@@ -110,7 +111,7 @@
         <button id="fb-pick" class="btn primary wide">Choisir le dossier Facebook</button>
         <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
       </div>
-      <p id="fb-folder-hint" class="muted small">Importe le dossier où tu ranges tes Reels et posts : un sous-dossier par post, avec <code>texte.txt</code> et une image ou une vidéo verticale. Chaque post part tout seul (à son heure s’il en a une).</p>
+      <p id="fb-folder-hint" class="muted small">Importe le dossier où tu ranges tes Reels et posts : un sous-dossier par post, avec <code>texte.txt</code> et une image ou une vidéo verticale. Chaque post part tout seul, à son heure s’il en a une.</p>
       <p id="fb-summary" class="muted small"></p>
       <ul id="fb-posts"></ul>
     </section>
