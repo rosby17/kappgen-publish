@@ -277,9 +277,11 @@ async function renderPosts() {
   const shown = posts.filter((p) => (p.due_at && new Date(p.due_at).toDateString() === today) || p.statut === 'echec' || (p.ready));
   $('fb-block').hidden = !posts.length;
   const count = (state) => shown.filter((p) => p.statut === state).length;
-  const missingPage = posts.some((p) => !p.page);
+  const config = await settings();
+  const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl);
+  const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
   $('fb-summary').textContent = `Aujourd’hui : ${count('publie')} publié(s), ${count('a_publier')} prévu(s)${count('echec') ? `, ${count('echec')} en échec` : ''}. Un post part à son heure, toutes les 5 min au plus.`
-    + (missingPage ? ' Lien de la page Facebook à renseigner (planning.json) pour certains posts.' : '');
+    + (missingPage ? ' Lien de la page Facebook à renseigner : onglet Chaînes → « URL de la page Facebook ». En attendant, les posts restent en attente.' : '');
   $('fb-posts').replaceChildren(...shown.map((post) => {
     const item = el('li', 'video');
     const info = el('div', 'info');
