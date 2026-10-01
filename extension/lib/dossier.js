@@ -405,9 +405,12 @@ const KappDossier = (() => {
       const relativePath = pathIn(node, video.name);
       const side = await sideFor(node);
       const record = side[video.name] || recordFor(node, relativePath, video.name);
-      const channelKey = channel.path || '.';
+      // The chosen folder may itself be a channel: it gets its own key (its
+      // name), so two channel folders chosen one after the other never share
+      // settings or the YouTube channel learned at the first upload.
+      const channelKey = channel.path || `./${tree.name}`;
       const fileConfig = await configFor(channel);
-      const channelName = channel.path ? channel.name : `${tree.name} (dossier principal)`;
+      const channelName = channel.path ? channel.name : tree.name;
       if (record.status === 'ignored') continue;
       if (record.status !== 'published' && sentCopies.has(`${video.name}|${video.size}`)) continue;
       if (record.status !== 'published' && unit.kind === 'vrac' && now - video.modified > LOOSE_MAX_AGE) continue;
@@ -426,7 +429,8 @@ const KappDossier = (() => {
       const thumb = await thumbnailIn(unit.thumbs, video.name);
       const vertical = await verticalVideoIn([node, node.parent, node.parent && node.parent.parent], video.name);
       // What YouTube should show: changes to it are applied automatically.
-      const hash = hashOf([sheet.title, sheet.description, (sheet.tags || []).join(','), thumb && thumb.path, thumb && thumb.size, thumb && thumb.modified]);
+      // Independent of the chosen folder: only the thumbnail's own name counts.
+      const hash = hashOf([sheet.title, sheet.description, (sheet.tags || []).join(','), thumb && thumb.path.split('/').pop(), thumb && thumb.size, thumb && thumb.modified]);
       if (record.status === 'published') {
         sent.push({ relative_path: relativePath, channel_key: channelKey, channel_name: channelName, size_bytes: video.size,
           youtube_id: record.youtubeId || null, date: record.date,
@@ -492,8 +496,8 @@ const KappDossier = (() => {
     }
     // Channels with only sent videos still show in the settings.
     for (const unit of units) {
-      const key = unit.channel.path || '.';
-      if (!channels.has(key)) channels.set(key, { key, name: unit.channel.path ? unit.channel.name : `${tree.name} (dossier principal)`, videos: 0, config: await configFor(unit.channel) });
+      const key = unit.channel.path || `./${tree.name}`;
+      if (!channels.has(key)) channels.set(key, { key, name: unit.channel.path ? unit.channel.name : tree.name, videos: 0, config: await configFor(unit.channel) });
     }
     videos.sort((a, b) => a.channel_key.localeCompare(b.channel_key) || a.relative_path.localeCompare(b.relative_path));
     return { folder: tree.name, videos, sent, channels: [...channels.values()].sort((a, b) => a.key.localeCompare(b.key)) };

@@ -110,6 +110,12 @@ async function closeOldKeeper() {
 async function folderSettings() {
   const { folder } = await chrome.storage.local.get('folder');
   const current = { channels: {}, ...(folder || {}) };
+  // Before 1.7.4 every channel folder chosen on its own was saved as "." and
+  // could inherit another channel's YouTube id: forget that shared entry.
+  if (current.channels['.']) {
+    delete current.channels['.'];
+    await chrome.storage.local.set({ folder: current });
+  }
   // Automatic is the default for every channel, but only for videos finished
   // after the first run: older ones stay manual (never a surprise mass upload).
   if (!current.autoSince) {
