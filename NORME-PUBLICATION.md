@@ -89,5 +89,6 @@ Ordre : YouTube d'abord ; Facebook juste après, une fois l'envoi YouTube termin
 
 - Dossier à choisir : **`YOUTUBE`** (toutes les chaînes) ou le dossier d'**une chaîne**. Pas `VIDEO/` : la chaîne et ses réglages ne seraient plus reconnus.
 - Le suivi des envois est écrit dans le dossier de chaque vidéo (`.kappgen.json`) : changer de dossier dans le panneau ne fait plus repartir une vidéo déjà envoyée.
+- Choisir le dossier = publier ce qu'il contient : toute vidéo prête part toute seule, ancienne ou nouvelle, sans question. Une vidéo dont le titre existe déjà sur la chaîne (page publique) est reconnue comme déjà publiée et n'est pas renvoyée.
 - Un envoi interrompu (Studio fermé, extension rechargée) n'est **jamais** relancé tout seul : la vidéo affiche « envoi précédent interrompu ». Vérifie dans YouTube Studio qu'elle n'y est pas déjà, puis relance-la à la main.
 - Chrome doit rester ouvert, connecté au bon compte YouTube (et à Facebook si la chaîne publie sur Facebook). L'onglet YouTube Studio ouvert par l'extension ne doit pas être fermé pendant l'envoi.

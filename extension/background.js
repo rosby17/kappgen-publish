@@ -86,10 +86,12 @@ async function askAccess({ wait = false, force = false } = {}) {
     if (force || wait || !askedAt || Date.now() - askedAt > 30 * 60 * 1000) {
       await chrome.storage.session.set({ askedAt: Date.now() });
       const current = await chrome.windows.getLastFocused().catch(() => null);
-      const width = 420, height = 330;
+      const width = 520, height = 330;
       const left = current ? Math.max(0, current.left + Math.round((current.width - width) / 2)) : undefined;
       const top = current ? Math.max(0, current.top + 120) : undefined;
-      await chrome.windows.create({ url: ASK_URL, type: 'popup', width, height, left, top, focused: true });
+      // A normal window: Chrome shows its folder-access prompt under the
+      // address bar, which a 'popup' window doesn't have (the click did nothing).
+      await chrome.windows.create({ url: ASK_URL, type: 'normal', width, height: height + 160, left, top, focused: true });
     }
   }
   if (!wait) return false;
@@ -116,12 +118,9 @@ async function folderSettings() {
     delete current.channels['.'];
     await chrome.storage.local.set({ folder: current });
   }
-  // Automatic is the default for every channel, but only for videos finished
-  // after the first run: older ones stay manual (never a surprise mass upload).
-  if (!current.autoSince) {
-    current.autoSince = Date.now();
-    await chrome.storage.local.set({ folder: current });
-  }
+  // Choosing the folder means "publish what is in it": every ready video
+  // goes out, old or new. Videos already on the channel are recognised by
+  // their title and skipped (see alreadyOnChannel).
   return current;
 }
 
@@ -760,6 +759,27 @@ async function remember(entry) {
 }
 
 // Every few minutes: send the next ready video of an automatic channel.
+// True when a video with the same title is already on the channel's public
+// page: such a video was published before KappGen, never send it twice.
+const sameTitle = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+async function alreadyOnChannel(video, own) {
+  const channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
+  if (!channelId) return false;
+  const { channelCache } = await chrome.storage.session.get('channelCache');
+  const cache = channelCache || {};
+  let entry = cache[channelId];
+  if (!entry || Date.now() - entry.at > 30 * 60 * 1000) {
+    try {
+      entry = { at: Date.now(), titles: (await channelVideos(channelId)).map((v) => sameTitle(v.title)) };
+    } catch {
+      return false;
+    }
+    cache[channelId] = entry;
+    await chrome.storage.session.set({ channelCache: cache });
+  }
+  return entry.titles.includes(sameTitle(video.title));
+}
+
 async function autoTick() {
   const { job } = await chrome.storage.session.get('job');
   if (job && job.running) return;
@@ -791,7 +811,15 @@ async function autoTick() {
   chrome.action.setBadgeText({ text: '' });
   await chrome.storage.session.remove('permissionNotified');
   const { videos, sent } = await folderQueue();
-  const next = videos.find((v) => v.auto_ok);
+  let next = null;
+  for (const candidate of videos.filter((v) => v.auto_ok)) {
+    if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
+      await folder('mark', { path: candidate.relative_path, status: 'ignored', data: { reason: 'déjà sur la chaîne (même titre)' } }).catch(() => {});
+      continue;
+    }
+    next = candidate;
+    break;
+  }
   if (next) {
     // Per channel: unlisted by default (the creator makes it public himself),
     // or straight to public for news channels where timing matters.

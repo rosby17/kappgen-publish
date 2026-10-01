@@ -462,7 +462,6 @@ const KappDossier = (() => {
       else if (record.status === 'failed') blocked = 'dernier envoi en échec : relance-le à la main';
       else if (running) blocked = 'envoi déjà en cours';
       else if (interrupted) blocked = 'envoi précédent interrompu : vérifie dans YouTube Studio qu’elle n’y est pas déjà, puis relance à la main';
-      else if ((config.since != null ? config.since : autoSince) && video.modified < (config.since != null ? config.since : autoSince)) blocked = 'vidéo antérieure à l’activation : envoi manuel';
 
       const bigThumb = thumb && thumb.size > 2 * 1024 * 1024;
       videos.push({

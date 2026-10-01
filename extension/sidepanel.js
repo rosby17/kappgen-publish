@@ -43,10 +43,6 @@ function button(label, className, onClick) {
 async function settings() {
   const { folder } = await chrome.storage.local.get('folder');
   const current = { channels: {}, ...(folder || {}) };
-  if (!current.autoSince) {
-    current.autoSince = Date.now();
-    await chrome.storage.local.set({ folder: current });
-  }
   return current;
 }
 
@@ -147,13 +143,7 @@ function channelItem(channel, panelOwn) {
   auto.checked = own.auto !== false;
   label.append(auto, document.createTextNode('Auto'));
   auto.addEventListener('change', async () => {
-    let since = Date.now();
-    if (auto.checked && channel.videos > 0
-      && confirm(`${channel.name} : envoyer aussi les ${channel.videos} vidéo(s) déjà présentes ?\n\nOK = oui, toutes\nAnnuler = seulement les prochaines`)) {
-      since = 0;
-    }
-    if (!auto.checked) since = undefined;
-    await saveChannel(channel.key, { auto: auto.checked, since });
+    await saveChannel(channel.key, { auto: auto.checked });
     renderFolder();
     if (auto.checked) send({ type: 'autoNow' });
   });
@@ -359,16 +349,23 @@ function youtubeItem(video) {
 
 $('pick').addEventListener('click', async () => {
   try {
-    await KappDossier.saveRoot(await window.showDirectoryPicker({ id: 'kappgen-videos', mode: 'readwrite' }));
+    rootHandle = await window.showDirectoryPicker({ id: 'kappgen-videos', mode: 'readwrite' });
+    await KappDossier.saveRoot(rootHandle);
+    send({ type: 'autoNow' }); // a chosen folder is published right away
   } catch (error) {
     if (!error || error.name !== 'AbortError') $('folder-status').textContent = String((error && error.message) || error);
   }
   renderFolder();
 });
 
+// Loaded in advance so the click calls requestPermission straight away
+// (Chrome ignores it when something was awaited first).
+let rootHandle = null;
+KappDossier.loadRoot().then((handle) => { rootHandle = handle; }).catch(() => {});
+
 $('grant').addEventListener('click', async () => {
-  const handle = await KappDossier.loadRoot();
-  if (handle) await handle.requestPermission({ mode: 'readwrite' });
+  const handle = rootHandle || await KappDossier.loadRoot();
+  if (handle) await handle.requestPermission({ mode: 'readwrite' }).catch(() => {});
   renderFolder();
   send({ type: 'autoNow' });
 });
