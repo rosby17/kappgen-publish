@@ -409,9 +409,10 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
       await step(tabId, 'receiveFile', { kind: 'video', path: filePath,
         src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`) });
       await sleep(3000);
-      await step(tabId, 'fillCaption', { caption: [video.title, video.description].filter(Boolean).join('\n\n').slice(0, 5000) });
-      await setJob({ message: 'Publication sur Facebook…' });
-      await step(tabId, 'sendPost');
+      // Only the catchy title of the YouTube video goes with it on Facebook.
+      await step(tabId, 'fillCaption', { caption: (video.title || '').slice(0, 500) });
+      await setJob({ message: 'Envoi de la vidéo à Facebook, puis publication (peut prendre plusieurs minutes)…' });
+      await step(tabId, 'sendPost', { timeout: 15 * 60000 });
     });
     return true;
   }
@@ -423,7 +424,8 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
         path: filePath,
       });
       await setJob({ message: `Préparation de la publication Facebook (${channelName || 'page sélectionnée'})…` });
-      const caption = [video.title, video.description].filter(Boolean).join('\n\n').slice(0, 5000);
+      // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
+      const caption = (video.title || video.description || '').slice(0, 5000);
       await step(tabId, 'fillCaption', { caption });
       await step(tabId, 'publish');
     });

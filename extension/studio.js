@@ -7,7 +7,9 @@
 // the local MP4 path to the file picker (DevTools protocol, see background.js).
 
 (() => {
-  if (window.__kappgen) return;
+  // A reused tab may hold the script of an older version: replace it.
+  const VERSION = chrome.runtime.getManifest().version;
+  if (window.__kappgen && window.__kappgen.version === VERSION) return;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -145,6 +147,7 @@
   }
 
   window.__kappgen = {
+    version: VERSION,
     // True once the upload dialog's file picker is on the page.
     async waitForFilePicker() {
       await waitFor(() => document.querySelector('ytcp-uploads-dialog input[type="file"], input[type="file"][name="Filedata"]'),

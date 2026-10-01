@@ -731,7 +731,12 @@ const KappDossier = (() => {
         const image = info.image && files.includes(info.image) ? info.image : files.find((f) => IMAGE_EXT.test(f));
         const video = files.find((f) => VIDEO_EXT.test(f));
         const due = dueTime(info, name);
-        const statut = info.statut || 'a_publier';
+        let statut = info.statut || 'a_publier';
+        // Stuck « en cours » (tab closed, envoi débloqué à la main): offer to retry.
+        if (statut === 'en_cours' && info.started_at && now - Date.parse(info.started_at) > 20 * 60000) {
+          statut = 'echec';
+          info.erreur = info.erreur || 'Publication interrompue : vérifie sur Facebook si elle est partie, sinon « Réessayer ».';
+        }
         posts.push({
           id: path,
           path,
