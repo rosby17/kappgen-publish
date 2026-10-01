@@ -26,7 +26,20 @@ button.link { background: none; border: 0; color: var(--muted); padding: 0; font
 button.link:hover { color: var(--text); }
 
 /* ----------------------------------------------------------- header, tabs */
-#account-on { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+header { position: relative; }
+header h1 { flex: 1; font-size: 19px; }
+.profile { position: relative; }
+.avatar { width: 34px; height: 34px; border-radius: 50%; padding: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #06121f; font-weight: 800; font-size: 15px; border: 2px solid rgba(255, 255, 255, 0.18); cursor: pointer; }
+.avatar:hover, .avatar[aria-expanded="true"] { border-color: var(--accent-strong); }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.profile-menu { position: absolute; right: 0; top: 42px; z-index: 10; min-width: 220px; max-width: 280px; padding: 12px; border-radius: 12px;
+  background: #16233f; border: 1px solid var(--border); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); display: grid; gap: 10px; }
+.profile-who { display: grid; gap: 2px; min-width: 0; }
+.profile-who strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-who span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-menu .btn { justify-content: flex-start; width: 100%; padding: 0 8px; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; padding-top: 2px; }
+.profile-menu .btn:hover:not(:disabled) { color: var(--danger); }
 #account form { display: grid; gap: 8px; }
 #account form h2 { margin: 0; }
 #account a { color: var(--accent-strong); }
@@ -135,3 +148,29 @@ details input { width: 100%; margin: 6px 0; }
 .check-line input[type="checkbox"] { margin-right: 2px; }
 .card > .field-head { margin-bottom: 10px; }
 .card > .field-head h2 { margin: 0; }
+
+/* ---- settings ---- */
+.select { width: 100%; height: 36px; padding: 0 10px; border-radius: 8px; font-size: 13px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); color: var(--text); }
+.choice { display: grid; gap: 8px; }
+.card .field + .field { margin-top: 14px; }
+.fb-times-field { margin: 4px 0 12px; padding: 12px 0 0; border-top: 1px solid var(--border); }
+.fb-times-field .small { margin: 0; }
+li.item > .field.when { grid-column: 1 / -1; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.input-group input[type="datetime-local"] { color-scheme: dark; }
+
+/* ---- subscription ---- */
+.paywall { text-align: center; padding: 22px 18px; }
+.paywall img { border-radius: 12px; }
+.paywall h2 { margin: 10px 0 6px; font-size: 18px; }
+.paywall .lead { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.perks { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 7px; text-align: left; }
+.perks li { display: flex; gap: 8px; font-size: 12.5px; padding: 0; background: none; border: 0; }
+.perks li::before { content: "✓"; color: var(--ok); font-weight: 800; }
+.price { margin: 0 0 16px; }
+.price strong { font-size: 28px; }
+.price span { color: var(--muted); }
+.paywall-actions { display: grid; gap: 8px; }
+#pw-message { margin: 12px 0 0; }
+.profile-plan { font-size: 12px; color: var(--ok); }
+.plan-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding: 10px 12px;
+  border-radius: 10px; background: rgba(255, 207, 110, 0.1); border: 1px solid rgba(255, 207, 110, 0.4); font-size: 12.5px; }

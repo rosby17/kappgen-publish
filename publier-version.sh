@@ -10,5 +10,5 @@ rm -rf dist && mkdir dist
 (cd extension && zip -rqX ../dist/kappgen-uploader.zip . -x ".*" -x "*/.DS_Store")
 git diff --quiet && git diff --cached --quiet || { echo "Commite d'abord tes changements."; exit 1; }
 git push -q origin HEAD
-gh release create "v$V" dist/kappgen-uploader.zip --title "KappGen Uploader $V" --notes "${1:-Version $V}" --latest
+gh release create "v$V" dist/kappgen-uploader.zip --title "KappGen Publish $V" --notes "${1:-Version $V}" --latest
 echo "Publiée : https://github.com/rosby17/kappgen-uploader/releases/tag/v$V"

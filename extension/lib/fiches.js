@@ -77,12 +77,23 @@ const KappFiches = (() => {
     };
   }
 
+  // The simple rule for everyone: first line = title, the rest = description.
+  function firstLineTitle(text) {
+    const lines = String(text || '').trim().split(/\r?\n/);
+    const [first, ...rest] = lines;
+    return { title: (first || '').trim(), description: rest.join('\n').trim(), text: String(text || '').trim() };
+  }
+
   // name: file name of the sheet; text: its content.
   function read(name, text) {
     const lower = plain(name);
     try {
       if (lower.endsWith('.json')) return json(text);
-      if (lower.endsWith('.md')) return markdown(text);
+      if (lower.endsWith('.md')) {
+        const sheet = markdown(text);
+        if (sheet.title || sheet.description) return sheet;
+        return firstLineTitle(text.replace(/^#{1,6}\s+/gm, ''));
+      }
       if (lower.endsWith('.txt')) {
         if (lower.startsWith('description')) return { description: text.trim() };
         if (lower.startsWith('titre') || lower.startsWith('title')) return { title: text.trim().split('\n')[0] };
@@ -100,8 +111,7 @@ const KappFiches = (() => {
             return `## ${m[1].trim()}${m[2] ? ` ${m[2]}` : ''}${m[3] ? `\n${m[3]}` : ''}`;
           }).join('\n'));
         }
-        const [first, ...rest] = lines;
-        return { title: (first || '').trim(), description: rest.join('\n').trim() };
+        return firstLineTitle(text);
       }
     } catch {
       return {};
@@ -127,5 +137,5 @@ const KappFiches = (() => {
     return out;
   }
 
-  return { read, clean, fitTags, plain };
+  return { read, clean, fitTags, plain, firstLineTitle };
 })();

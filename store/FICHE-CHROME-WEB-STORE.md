@@ -1,4 +1,4 @@
-# Fiche Chrome Web Store — KappGen Uploader
+# Fiche Chrome Web Store — KappGen Publish
 
 Tout ce qu'il faut copier dans le tableau de bord développeur : https://chrome.google.com/webstore/devconsole
 
@@ -9,7 +9,7 @@ Tout ce qu'il faut copier dans le tableau de bord développeur : https://chrome.
 
 ## 1. Fiche du Store
 
-**Nom** (repris du manifeste) : `KappGen Uploader`
+**Nom** (repris du manifeste) : `KappGen Publish`
 
 **Résumé** (132 caractères max, repris du manifeste) :
 ```
@@ -18,7 +18,7 @@ Publie automatiquement tes vidéos finies sur YouTube (et Facebook) depuis un do
 
 **Description** :
 ```
-KappGen Uploader publie toute seule tes vidéos finies sur YouTube, et sur Facebook si tu le souhaites, à partir d'un dossier de ton ordinateur.
+KappGen Publish publie toute seule tes vidéos finies sur YouTube, et sur Facebook si tu le souhaites, à partir d'un dossier de ton ordinateur.
 
 Range chaque vidéo dans son dossier avec sa fiche (titre, description, mots-clés) et sa miniature : l'extension s'occupe du reste.
 

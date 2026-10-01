@@ -18,17 +18,17 @@ function done() {
   if (access.state === 'granted' && fb.state !== 'prompt') return done();
   if (access.state === 'granted') {
     message.innerHTML = '';
-    message.append('KappGen Uploader a besoin d’accéder au dossier Facebook ', Object.assign(document.createElement('strong'), { textContent: `« ${fb.name} »` }), ' pour publier tes Reels et posts.');
+    message.append('KappGen Publish a besoin d’accéder au dossier Facebook ', Object.assign(document.createElement('strong'), { textContent: `« ${fb.name} »` }), ' pour publier tes Reels et posts.');
     return;
   }
   if (access.state === 'none') {
     message.className = 'warn';
-    message.textContent = 'Aucun dossier choisi : ouvre le panneau KappGen Uploader et clique « Choisir le dossier ».';
+    message.textContent = 'Aucun dossier choisi : ouvre le panneau KappGen Publish et clique « Choisir le dossier ».';
     grant.hidden = true;
     return;
   }
   message.innerHTML = '';
-  message.append('KappGen Uploader a besoin d’accéder au dossier ', Object.assign(document.createElement('strong'), { textContent: `« ${access.name} »` }), ' pour publier tes vidéos.');
+  message.append('KappGen Publish a besoin d’accéder au dossier ', Object.assign(document.createElement('strong'), { textContent: `« ${access.name} »` }), ' pour publier tes vidéos.');
 })();
 
 // Loaded in advance: Chrome only shows its prompt when requestPermission is

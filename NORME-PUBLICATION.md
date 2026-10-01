@@ -2,6 +2,26 @@
 
 Une vidéo rangée selon cette norme est publiée **toute seule** par l'extension KappGen : elle trouve la chaîne, la vidéo, le titre, la description, les mots-clés et la miniature, puis l'envoie sur YouTube et, si la chaîne le demande, sur Facebook.
 
+## 0. La règle simple (pour tout le monde, depuis 1.11)
+
+**Un dossier qui contient une vidéo = une publication.** Le rangement est libre : KappGen descend dans tous les sous-dossiers du dossier choisi.
+
+| Dans le dossier | Rôle |
+|---|---|
+| une vidéo `.mp4` (5 Mo minimum) | la vidéo YouTube (la plus grosse s'il y en a plusieurs) |
+| une vidéo dont le nom contient `short`, `reel` ou `vertical` | Short YouTube / Reel Facebook |
+| une image | la miniature (de préférence `miniature.jpg`) |
+| n'importe quel `.txt` / `.md` court | 1re ligne = titre, le reste = description |
+
+- Sans texte, la vidéo s'affiche dans le panneau mais ne part jamais seule.
+- Ne sont jamais pris comme texte : `script*`, `notes*`, `prompt*`, `journal*`, `chapitres*`, `transcri*`, `sous-titres*`, `modele*`, `readme*`, `planning*`, `voix*`, `sources*`, ni un fichier de plus de 12 000 caractères.
+- **Seules les vidéos terminées après le choix du dossier partent toutes seules** ; celles qui y étaient déjà attendent un clic « Publier maintenant ».
+- Dossiers ignorés : ceux qui commencent par `_` ou `.`, et les dossiers techniques (`build`, `cache`, `tmp`, `frames`, `rushes`, `brut`, `raw`, `bibliotheque`…).
+- Quand publier (panneau, onglet Vidéos) : dès que c'est prêt (par défaut) ou à heures fixes. Chaque vidéo peut aussi être programmée à la main (« Programmer ») ou envoyée tout de suite (« Publier maintenant »).
+- Facebook (onglet Facebook) : un seul lien de page ; un dossier à part pour les Reels et posts avec la même règle (un dossier = un post, texte publié tel quel) ; horaires des posts obligatoires (chaque nouveau post prend le prochain horaire libre, écrit dans son `publication.json`), modifiables post par post.
+
+Le format détaillé ci-dessous reste compris (fiche `publication.md` avec `## Titre`, `FACEBOOK/A-PUBLIER`, `reglages-publication.json`).
+
 ## 1. Arborescence
 
 ```

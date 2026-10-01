@@ -45,9 +45,13 @@ const KappDossier = (() => {
   // the channel enables the social distribution option.
   const DERIVATIVE_VIDEO = /(?:^|[-_ .])(short|shorts|reel|reels|vertical)(?:[-_ .]|$)/i;
   const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
-  const SKIP = new Set(['node modules', 'build', 'tournage', 'flow', 'neuves', 'sprites', 'src', 'wav', 'cache',
-    'tmp', 'temp', 'captures', 'scripts', 'script', 'miniature', 'miniatures', 'images', 'image', 'img', 'avatar',
-    'adn', 'marque', 'assets', 'frames', 'proxy', 'proxies', 'rushes', 'brut', 'raw', 'library', 'bibliotheque']);
+  // Technical folders only (work files, caches, raw footage); any other
+  // folder, whatever its name, is looked into.
+  const SKIP = new Set(['node modules', 'build', 'flow', 'neuves', 'sprites', 'src', 'wav', 'cache',
+    'tmp', 'temp', 'captures', 'frames', 'proxy', 'proxies', 'rushes', 'brut', 'raw', 'library', 'bibliotheque']);
+  // Text files that are never the text of a publication.
+  const NOT_A_SHEET = /^(deja publiee|readme|lisez|prompt|script|journal|notes?|chapitres?|timing|transcri|sous titres?|subtitles?|modele|template|images a generer|planning|voix|sources?)\b/;
+  const FALLBACK_MAX = 12000; // a description, not a script
   const RENDER_DIRS = new Set(['renders', 'render', 'export', 'exports', 'final', 'finals', 'output', 'outputs',
     'sortie', 'sorties', 'out', 'a publier', 'to publish', 'pret', 'prets', 'ready']);
   const CONTAINERS = new Set(['video', 'videos', 'videos longues', 'longues', 'long', 'shorts', 'episodes']);
@@ -268,6 +272,18 @@ const KappDossier = (() => {
   }
 
   const sharedSheets = (node) => [...node.files.keys()].filter((name) => SHEET_NAMES.test(name)).sort();
+  // No sheet with a known name: any short .txt / .md of the folder (first
+  // line = title, the rest = description). Names like texte/legende first.
+  async function anyText(node) {
+    const names = [...node.files.keys()]
+      .filter((name) => /\.(txt|md)$/i.test(name) && name !== MARKER_FILE && !NOT_A_SHEET.test(norm(stem(name))))
+      .sort((a, b) => Number(!/texte|text|legende|caption|description|post|titre|title/i.test(a)) - Number(!/texte|text|legende|caption|description|post|titre|title/i.test(b)) || a.localeCompare(b));
+    for (const name of names) {
+      const file = await node.files.get(name).getFile();
+      if (file.size > 0 && file.size <= FALLBACK_MAX) return [name];
+    }
+    return [];
+  }
 
   function ownSheets(node, videoName) {
     const base = stem(videoName).toLowerCase();
@@ -292,6 +308,13 @@ const KappDossier = (() => {
         const file = await node.files.get(best).getFile();
         return { path: pathIn(node, best), size: file.size, modified: file.lastModified };
       }
+    }
+    // None named « miniature »: the image of the video's own folder.
+    const own = nodes[0];
+    const any = own && [...own.files.keys()].filter((name) => IMAGE_EXT.test(name)).sort()[0];
+    if (any) {
+      const file = await own.files.get(any).getFile();
+      return { path: pathIn(own, any), size: file.size, modified: file.lastModified };
     }
     return null;
   }
@@ -354,7 +377,9 @@ const KappDossier = (() => {
     return h.toString(36);
   }
 
-  async function scan({ channels: settings = {}, autoSince = 0, now = Date.now() } = {}) {
+  // watchSince: when the folder started being watched. Only videos finished
+  // after it go out on their own; the ones already there wait for a click.
+  async function scan({ channels: settings = {}, watchSince = 0, now = Date.now() } = {}) {
     const rootHandle = await root();
     const tree = await walk(rootHandle, '', null, 0);
     const states = new Map();
@@ -395,7 +420,8 @@ const KappDossier = (() => {
       const videos = await videosOf(node);
       if (videos.length) {
         const isRender = RENDER_DIRS.has(norm(node.name)) && node.parent;
-        const shared = sharedSheets(node);
+        let shared = sharedSheets(node);
+        if (!shared.length && !videos.some((video) => ownSheets(node, video.name).length)) shared = await anyText(node);
         const rest = [];
         for (const video of videos) {
           const own = ownSheets(node, video.name);
@@ -512,6 +538,7 @@ const KappDossier = (() => {
       if (config.auto === false) blocked = 'publication automatique désactivée pour cette chaîne';
       else if (!sheet.title) blocked = 'pas de fiche avec un titre : envoi manuel seulement';
       else if (now - video.modified < SETTLE_MS) blocked = 'fichier modifié il y a moins de 10 min';
+      else if (watchSince && video.modified < watchSince) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
       else if (record.status === 'failed') blocked = 'dernier envoi en échec : relance-le à la main';
       else if (running) blocked = 'envoi déjà en cours';
       else if (interrupted) blocked = 'envoi précédent interrompu : vérifie dans YouTube Studio qu’elle n’y est pas déjà, puis relance à la main';
@@ -540,6 +567,7 @@ const KappDossier = (() => {
         auto_blocked: blocked,
         running,
         last_error: record.status === 'failed' ? record.error : null,
+        schedule_at: record.scheduleAt || null,
         vertical_path: vertical && vertical.path,
         vertical_size_bytes: vertical && vertical.size,
         channel_config: fileConfig,
@@ -593,6 +621,11 @@ const KappDossier = (() => {
       delete record.forceUpdate;
       if (data.error) Object.assign(record, { updateError: data.error, updateTriedHash: data.hash });
       else { record.appliedHash = data.hash; delete record.updateError; delete record.updateTriedHash; }
+      state[relativePath] = record;
+    } else if (status === 'schedule') {
+      // Time chosen in the panel for this video (status unchanged).
+      const record = state[relativePath] || {};
+      if (data.at) record.scheduleAt = data.at; else delete record.scheduleAt;
       state[relativePath] = record;
     } else if (status === 'reset') {
       delete state[relativePath];
@@ -661,12 +694,12 @@ const KappDossier = (() => {
     return new Date(y, m - 1, d, hh || 0, mm || 0).getTime();
   }
 
-  // Where the posts are: with a Facebook folder chosen, only there (it may be
-  // a FACEBOOK folder, its A-PUBLIER, a folder of posts, or a folder holding
-  // FACEBOOK folders); otherwise the FACEBOOK folders of the videos folder.
-  async function postQueues() {
+  // Where the posts are. With a Facebook folder chosen: every folder inside
+  // it that holds an image, a video or a text is one post (any layout, any
+  // names). Without one: the FACEBOOK/A-PUBLIER folders of the videos folder.
+  async function postDirs() {
     const fbHandle = await fbRoot();
-    const queues = [];
+    const out = [];
     const join = (...parts) => parts.filter(Boolean).join('/');
     if (!fbHandle) {
       const dirs = [];
@@ -674,10 +707,14 @@ const KappDossier = (() => {
       for (const fb of dirs) {
         let queue;
         try { queue = await fb.handle.getDirectoryHandle('A-PUBLIER'); } catch { continue; }
-        queues.push({ planningDir: fb.handle, queue, path: join(fb.path, 'A-PUBLIER'), channelKey: fb.channelPath || '.',
-          channelName: fb.channelPath ? fb.channelName : `${fb.channelName} (dossier principal)` });
+        const planning = (await readJson(fb.handle, 'planning.json')) || {};
+        for await (const [name, handle] of queue.entries()) {
+          if (handle.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
+          out.push({ handle, name, path: join(fb.path, 'A-PUBLIER', name), planning,
+            channelKey: fb.channelPath || '.', channelName: fb.channelPath ? fb.channelName : `${fb.channelName} (dossier principal)` });
+        }
       }
-      return queues;
+      return out;
     }
     // Inside the videos folder? Then its channel (and its Page setting) is known.
     let inside = null;
@@ -685,78 +722,119 @@ const KappDossier = (() => {
       const main = testRoot || await loadRoot();
       if (main && (testRoot || await main.queryPermission({ mode: 'readwrite' }) === 'granted')) inside = await main.resolve(fbHandle);
     } catch { inside = null; }
-    const channelOf = (facebookDirParts) => {
-      const full = inside ? [...inside, ...facebookDirParts] : null;
-      if (full && full.length >= 2) return { channelKey: full.slice(0, -1).join('/'), channelName: full[full.length - 2] };
+    const channelOf = () => {
+      // The channel is the folder above « FACEBOOK » / « A-PUBLIER » when there is one.
+      const full = inside ? [...inside] : null;
+      while (full && full.length && /^(facebook|a publier)$/.test(norm(full[full.length - 1]))) full.pop();
+      if (full && full.length) return { channelKey: full.join('/'), channelName: full[full.length - 1] };
       return { channelKey: FB_PREFIX, channelName: fbHandle.name };
     };
-    if (norm(fbHandle.name) === 'a publier') {
-      queues.push({ planningDir: null, queue: fbHandle, path: FB_PREFIX, ...(inside && inside.length >= 3
-        ? { channelKey: inside.slice(0, -2).join('/'), channelName: inside[inside.length - 3] }
-        : { channelKey: FB_PREFIX, channelName: fbHandle.name }) });
-      return queues;
+    const { channelKey, channelName } = channelOf();
+    const planning = (await readJson(fbHandle, 'planning.json')) || {};
+    async function visit(dir, rel, depth) {
+      const files = [];
+      const children = [];
+      for await (const [name, handle] of dir.entries()) {
+        if (name.startsWith('.') || name.startsWith('_')) continue;
+        if (handle.kind === 'file') files.push(name);
+        else if (depth < 6 && !SKIP.has(norm(name))) children.push([name, handle]);
+      }
+      const media = files.some((f) => IMAGE_EXT.test(f) || VIDEO_EXT.test(f));
+      const text = files.some((f) => /\.(txt|md)$/i.test(f) && f !== MARKER_FILE && !NOT_A_SHEET.test(norm(stem(f))));
+      if (rel && (media || text || files.includes('publication.json'))) {
+        out.push({ handle: dir, name: dir.name, path: `${FB_PREFIX}${rel}`, planning, channelKey, channelName });
+      }
+      for (const [name, handle] of children) await visit(handle, join(rel, name), depth + 1);
     }
-    try {
-      const queue = await fbHandle.getDirectoryHandle('A-PUBLIER');
-      queues.push({ planningDir: fbHandle, queue, path: `${FB_PREFIX}A-PUBLIER`, ...channelOf([]) });
-      return queues;
-    } catch { /* not a FACEBOOK folder itself */ }
-    const dirs = [];
-    await findFacebookDirs(fbHandle, '', 0, dirs);
-    for (const fb of dirs) {
-      let queue;
-      try { queue = await fb.handle.getDirectoryHandle('A-PUBLIER'); } catch { continue; }
-      queues.push({ planningDir: fb.handle, queue, path: `${FB_PREFIX}${join(fb.path, 'A-PUBLIER')}`, ...channelOf(fb.path.split('/')) });
-    }
-    // A plain folder of posts (one sub-folder per post).
-    if (!queues.length) queues.push({ planningDir: fbHandle, queue: fbHandle, path: FB_PREFIX, ...channelOf([]) });
-    return queues;
+    await visit(fbHandle, '', 0);
+    return out;
   }
 
-  async function facebookPosts({ now = Date.now() } = {}) {
+  // times: "08:00, 12:30, 18:00" (panel). A post without its own date gets
+  // the next free one, written into its publication.json so it stays put.
+  function slotsFrom(times) {
+    return String(times || '').split(/[,;\s]+/).map((t) => t.match(/^(\d{1,2})[:hH](\d{2})$/)).filter(Boolean)
+      .map((m) => [Number(m[1]), Number(m[2])]).filter(([h, m]) => h < 24 && m < 60).sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  }
+
+  async function facebookPosts({ now = Date.now(), times = '' } = {}) {
     const posts = [];
-    for (const fb of await postQueues()) {
-      const planning = (fb.planningDir && await readJson(fb.planningDir, 'planning.json')) || {};
-      const queue = fb.queue;
-      for await (const [name, postDir] of queue.entries()) {
-        if (postDir.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
-        const info = (await readJson(postDir, 'publication.json')) || {};
-        const files = [];
-        for await (const [fileName, handle] of postDir.entries()) if (handle.kind === 'file') files.push(fileName);
-        if (!files.some((f) => /^texte.*\.txt$/i.test(f) || IMAGE_EXT.test(f) || VIDEO_EXT.test(f) || f === 'publication.json')) continue;
-        const path = fb.path === FB_PREFIX ? `${FB_PREFIX}${name}` : `${fb.path}/${name}`;
-        const textName = info.texte && files.includes(info.texte) ? info.texte : files.find((f) => /^texte.*\.txt$/i.test(f));
-        let text = '';
-        if (textName) text = (await (await (await postDir.getFileHandle(textName)).getFile()).text()).trim();
-        const image = info.image && files.includes(info.image) ? info.image : files.find((f) => IMAGE_EXT.test(f));
-        const video = files.find((f) => VIDEO_EXT.test(f));
-        const due = dueTime(info, name);
-        let statut = info.statut || 'a_publier';
-        // Stuck « en cours » (tab closed, envoi débloqué à la main): offer to retry.
-        if (statut === 'en_cours' && info.started_at && now - Date.parse(info.started_at) > 20 * 60000) {
-          statut = 'echec';
-          info.erreur = info.erreur || 'Publication interrompue : vérifie sur Facebook si elle est partie, sinon « Réessayer ».';
+    const unscheduled = [];
+    for (const dirInfo of await postDirs()) {
+      const postDir = dirInfo.handle;
+      const name = dirInfo.name;
+      const info = (await readJson(postDir, 'publication.json')) || {};
+      const files = [];
+      for await (const [fileName, handle] of postDir.entries()) if (handle.kind === 'file') files.push(fileName);
+      if (!files.some((f) => IMAGE_EXT.test(f) || VIDEO_EXT.test(f) || /\.(txt|md)$/i.test(f) || f === 'publication.json')) continue;
+      const path = dirInfo.path;
+      // The text: texte*.txt, or any short .txt / .md of the folder, as written.
+      const texts = files.filter((f) => /\.(txt|md)$/i.test(f) && f !== MARKER_FILE && !NOT_A_SHEET.test(norm(stem(f))))
+        .sort((x, y) => Number(!/^texte/i.test(x)) - Number(!/^texte/i.test(y)) || x.localeCompare(y));
+      const textName = info.texte && files.includes(info.texte) ? info.texte : texts[0];
+      let text = '';
+      if (textName) {
+        const file = await (await postDir.getFileHandle(textName)).getFile();
+        if (file.size <= 64 * 1024) text = (await file.text()).trim();
+      }
+      const image = info.image && files.includes(info.image) ? info.image : files.filter((f) => IMAGE_EXT.test(f)).sort()[0];
+      const video = files.filter((f) => VIDEO_EXT.test(f)).sort()[0];
+      let due = dueTime(info, name);
+      let statut = info.statut || 'a_publier';
+      // Stuck « en cours » (tab closed, envoi débloqué à la main): offer to retry.
+      if (statut === 'en_cours' && info.started_at && now - Date.parse(info.started_at) > 20 * 60000) {
+        statut = 'echec';
+        info.erreur = info.erreur || 'Publication interrompue : vérifie sur Facebook si elle est partie, sinon « Réessayer ».';
+      }
+      const post = {
+        id: path,
+        path,
+        channel_key: dirInfo.channelKey,
+        channel_name: dirInfo.channelName,
+        page: info.page || dirInfo.planning.page || null,
+        type: video ? 'reel' : image ? 'photo' : 'texte',
+        text: text.slice(0, 63000),
+        image_path: image ? `${path}/${image}` : null,
+        video_path: video ? `${path}/${video}` : null,
+        due_at: due,
+        statut,
+        error: info.erreur || null,
+        started_at: info.started_at || null,
+        published_at: info.published_at || null,
+      };
+      if (!due && statut === 'a_publier') unscheduled.push(post);
+      posts.push(post);
+    }
+    // Posting times are required: each new post takes the next free time.
+    const slots = slotsFrom(times);
+    if (slots.length && unscheduled.length) {
+      const taken = new Set(posts.filter((p) => p.due_at).map((p) => p.due_at));
+      const start = new Date(now);
+      unscheduled.sort((x, y) => x.path.localeCompare(y.path));
+      let day = 0;
+      let index = 0;
+      for (const post of unscheduled) {
+        for (;;) {
+          if (index >= slots.length) { index = 0; day += 1; }
+          const [h, m] = slots[index];
+          index += 1;
+          const at = new Date(start.getFullYear(), start.getMonth(), start.getDate() + day, h, m).getTime();
+          if (at <= now || taken.has(at)) continue;
+          taken.add(at);
+          post.due_at = at;
+          break;
         }
-        posts.push({
-          id: path,
-          path,
-          channel_key: fb.channelKey,
-          channel_name: fb.channelName,
-          page: info.page || planning.page || null,
-          type: video ? 'reel' : image ? 'photo' : 'texte',
-          text: text.slice(0, 63000),
-          image_path: image ? `${path}/${image}` : null,
-          video_path: video ? `${path}/${video}` : null,
-          due_at: due,
-          statut,
-          error: info.erreur || null,
-          started_at: info.started_at || null,
-          published_at: info.published_at || null,
-          ready: statut === 'a_publier' && (!due || due <= now) && !!(text || image || video),
-        });
+        const d = new Date(post.due_at);
+        const pad = (n) => String(n).padStart(2, '0');
+        await markPost(post.path, { date_locale: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+          heure_prevue: `${pad(d.getHours())}:${pad(d.getMinutes())}`, statut: 'a_publier', horaire: 'automatique' }).catch(() => {});
       }
     }
-    posts.sort((a, b) => (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
+    for (const post of posts) {
+      post.needs_times = !post.due_at && post.statut === 'a_publier';
+      post.ready = post.statut === 'a_publier' && !!post.due_at && post.due_at <= now && !!(post.text || post.image_path || post.video_path);
+    }
+    posts.sort((a, b) => (a.due_at || Infinity) - (b.due_at || Infinity) || a.path.localeCompare(b.path));
     return posts;
   }
 

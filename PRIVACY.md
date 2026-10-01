@@ -1,8 +1,8 @@
-# Politique de confidentialité — KappGen Uploader
+# Politique de confidentialité — KappGen Publish
 
 Dernière mise à jour : 1er octobre 2026
 
-KappGen Uploader est une extension Chrome éditée par KappGen. Elle publie sur YouTube (et, si l'utilisateur l'active, sur Facebook) des vidéos rangées dans un dossier de son ordinateur.
+KappGen Publish est une extension Chrome éditée par KappGen. Elle publie sur YouTube (et, si l'utilisateur l'active, sur Facebook) des vidéos rangées dans un dossier de son ordinateur.
 
 ## Données traitées
 

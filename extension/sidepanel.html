@@ -2,21 +2,29 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <title>KappGen Uploader</title>
+  <title>KappGen Publish</title>
   <link rel="stylesheet" href="popup.css">
   <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
   <header>
     <img src="logo.png" alt="" width="36" height="36">
-    <h1>KappGen Uploader</h1>
+    <h1>KappGen Publish</h1>
+    <div id="profile" class="profile" hidden>
+      <button id="avatar" class="avatar" title="Mon compte" aria-haspopup="true" aria-expanded="false"></button>
+      <div id="profile-menu" class="profile-menu" role="menu" hidden>
+        <div class="profile-who">
+          <strong id="account-name"></strong>
+          <span id="account-email"></span>
+        </div>
+        <div id="account-plan" class="profile-plan"></div>
+        <button id="renew" class="btn ghost" role="menuitem">Prolonger mon abonnement</button>
+        <button id="logout" class="btn ghost" role="menuitem">Se déconnecter</button>
+      </div>
+    </div>
   </header>
 
   <section id="account" class="card">
-    <div id="account-on" hidden>
-      <span id="account-email" class="status ok"></span>
-      <button id="logout" class="link">Se déconnecter</button>
-    </div>
     <form id="login" hidden>
       <h2>Connecte-toi à KappGen</h2>
       <button id="login-google" class="primary" type="button">Se connecter avec Google</button>
@@ -33,7 +41,29 @@
     </form>
   </section>
 
+  <section id="paywall" class="card paywall" hidden>
+    <img src="logo.png" alt="" width="44" height="44">
+    <h2>KappGen Publish</h2>
+    <p class="lead">Tes vidéos et tes posts partent tout seuls sur tes réseaux sociaux, depuis un simple dossier de ton ordinateur.</p>
+    <ul class="perks">
+      <li>YouTube : vidéos, Shorts, titre, description et miniature</li>
+      <li>Facebook : vidéos, Reels, posts photo et texte</li>
+      <li>Programmation à l’heure que tu veux, jamais de doublon</li>
+      <li>TikTok, Instagram, LinkedIn et X arrivent</li>
+    </ul>
+    <div class="price"><strong>1 200 FCFA</strong><span> / mois</span></div>
+    <div class="paywall-actions">
+      <button id="pw-trial" class="btn primary wide" hidden>Essayer gratuitement 3 jours</button>
+      <button id="pw-maketou" class="btn primary wide">S’abonner (Mobile Money ou carte)</button>
+      <button id="pw-tara" class="btn secondary wide">S’abonner avec Tara Money</button>
+      <button id="pw-check" class="btn ghost wide">J’ai payé, vérifier</button>
+      <button id="pw-back" class="btn ghost wide" hidden>Retour</button>
+    </div>
+    <p id="pw-message" class="small muted"></p>
+  </section>
+
   <div id="main" hidden>
+  <div id="plan-banner" class="plan-banner" hidden></div>
   <section id="job" class="job" hidden>
     <strong id="job-title"></strong>
     <p id="job-message"></p>
@@ -66,6 +96,29 @@
       </div>
       <p id="folder-hint" class="muted small">Choisis le dossier <code>YOUTUBE</code> (toutes tes chaînes) ou le dossier d’une chaîne.</p>
     </section>
+    <section class="card">
+      <h2>Réglages de publication</h2>
+      <div class="field">
+        <label for="yt-visibility">Visibilité sur YouTube</label>
+        <select id="yt-visibility" class="select">
+          <option value="UNLISTED">Non répertoriée (tu la passes en public toi-même)</option>
+          <option value="PUBLIC">Publique tout de suite</option>
+          <option value="PRIVATE">Privée</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Quand publier</label>
+        <div class="choice">
+          <label class="check-line"><input type="radio" name="yt-when" value="now"> Dès que la vidéo est prête</label>
+          <label class="check-line"><input type="radio" name="yt-when" value="times"> À heures fixes (une vidéo par horaire, publique à l’heure dite)</label>
+        </div>
+        <div id="yt-times-row" class="input-group" hidden>
+          <input id="yt-times" type="text" placeholder="ex. 18:00 ou 09:00, 18:00">
+          <button id="yt-times-save" class="btn secondary">Enregistrer</button>
+        </div>
+      </div>
+    </section>
+
     <div class="list-head">
       <h2>Prêtes à partir sur YouTube</h2>
       <button id="rescan" class="link" title="Relit le dossier tout de suite (sinon toutes les 5 minutes)">↻ Actualiser</button>
@@ -112,6 +165,14 @@
         <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
       </div>
       <p id="fb-folder-hint" class="muted small">Importe le dossier où tu ranges tes Reels et posts : un sous-dossier par post, avec <code>texte.txt</code> et une image ou une vidéo verticale. Chaque post part tout seul, à son heure s’il en a une.</p>
+      <div class="field fb-times-field">
+        <div class="field-head"><label for="fb-times">Horaires des posts (obligatoires)</label><span id="fb-times-state" class="pill warn">À remplir</span></div>
+        <div class="input-group">
+          <input id="fb-times" type="text" placeholder="ex. 08:00, 12:30, 18:00, 21:00">
+          <button id="fb-times-save" class="btn secondary">Enregistrer</button>
+        </div>
+        <p class="muted small">Chaque nouveau post prend le prochain horaire libre. Un post qui a déjà sa date garde la sienne.</p>
+      </div>
       <p id="fb-summary" class="muted small"></p>
       <ul id="fb-posts"></ul>
     </section>
@@ -120,70 +181,103 @@
   <div id="tab-help" class="tab" hidden>
     <div class="help">
       <section class="help-card">
-        <h3>Ce que fait KappGen</h3>
-        <p>Il surveille ton dossier de vidéos. Dès qu’une vidéo est finie, il l’envoie sur la bonne chaîne YouTube avec son titre, sa description, ses mots-clés et sa miniature. Tu n’as rien à remplir dans YouTube Studio.</p>
+        <h3>À quoi sert KappGen Publish ?</h3>
+        <p>Tu ranges tes vidéos finies dans un dossier de ton ordinateur. KappGen les publie <strong>toutes seules</strong> sur YouTube (titre, description, miniature) et, si tu veux, sur ta page Facebook. Tu n’ouvres plus YouTube Studio pour remplir les champs.</p>
       </section>
 
       <section class="help-card">
-        <h3>En 3 étapes</h3>
+        <h3>Abonnement</h3>
+        <p>KappGen Publish coûte <strong>1 200 FCFA par mois</strong>, avec <strong>3 jours d’essai gratuit</strong> pour commencer. Il faut un compte KappGen (adresse e-mail confirmée). Paiement par Mobile Money ou carte (Maketou) ou par Tara Money ; l’abonnement s’active dès que le paiement est confirmé. Payer avant la fin ne fait perdre aucun jour : le nouveau mois s’ajoute à la suite. Ton état d’abonnement est dans le menu de ton avatar, en haut à droite.</p>
+      </section>
+
+      <section class="help-card">
+        <h3>Démarrer en 4 étapes</h3>
         <ol class="steps">
-          <li><strong>Choisis le dossier de tes chaînes</strong> (ex. <code>YOUTUBE</code>) ou celui d’une chaîne.</li>
-          <li><strong>Range chaque vidéo finie</strong> dans <code>VIDEO/&lt;NN&gt;-&lt;sujet&gt;/</code> avec <code>publication.md</code> et <code>miniature.jpg</code>. Facebook : onglet Facebook, colle le lien de ta page puis « Enregistrer ».</li>
-          <li><strong>Laisse Chrome ouvert.</strong> Toutes les 5 minutes, les nouvelles vidéos prêtes partent toutes seules.</li>
+          <li><strong>Connecte-toi</strong> dans ce Chrome à ton compte YouTube (et à Facebook si tu publies là-bas).</li>
+          <li>Onglet <strong>Vidéos</strong> : clique « Choisir le dossier des vidéos » et choisis le dossier où tu ranges tes vidéos finies.</li>
+          <li>Règle la <strong>visibilité</strong> (publique, non répertoriée…) et <strong>quand publier</strong> (dès que c’est prêt, ou à heures fixes).</li>
+          <li><strong>Laisse Chrome ouvert.</strong> Toutes les 5 minutes, KappGen regarde s’il y a une nouvelle vidéo prête et la publie.</li>
         </ol>
       </section>
 
       <section class="help-card">
-        <h3>Comment ranger tes vidéos</h3>
-<pre class="tree">YOUTUBE/
-└─ MA-CHAINE/
-   ├─ reglages-publication.json  (facultatif)
-   └─ VIDEO/
-      └─ 01-mon-sujet/
-         ├─ ma-video.mp4
-         ├─ publication.md
-         ├─ miniature.jpg
-         └─ short.mp4  (facultatif)</pre>
-        <p class="muted">Aussi compris : <code>MA-CHAINE/mon-sujet/renders/</code>, ou une fiche du même nom que la vidéo. Les dossiers qui commencent par <code>_</code> sont ignorés (brouillons, montage, archives).</p>
+        <h3>La règle d’or : un dossier = une publication</h3>
+        <p>Range chaque vidéo dans <strong>son propre dossier</strong>, avec son image et son texte. Les noms des dossiers et des fichiers sont libres, et tu peux les ranger comme tu veux (par mois, par thème…) : KappGen descend dans tous les sous-dossiers.</p>
+<pre class="tree">Mes vidéos/
+├─ Recette du pain/
+│  ├─ video.mp4        ← la vidéo
+│  ├─ image.jpg        ← la miniature
+│  └─ texte.txt        ← le titre et la description
+└─ Octobre/
+   └─ Astuce frigo/
+      ├─ astuce.mp4
+      ├─ miniature.png
+      ├─ legende.txt
+      └─ short.mp4     ← (facultatif) version verticale</pre>
+        <p class="muted">Un dossier dont le nom commence par <code>_</code> est ignoré : pratique pour tes brouillons et ton travail en cours.</p>
       </section>
 
       <section class="help-card">
-        <h3>La fiche de la vidéo</h3>
-<pre class="tree">## Titre
-Mon titre YouTube
-
-## Description
-Le texte sous la vidéo…
-
-## Mots-clés
-mot 1, mot 2, mot 3</pre>
-        <p class="muted">Aussi lu : <code>youtube.txt</code> ou <code>metadata.json</code>. Miniature : <code>miniature.jpg</code>, moins de 2 Mo.</p>
+        <h3>Le fichier texte</h3>
+        <p>N’importe quel fichier <code>.txt</code> ou <code>.md</code> du dossier. <strong>La 1re ligne est le titre</strong>, tout le reste est la description.</p>
+<pre class="tree">Recette du pain maison en 10 minutes
+Dans cette vidéo, je te montre…
+Ingrédients : …</pre>
+        <p class="muted">Sans fichier texte, la vidéo s’affiche dans le panneau mais ne part jamais toute seule : il faut cliquer « Publier sur YouTube ». Les fichiers nommés <code>script</code>, <code>notes</code>, <code>prompt</code>… ne sont jamais pris comme texte.</p>
       </section>
 
       <section class="help-card">
-        <h3>Short YouTube + Reel Facebook</h3>
-        <p>Place le fichier vertical à côté de la vidéo longue sous le nom <code>short.mp4</code>, <code>reel.mp4</code> ou <code>vertical.mp4</code> (un dossier <code>short/</code> ou <code>vertical/</code> fonctionne aussi). L’onglet Facebook affiche alors automatiquement le contenu associé.</p>
-      </section>
-
-      <section class="help-card">
-        <h3>Les boutons</h3>
-        <dl class="glossary">
-          <dt>↻ Actualiser</dt><dd>Relit le dossier tout de suite au lieu d’attendre 5 minutes.</dd>
-          <dt>Publier sur YouTube</dt><dd>Envoie le MP4 long avec la fiche et la miniature du même dossier.</dd>
-          <dt>YouTube</dt><dd>Les vidéos déjà publiées, avec « Mettre à jour maintenant » (sinon mise à jour toute seule en 5 à 10 min).</dd>
-          <dt>Facebook</dt><dd>1. ta page Facebook, 2. les vidéos YouTube à y partager, 3. ton dossier de Reels et posts, chacun avec « Publier ».</dd>
-          <dt>Mettre à jour</dt><dd>Recopie sur YouTube le titre, la description, les mots-clés et la miniature modifiés dans le dossier.</dd>
-        </dl>
-      </section>
-
-      <section class="help-card">
-        <h3>Bon à savoir</h3>
+        <h3>Image et vidéo verticale</h3>
         <ul class="guide">
-          <li>Une vidéo est « prête » quand sa fiche a un titre et que le fichier n’a pas bougé depuis 10 minutes (rendu terminé).</li>
-          <li>Chrome doit rester ouvert et l’ordinateur éveillé.</li>
-          <li>YouTube Studio s’ouvre quelques secondes pendant l’envoi, puis te rend ta page.</li>
-          <li>Jamais deux fois la même vidéo, même avec plusieurs profils Chrome.</li>
+          <li><strong>Miniature</strong> : l’image du dossier (de préférence nommée <code>miniature.jpg</code>), moins de 2 Mo, 1280 × 720.</li>
+          <li><strong>Short / Reel</strong> : une vidéo verticale dont le nom contient <code>short</code>, <code>reel</code> ou <code>vertical</code>.</li>
+          <li>Plusieurs vidéos dans un dossier : la plus grosse est la vidéo principale.</li>
         </ul>
+      </section>
+
+      <section class="help-card">
+        <h3>Quand une vidéo part-elle ?</h3>
+        <ul class="guide">
+          <li><strong>Dès que c’est prêt</strong> (par défaut) : quand la vidéo a son texte et que le fichier n’a plus bougé depuis 10 minutes (rendu terminé).</li>
+          <li><strong>À heures fixes</strong> : chaque nouvelle vidéo prend le prochain horaire libre et devient publique à l’heure dite.</li>
+          <li><strong>Seules les vidéos ajoutées après le choix du dossier partent toutes seules.</strong> Celles qui y étaient déjà attendent que tu cliques « Publier sur YouTube » : rien de vieux ne part par surprise.</li>
+          <li>Sur chaque vidéo et chaque post : <strong>« Programmer » / « Modifier l’heure »</strong> pour choisir le jour et l’heure, <strong>« Publier maintenant »</strong> pour l’envoyer tout de suite.</li>
+          <li>Une publication à la fois : les autres attendent leur tour (le bandeau en haut indique ce qui est en cours). Un post part dans les 5 minutes qui suivent son heure.</li>
+        </ul>
+      </section>
+
+      <section class="help-card">
+        <h3>Facebook</h3>
+        <ol class="steps">
+          <li>Onglet <strong>Facebook</strong> : colle le lien de ta page (ex. <code>https://www.facebook.com/ta-page</code>) puis « Enregistrer ».</li>
+          <li><strong>Vidéos YouTube à partager</strong> : chaque vidéo déjà sur YouTube a un bouton « Publier sur Facebook ». Elle part avec son titre.</li>
+          <li><strong>Reels et posts</strong> : choisis un dossier à part (même règle : un dossier par post, avec une image ou une vidéo verticale et un texte). Le texte est publié tel quel.</li>
+          <li><strong>Horaires des posts (obligatoires)</strong> : écris tes heures, ex. <code>08:00, 12:30, 18:00</code>. Chaque nouveau post prend le prochain horaire libre.</li>
+        </ol>
+      </section>
+
+      <section class="help-card">
+        <h3>Savoir ce qui est déjà publié</h3>
+        <ul class="guide">
+          <li>Après publication, un fichier <code>DEJA-PUBLIEE.txt</code> (avec le lien) apparaît dans le dossier de la vidéo. Ne l’efface pas.</li>
+          <li>Onglet <strong>YouTube</strong> : toutes les vidéos publiées. Tu as changé le titre, la description ou la miniature dans le dossier ? « Mettre à jour maintenant », sinon c’est fait tout seul en 5 à 10 minutes.</li>
+          <li>Jamais deux fois la même vidéo : un nouveau rendu avec le même titre n’est pas renvoyé tout seul.</li>
+        </ul>
+      </section>
+
+      <section class="help-card">
+        <h3>Plusieurs chaînes</h3>
+        <p>Utilise <strong>un profil Chrome par chaîne</strong> (menu Chrome → Profils), connecté au bon compte YouTube, avec son propre dossier de vidéos et sa page Facebook.</p>
+      </section>
+
+      <section class="help-card">
+        <h3>Problèmes fréquents</h3>
+        <dl class="glossary">
+          <dt>Rien ne part</dt><dd>Chrome est-il ouvert ? La vidéo a-t-elle un fichier texte ? Était-elle déjà dans le dossier quand tu l’as choisi (alors clique « Publier ») ?</dd>
+          <dt>« Autoriser l’accès »</dt><dd>Chrome redemande parfois l’accès au dossier : clique le bouton, puis « Autoriser à chaque visite ».</dd>
+          <dt>Envoi bloqué</dt><dd>Au bout de 5 minutes sans nouvelles, un bouton « Débloquer » apparaît. Vérifie sur YouTube / Facebook avant de relancer.</dd>
+          <dt>Échec Facebook</dt><dd>Le message indique l’étape ; termine-la dans l’onglet Facebook resté ouvert puis clique « Réessayer ».</dd>
+        </dl>
       </section>
     </div>
   </div>

@@ -53,6 +53,42 @@ async function setJob(patch) {
   await chrome.storage.session.set({ job: { ...(job || {}), ...patch, updatedAt: Date.now() } });
 }
 
+// ------------------------------------------------------- subscription
+
+// KappGen Publish is paid: nothing goes out without an active subscription
+// (or the free trial). Checked on the server, kept 10 minutes; without
+// network the last answer stays valid for 24 h.
+const ACCESS_TTL = 10 * 60 * 1000;
+async function publishAccess({ fresh = false } = {}) {
+  const { publishAccess: cached } = await chrome.storage.local.get('publishAccess');
+  if (!fresh && cached && Date.now() - cached.checkedAt < ACCESS_TTL) return cached;
+  try {
+    const data = await api('/publish/access');
+    const state = { ...data, checkedAt: Date.now() };
+    await chrome.storage.local.set({ publishAccess: state });
+    return state;
+  } catch (error) {
+    if (error.status === 401) {
+      await chrome.storage.local.remove('publishAccess');
+      return { active: false, signedOut: true, checkedAt: Date.now() };
+    }
+    if (error.status === 404) return { active: false, unavailable: true, checkedAt: Date.now() };
+    // Network trouble: the last answer, if recent and still running.
+    if (cached && Date.now() - cached.checkedAt < 24 * 3600 * 1000
+      && (!cached.expires_at || Date.parse(cached.expires_at) > Date.now())) return cached;
+    return { active: false, offline: true, checkedAt: Date.now() };
+  }
+}
+
+async function requireAccess() {
+  const state = await publishAccess();
+  if (state.active) return state;
+  if (state.signedOut) throw new Error('Connecte-toi à ton compte KappGen.');
+  if (state.unavailable) throw new Error('Le serveur KappGen n’est pas encore à jour pour KappGen Publish.');
+  if (state.offline) throw new Error('Impossible de vérifier ton abonnement (connexion Internet ?).');
+  throw new Error('Ton abonnement KappGen Publish n’est pas actif : ouvre le panneau pour t’abonner.');
+}
+
 // ------------------------------------------------------------ folder source
 
 const AUTO_EVERY_MINUTES = 5;
@@ -120,9 +156,13 @@ async function folderSettings() {
     delete current.channels['.'];
     await chrome.storage.local.set({ folder: current });
   }
-  // Choosing the folder means "publish what is in it": every ready video
-  // goes out, old or new. Videos already on the channel are recognised by
-  // their title and skipped (see alreadyOnChannel).
+  // Watching starts when the folder is chosen: only videos finished after
+  // that go out on their own (older ones wait for a click). Installs from
+  // before 1.11 start watching now.
+  if (!current.watchSince) {
+    current.watchSince = Date.now();
+    await chrome.storage.local.set({ folder: current });
+  }
   return current;
 }
 
@@ -133,9 +173,16 @@ async function folder(type, payload = {}) {
   return reply.data;
 }
 
+// Facebook posts, with the posting times of the panel (required for the
+// posts that have no date of their own).
+async function postsList() {
+  const settings = await folderSettings();
+  return folder('posts', { times: settings.fbTimes || '' });
+}
+
 async function folderQueue() {
   const settings = await folderSettings();
-  return folder('scan', { channels: settings.channels, autoSince: settings.autoSince });
+  return folder('scan', { channels: settings.channels, watchSince: settings.watchSince });
 }
 
 // "UC…" id from an id, a channel link or a Studio link.
@@ -293,6 +340,12 @@ function ownOf(settings, video) {
   const { facebook, ...panel } = (settings.channels || {})[video.channel_key] || {};
   const own = { ...panel, ...((video && video.channel_config) || {}) };
   if (!own.facebookPageUrl && settings.facebookPageUrl) own.facebookPageUrl = settings.facebookPageUrl;
+  // Panel-wide YouTube settings (one Chrome profile = one channel): used when
+  // the channel has none of its own.
+  if (!own.visibility && (settings.visibility || settings.schedule === 'times')) {
+    own.visibility = settings.schedule === 'times' ? 'SCHEDULE' : settings.visibility;
+  }
+  if (!own.times && settings.times) own.times = settings.times;
   return own;
 }
 
@@ -482,7 +535,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
   try {
     if (source === 'folder') {
       if (!await askAccess({ wait: true })) {
-        throw new Error('Accès au dossier non autorisé : clique « Autoriser » dans la petite fenêtre KappGen Uploader.');
+        throw new Error('Accès au dossier non autorisé : clique « Autoriser » dans la petite fenêtre KappGen Publish.');
       }
       const { videos } = await folderQueue();
       video = videos.find((v) => v.id === videoId);
@@ -492,8 +545,10 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       // id typed by hand in older versions still wins.
       channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
       monetization = own.monetization || 'on';
-      if (visibility === 'CHANNEL') visibility = channelVisibility(own);
-      if (visibility === 'SCHEDULE') scheduleAt = await nextSlot(video.channel_key, own.times);
+      // A time chosen for this video in the panel wins (YouTube makes it public then).
+      const fixed = video.schedule_at && video.schedule_at > Date.now() + 15 * 60000;
+      if (visibility === 'CHANNEL') visibility = fixed ? 'SCHEDULE' : channelVisibility(own);
+      if (visibility === 'SCHEDULE') scheduleAt = fixed ? video.schedule_at : await nextSlot(video.channel_key, own.times);
       await folder('mark', { path: video.relative_path, status: 'started' });
       marked = true;
     } else {
@@ -843,7 +898,7 @@ async function publishFacebookPost(post, { auto = false } = {}) {
 
 // Next post whose time has come (one per pass, so posts stay spread out).
 async function nextDuePost() {
-  const posts = await folder('posts').catch(() => []);
+  const posts = await postsList().catch(() => []);
   // A post without a known Page waits (no failure) until the link is given.
   for (const post of posts.filter((p) => p.ready)) if (await postPage(post)) return post;
   return null;
@@ -880,6 +935,11 @@ async function alreadyOnChannel(video, own) {
 async function autoTick() {
   const { job } = await chrome.storage.session.get('job');
   if (job && job.running) return;
+  if (!(await publishAccess()).active) {
+    chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
+    chrome.action.setBadgeText({ text: '!' });
+    return;
+  }
   const settings = await folderSettings();
   const access = await folder('access').catch(() => ({ state: 'none' }));
   if (access.state === 'prompt') await askAccess().catch(() => {});
@@ -898,7 +958,7 @@ async function autoTick() {
       chrome.notifications.create('kappgen-folder-access', {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: 'KappGen Uploader : accès au dossier à confirmer',
+        title: 'KappGen Publish : accès au dossier à confirmer',
         message: "Clique ici puis « Autoriser » (choisis « Autoriser à chaque visite ») pour que les publications reprennent.",
         priority: 2,
       });
@@ -985,24 +1045,50 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const handlers = {
     account: () => api('/auth/session').catch((error) => { if (error.status === 401) return null; throw error; }),
     login: () => api('/auth/login', { method: 'POST', body: JSON.stringify({ email: message.email, password: message.password }) }),
-    logout: () => api('/auth/logout', { method: 'POST' }),
+    logout: async () => { await chrome.storage.local.remove(['publishAccess', 'pendingOrder']); return api('/auth/logout', { method: 'POST' }); },
     status: () => api('/studio-upload/status'),
     queue: () => api('/studio-upload/queue'),
     folderQueue: () => folderQueue(),
     folderMark: () => folder('mark', { path: message.path, status: message.status }),
     channelVideos: () => channelVideos(message.channelId),
-    facebookPosts: () => folder('posts'),
+    facebookPosts: () => postsList(),
     postNow: async () => {
+      await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
-      const post = (await folder('posts')).find((p) => p.path === message.path);
+      const post = (await postsList()).find((p) => p.path === message.path);
       if (!post) throw new Error('Post introuvable (déplacé ?).');
       if (!await postPage(post)) throw new Error('Ajoute d’abord le lien de ta page Facebook (en haut de l’onglet Facebook).');
       publishFacebookPost(post).catch(() => {}); // runs on; the panel follows chrome.storage
       return { started: true };
     },
     autoNow: async () => { autoTick().catch(() => {}); return {}; },
+    access: () => publishAccess({ fresh: !!message.fresh }),
+    startTrial: async () => {
+      await api('/publish/trial', { method: 'POST' });
+      const state = await publishAccess({ fresh: true });
+      autoTick().catch(() => {});
+      return state;
+    },
+    // Opens the payment page; the order is checked when the creator comes back.
+    subscribe: async () => {
+      const data = await api('/publish/checkout', { method: 'POST', body: JSON.stringify({ provider: message.provider }) });
+      await chrome.storage.local.set({ pendingOrder: data.order_id });
+      await chrome.tabs.create({ url: data.redirect_url, active: true });
+      return data;
+    },
+    checkPayment: async () => {
+      const { pendingOrder } = await chrome.storage.local.get('pendingOrder');
+      if (pendingOrder) {
+        const result = await api(`/billing/verify?order_id=${encodeURIComponent(pendingOrder)}`).catch(() => ({ status: 'pending' }));
+        if (result.status === 'success') await chrome.storage.local.remove('pendingOrder');
+      }
+      const state = await publishAccess({ fresh: true });
+      if (state.active) autoTick().catch(() => {});
+      return state;
+    },
     publish: async () => {
+      await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       // runs on; the popup follows chrome.storage
@@ -1010,12 +1096,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return { started: true };
     },
     update: async () => {
+      await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       updateVideo(message.path);
       return { started: true };
     },
     facebook: async () => {
+      await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       const { sent } = await folderQueue();
@@ -1037,6 +1125,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     },
     // Send the video again, with the sheet and thumbnail of the folder.
     republish: async () => {
+      await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       await folder('mark', { path: message.path, status: 'reset' });
