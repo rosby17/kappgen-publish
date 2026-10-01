@@ -360,7 +360,6 @@ function youtubeItem(video) {
 $('pick').addEventListener('click', async () => {
   try {
     await KappDossier.saveRoot(await window.showDirectoryPicker({ id: 'kappgen-videos', mode: 'readwrite' }));
-    send({ type: 'keeper' });
   } catch (error) {
     if (!error || error.name !== 'AbortError') $('folder-status').textContent = String((error && error.message) || error);
   }
@@ -372,7 +371,6 @@ $('grant').addEventListener('click', async () => {
   if (handle) await handle.requestPermission({ mode: 'readwrite' });
   renderFolder();
   send({ type: 'autoNow' });
-  send({ type: 'keeper' });
 });
 
 $('rescan').addEventListener('click', () => { renderFolder(); renderApp(); });

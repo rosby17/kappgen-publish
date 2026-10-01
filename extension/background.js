@@ -70,22 +70,41 @@ async function ensureOffscreen() {
   }
 }
 
-// Chrome drops a granted folder access as soon as the last tab of the
-// extension closes — which happened after every upload (the Studio tab hosts
-// bridge.html). A small pinned tab keeps the access alive for the session.
-const KEEPER_URL = chrome.runtime.getURL('keepalive.html');
-async function ensureKeeper({ focus = false } = {}) {
+// Chrome sometimes asks again for access to the videos folder. Granting it
+// needs a click, so a small popup window with one button is opened (once at a
+// time, at most every 30 min when nobody asked for it). Choosing « Autoriser
+// à chaque visite » in Chrome's prompt makes the access permanent.
+const ASK_URL = chrome.runtime.getURL('autorisation.html');
+async function askAccess({ wait = false, force = false } = {}) {
   const access = await folder('access').catch(() => ({ state: 'none' }));
-  if (access.state === 'none') return null;
-  let [tab] = await chrome.tabs.query({ url: KEEPER_URL });
-  if (!tab) {
-    tab = await chrome.tabs.create({ url: KEEPER_URL, pinned: true, active: focus, index: 0 });
-  } else if (focus) {
-    await chrome.tabs.update(tab.id, { active: true });
-    await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  if (access.state !== 'prompt') return access.state === 'granted';
+  const [open] = await chrome.tabs.query({ url: ASK_URL });
+  if (open) {
+    await chrome.windows.update(open.windowId, { focused: true, drawAttention: true }).catch(() => {});
+  } else {
+    const { askedAt } = await chrome.storage.session.get('askedAt');
+    if (force || wait || !askedAt || Date.now() - askedAt > 30 * 60 * 1000) {
+      await chrome.storage.session.set({ askedAt: Date.now() });
+      const current = await chrome.windows.getLastFocused().catch(() => null);
+      const width = 420, height = 330;
+      const left = current ? Math.max(0, current.left + Math.round((current.width - width) / 2)) : undefined;
+      const top = current ? Math.max(0, current.top + 120) : undefined;
+      await chrome.windows.create({ url: ASK_URL, type: 'popup', width, height, left, top, focused: true });
+    }
   }
-  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
-  return tab;
+  if (!wait) return false;
+  const deadline = Date.now() + 3 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    if ((await folder('access').catch(() => ({}))).state === 'granted') return true;
+  }
+  return false;
+}
+
+// Older versions kept a pinned tab open: close it.
+async function closeOldKeeper() {
+  const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('keepalive.html') }).catch(() => []);
+  for (const tab of tabs) chrome.tabs.remove(tab.id).catch(() => {});
 }
 
 async function folderSettings() {
@@ -378,7 +397,9 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
   linkedYoutubeId = null;
   try {
     if (source === 'folder') {
-      await ensureKeeper().catch(() => {});
+      if (!await askAccess({ wait: true })) {
+        throw new Error('Accès au dossier non autorisé : clique « Autoriser » dans la petite fenêtre KappGen Uploader.');
+      }
       const { videos } = await folderQueue();
       video = videos.find((v) => v.id === videoId);
       if (!video) throw new Error('Cette vidéo n’est plus dans le dossier (déplacée, renommée ou déjà envoyée).');
@@ -698,8 +719,8 @@ async function autoTick() {
   const { job } = await chrome.storage.session.get('job');
   if (job && job.running) return;
   const settings = await folderSettings();
-  await ensureKeeper().catch(() => {});
   const access = await folder('access').catch(() => ({ state: 'none' }));
+  if (access.state === 'prompt') await askAccess().catch(() => {});
   if (access.state !== 'granted') {
     // Chrome asks again for folder access after some restarts — re-granting
     // an existing handle needs a real click (requestPermission can't be
@@ -715,8 +736,8 @@ async function autoTick() {
       chrome.notifications.create('kappgen-folder-access', {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: 'KappGen : accès au dossier à ré-autoriser',
-        message: "Chrome a redemandé l'accès au dossier de vidéos — ouvre le panneau KappGen et clique « Autoriser l'accès » pour relancer l'envoi automatique.",
+        title: 'KappGen Uploader : accès au dossier à confirmer',
+        message: "Clique ici puis « Autoriser » (choisis « Autoriser à chaque visite ») pour que les publications reprennent.",
         priority: 2,
       });
     }
@@ -767,10 +788,10 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 // as clicking the extension icon itself.
 chrome.notifications.onClicked.addListener(async (id) => {
   if (id !== 'kappgen-folder-access') return;
-  await ensureKeeper({ focus: true }).catch(() => {});
+  await askAccess({ force: true }).catch(() => {});
 });
-chrome.runtime.onStartup.addListener(() => { heartbeat(); resume(); ensureKeeper().catch(() => {}); });
-chrome.runtime.onInstalled.addListener(() => { heartbeat(); resume(); ensureKeeper().catch(() => {}); });
+chrome.runtime.onStartup.addListener(() => { heartbeat(); resume(); });
+chrome.runtime.onInstalled.addListener(() => { heartbeat(); resume(); closeOldKeeper(); });
 resume(); // service worker restarted while an upload was being followed
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -785,7 +806,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     folderMark: () => folder('mark', { path: message.path, status: message.status }),
     channelVideos: () => channelVideos(message.channelId),
     autoNow: async () => { autoTick().catch(() => {}); return {}; },
-    keeper: async () => { await ensureKeeper(); return {}; },
     publish: async () => {
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
