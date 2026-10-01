@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>KappGen Uploader · accès au dossier</title>
+<link rel="icon" href="icons/icon32.png">
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; background: #0f1b33; color: #e8eefc; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+  main { max-width: 520px; padding: 32px; text-align: center; }
+  h1 { font-size: 20px; margin: 12px 0; }
+  .ok { color: #7ee2a8; } .warn { color: #ffcf6e; }
+  button { font: inherit; font-weight: 600; padding: 10px 18px; border: 0; border-radius: 8px; background: #2f6bff; color: #fff; cursor: pointer; }
+  p.small { color: #9fb0d0; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <img src="icons/icon48.png" alt="">
+  <h1>KappGen Uploader garde l’accès à ton dossier de vidéos</h1>
+  <p id="state">…</p>
+  <button id="grant" hidden>Autoriser l’accès</button>
+  <p class="small">Laisse cet onglet épinglé ouvert : tant qu’il est là, Chrome ne retire pas l’accès au dossier après chaque publication.<br>
+  Quand Chrome demande l’autorisation, choisis <strong>« Autoriser à chaque visite »</strong> (ou « Toujours autoriser ») : l’accès tiendra aussi après un redémarrage de Chrome.</p>
+</main>
+<script src="lib/fiches.js"></script>
+<script src="lib/dossier.js"></script>
+<script src="keepalive.js"></script>
+</body>
+</html>

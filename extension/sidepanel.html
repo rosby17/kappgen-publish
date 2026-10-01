@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>KappGen Uploader</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <img src="logo.png" alt="" width="36" height="36">
+    <h1>KappGen Uploader</h1>
+  </header>
+
+  <section id="account" class="card">
+    <div id="account-on" hidden>
+      <span id="account-email" class="status ok"></span>
+      <button id="logout" class="link">Se déconnecter</button>
+    </div>
+    <form id="login" hidden>
+      <h2>Connecte-toi à KappGen</h2>
+      <button id="login-google" class="primary" type="button">Se connecter avec Google</button>
+      <p class="muted">Ouvre app.kappgen.com dans un onglet — une fois connecté là-bas (Google ou mot de passe), reviens ici et clique « J'ai fini, vérifier ». Déjà connecté à KappGen ailleurs dans Chrome ? Clique directement « J'ai fini, vérifier ».</p>
+      <button id="login-recheck" class="secondary" type="button">J'ai fini, vérifier</button>
+      <details>
+        <summary>Ou avec un mot de passe</summary>
+        <input id="login-email" type="email" placeholder="E-mail" autocomplete="username" required>
+        <input id="login-password" type="password" placeholder="Mot de passe" autocomplete="current-password" required>
+        <button class="primary" type="submit">Se connecter</button>
+      </details>
+      <p id="login-error" class="warn" hidden></p>
+      <p class="muted">Pas encore de compte ? <a href="https://app.kappgen.com" target="_blank">Créer un compte</a></p>
+    </form>
+  </section>
+
+  <div id="main" hidden>
+  <section id="job" class="job" hidden>
+    <strong id="job-title"></strong>
+    <p id="job-message"></p>
+    <a id="job-link" target="_blank" hidden>Ouvrir sur YouTube</a>
+    <button id="job-clear" class="link" hidden>Masquer</button>
+  </section>
+
+  <nav class="tabs">
+    <button data-tab="videos" class="active">Vidéos</button>
+    <button data-tab="sent">YouTube</button>
+    <button data-tab="facebook">Facebook</button>
+    <button data-tab="help">Aide</button>
+  </nav>
+
+  <section class="card">
+    <p id="folder-status" class="status">Vérification…</p>
+    <p class="muted small">Choisis le dossier qui contient toutes tes chaînes (ex. <code>YOUTUBE</code>) ou le dossier d’une chaîne : chaque vidéo finie y est rangée dans <code>VIDEO/&lt;NN&gt;-&lt;sujet&gt;/</code> avec sa fiche <code>publication.md</code> et <code>miniature.jpg</code>.</p>
+    <div class="actions">
+      <button id="pick" class="secondary" title="Choisir le dossier de toutes tes chaînes, ou celui d’une chaîne">Choisir le dossier</button>
+      <button id="grant" class="primary" hidden>Autoriser l’accès</button>
+      <button id="rescan" class="secondary" title="Relit le dossier tout de suite (sinon c’est fait automatiquement toutes les 5 minutes)">↻ Actualiser</button>
+    </div>
+  </section>
+
+  <div id="tab-videos" class="tab">
+    <h2>À envoyer</h2>
+    <ul id="videos"></ul>
+    <p id="no-videos" class="muted" hidden>Aucune vidéo en attente dans le dossier.</p>
+    <div id="app-block" hidden>
+      <h2>Vidéos KappGen</h2>
+      <ul id="app-videos"></ul>
+    </div>
+  </div>
+
+  <div id="tab-sent" class="tab" hidden>
+    <p id="sent-summary" class="muted"></p>
+    <ul id="sent"></ul>
+  </div>
+
+  <div id="tab-facebook" class="tab" hidden>
+    <h2>Facebook</h2>
+    <p class="muted">Chaînes avec « Facebook aussi » (ou <code>"facebook"</code> dans <code>reglages-publication.json</code>) : la vidéo part sur la page Facebook juste après YouTube. Un fichier vertical <code>short.mp4</code> / <code>reel.mp4</code> / <code>vertical.mp4</code> est publié à la place en Reel (+ Short YouTube).</p>
+    <ul id="facebook"></ul>
+    <p id="no-facebook" class="muted" hidden>Aucune vidéo pour Facebook : coche « Facebook aussi » sur une chaîne, ou ajoute un fichier vertical.</p>
+  </div>
+
+  <div id="tab-help" class="tab" hidden>
+    <div class="help">
+      <section class="help-card">
+        <h3>Ce que fait KappGen</h3>
+        <p>Il surveille ton dossier de vidéos. Dès qu’une vidéo est finie, il l’envoie sur la bonne chaîne YouTube avec son titre, sa description, ses mots-clés et sa miniature. Tu n’as rien à remplir dans YouTube Studio.</p>
+      </section>
+
+      <section class="help-card">
+        <h3>En 3 étapes</h3>
+        <ol class="steps">
+          <li><strong>Choisis le dossier de tes chaînes</strong> (ex. <code>YOUTUBE</code>) ou celui d’une chaîne.</li>
+          <li><strong>Range chaque vidéo finie</strong> dans <code>VIDEO/&lt;NN&gt;-&lt;sujet&gt;/</code> avec <code>publication.md</code> et <code>miniature.jpg</code>. Facebook : coche « Facebook aussi » sur la chaîne (ou <code>reglages-publication.json</code>).</li>
+          <li><strong>Laisse Chrome ouvert.</strong> Toutes les 5 minutes, les nouvelles vidéos prêtes partent toutes seules.</li>
+        </ol>
+      </section>
+
+      <section class="help-card">
+        <h3>Comment ranger tes vidéos</h3>
+<pre class="tree">YOUTUBE/
+└─ MA-CHAINE/
+   ├─ reglages-publication.json  (facultatif)
+   └─ VIDEO/
+      └─ 01-mon-sujet/
+         ├─ ma-video.mp4
+         ├─ publication.md
+         ├─ miniature.jpg
+         └─ short.mp4  (facultatif)</pre>
+        <p class="muted">Aussi compris : <code>MA-CHAINE/mon-sujet/renders/</code>, ou une fiche du même nom que la vidéo. Les dossiers qui commencent par <code>_</code> sont ignorés (brouillons, montage, archives).</p>
+      </section>
+
+      <section class="help-card">
+        <h3>La fiche de la vidéo</h3>
+<pre class="tree">## Titre
+Mon titre YouTube
+
+## Description
+Le texte sous la vidéo…
+
+## Mots-clés
+mot 1, mot 2, mot 3</pre>
+        <p class="muted">Aussi lu : <code>youtube.txt</code> ou <code>metadata.json</code>. Miniature : <code>miniature.jpg</code>, moins de 2 Mo.</p>
+      </section>
+
+      <section class="help-card">
+        <h3>Short YouTube + Reel Facebook</h3>
+        <p>Place le fichier vertical à côté de la vidéo longue sous le nom <code>short.mp4</code>, <code>reel.mp4</code> ou <code>vertical.mp4</code> (un dossier <code>short/</code> ou <code>vertical/</code> fonctionne aussi). L’onglet Facebook affiche alors automatiquement le contenu associé.</p>
+      </section>
+
+      <section class="help-card">
+        <h3>Les boutons</h3>
+        <dl class="glossary">
+          <dt>↻ Actualiser</dt><dd>Relit le dossier tout de suite au lieu d’attendre 5 minutes.</dd>
+          <dt>Publier sur YouTube</dt><dd>Envoie le MP4 long avec la fiche et la miniature du même dossier.</dd>
+          <dt>YouTube</dt><dd>Affiche les vidéos déjà publiées détectées grâce au manifeste.</dd>
+          <dt>Facebook</dt><dd>Affiche les formats verticaux détectés comme Shorts/Reels.</dd>
+          <dt>Mettre à jour</dt><dd>Recopie sur YouTube le titre, la description, les mots-clés et la miniature modifiés dans le dossier.</dd>
+        </dl>
+      </section>
+
+      <section class="help-card">
+        <h3>Bon à savoir</h3>
+        <ul class="guide">
+          <li>Une vidéo est « prête » quand sa fiche a un titre et que le fichier n’a pas bougé depuis 10 minutes (rendu terminé).</li>
+          <li>Chrome doit rester ouvert et l’ordinateur éveillé.</li>
+          <li>YouTube Studio s’ouvre quelques secondes pendant l’envoi, puis te rend ta page.</li>
+          <li>Jamais deux fois la même vidéo, même avec plusieurs profils Chrome.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  </div>
+
+  <footer id="server">
+    <details>
+      <summary>Serveur KappGen (version locale)</summary>
+      <label><input id="app-url" type="url" placeholder="https://api.kappgen.com"></label>
+      <button id="save-url" class="secondary">Enregistrer</button>
+    </details>
+  </footer>
+
+  <script src="lib/fiches.js"></script>
+  <script src="lib/dossier.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
