@@ -175,9 +175,48 @@ function friendly(error) {
 
 // channelId: open the upload dialog of that channel (several channels on one
 // Google account); otherwise the channel last used in this Chrome profile.
-async function openStudioUpload(channelId, active = true) {
+// Studio tabs that belong to the creator (the one they had open, or the one
+// opened for a click): the upload runs there and they are never closed.
+async function borrowedTabs() {
+  const { borrowed } = await chrome.storage.session.get('borrowed');
+  return new Set(borrowed || []);
+}
+
+async function setBorrowed(tabId, on) {
+  const tabs = await borrowedTabs();
+  if (on) tabs.add(tabId); else tabs.delete(tabId);
+  await chrome.storage.session.set({ borrowed: [...tabs] });
+}
+
+// Closes a Studio tab the extension opened by itself (automatic uploads),
+// leaves the creator's own tab open.
+async function closeStudioTab(tabId) {
+  if ((await borrowedTabs()).has(tabId)) return;
+  chrome.tabs.remove(tabId).catch(() => {});
+}
+
+// A click on "Envoyer" uses the YouTube Studio tab in front, or another
+// Studio tab of the window; a new tab only when there is none.
+async function studioTabToReuse() {
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (active && /^https:\/\/studio\.youtube\.com\//.test(active.url || '')) return active;
+  const others = await chrome.tabs.query({ url: 'https://studio.youtube.com/*', lastFocusedWindow: true });
+  return others[0] || null;
+}
+
+// reuse: upload in the creator's own Studio tab (clicks); otherwise a tab of
+// its own in the background (automatic uploads, so the tab the creator is
+// working in is never taken over).
+async function openStudioUpload(channelId, active = true, { reuse = false } = {}) {
   const url = channelId ? `https://studio.youtube.com/channel/${channelId}/videos/upload?d=ud` : 'https://www.youtube.com/upload';
-  const tab = await chrome.tabs.create({ url, active });
+  let tab = reuse ? await studioTabToReuse() : null;
+  if (tab) {
+    tab = await chrome.tabs.update(tab.id, { url, active: true });
+    await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  } else {
+    tab = await chrome.tabs.create({ url, active: reuse || active });
+  }
+  if (reuse) await setBorrowed(tab.id, true);
   // Never let Chrome discard the tab: that would cancel the transfer.
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
@@ -187,7 +226,7 @@ async function openStudioUpload(channelId, active = true) {
     if (url.startsWith('https://accounts.google.com')) {
       throw new Error('Connecte-toi d’abord à YouTube Studio dans ce navigateur, puis relance.');
     }
-    if (url.startsWith('https://studio.youtube.com') && current.status === 'complete') {
+    if (url.startsWith('https://studio.youtube.com') && /\/upload|[?&]d=ud/.test(url) && current.status === 'complete') {
       if (channelId && !url.includes(channelId)) {
         throw new Error(`Ce profil Chrome n’a pas accès à la chaîne ${channelId} dans YouTube Studio.`);
       }
@@ -359,8 +398,8 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
   }
 }
 
-async function publishShortYouTube(video, channelId, visibility) {
-  const tabId = await openStudioUpload(channelId, false);
+async function publishShortYouTube(video, channelId, visibility, { reuse = false } = {}) {
+  const tabId = await openStudioUpload(channelId, false, { reuse });
   const shortVisibility = visibility === 'SCHEDULE' ? 'UNLISTED' : visibility;
   const job = { source: 'folder', social: true, videoId: video.id, tabId,
     visibility: shortVisibility, stage: 'filling',
@@ -385,7 +424,7 @@ async function publishShortYouTube(video, channelId, visibility) {
     const { job: finished } = await chrome.storage.session.get('job');
     return finished && finished.youtubeId;
   } catch (error) {
-    chrome.tabs.remove(tabId).catch(() => {});
+    closeStudioTab(tabId);
     throw error;
   }
 }
@@ -428,14 +467,14 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
     }
     await setJob({ title: video.title, channel: video.channel_name, message: 'Ouverture de YouTube Studio…' });
     if (visibility === 'CHANNEL') visibility = 'UNLISTED';
-    tabId = await openStudioUpload(channelId, false);
+    tabId = await openStudioUpload(channelId, false, { reuse: !auto });
     if (source === 'folder') {
       const learned = channelIdOf((await chrome.tabs.get(tabId)).url);
       if (learned) await rememberChannel(video.channel_key, learned);
     }
     // Written to disk: after an update/reload of the extension, resume()
     // picks this up and only follows the transfer already under way.
-    job = { source, videoId, tabId, visibility, stage: 'filling',
+    job = { source, videoId, tabId, visibility, auto, stage: 'filling',
       video: video && { title: video.title, description: video.description, tags: video.tags,
         channel_name: video.channel_name, channel_key: video.channel_key, relative_path: video.relative_path,
         hash: video.hash, vertical_path: video.vertical_path } };
@@ -532,7 +571,7 @@ async function finishUpload(job) {
     await setJob({ message: 'Studio bloqué sur « Saving… » : visibilité réglée depuis la page de la vidéo…' });
     await applyVisibilityFromEdit(tabId, youtubeId, visibility);
   }
-  chrome.tabs.remove(tabId).catch(() => {});
+  await closeStudioTab(tabId);
   await chrome.storage.local.remove('pending');
   let socialMessage = '';
   if (source === 'folder' && !job.social) {
@@ -558,7 +597,7 @@ async function finishUpload(job) {
           let shortId = published.short_youtube_id;
           if (!shortId) {
             const channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
-            shortId = await publishShortYouTube(published, channelId, visibility);
+            shortId = await publishShortYouTube(published, channelId, visibility, { reuse: !job.auto });
             await folder('mark', { path: video.relative_path, status: 'published', data: { shortYoutubeId: shortId } });
           }
           if (!published.facebook_published_at) {
