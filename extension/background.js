@@ -400,6 +400,21 @@ async function openFacebookReel(pageUrl) {
 async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path) {
   if (!filePath) throw new Error('Aucun fichier vertical associé à cette vidéo.');
   const tabId = await openFacebookReel(pageUrl);
+  // The long video is a normal video post ("Photo/vidéo"); only the vertical
+  // version is a Reel.
+  if (filePath === video.relative_path && !video.vertical_path) {
+    await whileShown(tabId, async () => {
+      await step(tabId, 'openPost', { photo: true });
+      await setJob({ message: 'Envoi de la vidéo sur Facebook…' });
+      await step(tabId, 'receiveFile', { kind: 'video', path: filePath,
+        src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`) });
+      await sleep(3000);
+      await step(tabId, 'fillCaption', { caption: [video.title, video.description].filter(Boolean).join('\n\n').slice(0, 5000) });
+      await setJob({ message: 'Publication sur Facebook…' });
+      await step(tabId, 'sendPost');
+    });
+    return true;
+  }
   try {
     await whileShown(tabId, async () => {
       await step(tabId, 'openReel');

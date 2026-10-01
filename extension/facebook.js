@@ -7,6 +7,9 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const visible = (node) => !!node && node.getClientRects().length > 0 && !node.closest('[hidden]');
   const textOf = (node) => (node.textContent || '').replace(/\s+/g, ' ').trim();
+  // What a button says: its visible text, or its accessible name (icons).
+  const labelsOf = (node) => [textOf(node), (node.getAttribute('aria-label') || '').trim()].filter(Boolean);
+  const enabled = (node) => node.getAttribute('aria-disabled') !== 'true' && !node.disabled;
   const click = (node) => { node.scrollIntoView({ block: 'center' }); node.click(); };
   const waitFor = async (finder, timeout = 30000, what = 'élément') => {
     const start = Date.now();
@@ -15,10 +18,14 @@
       if (result) return result;
       await sleep(500);
     }
-    throw new Error(`Facebook : ${what} introuvable. Termine l’action dans l’onglet Facebook resté ouvert.`);
+    // Says which buttons were on screen, so the next version can match them.
+    const seen = [...new Set([...document.querySelectorAll(buttons)].filter(visible)
+      .map((node) => labelsOf(node).sort((a, b) => a.length - b.length)[0]).filter((label) => label && label.length < 40))].slice(0, 25);
+    throw new Error(`Facebook : ${what} introuvable. Termine l’action dans l’onglet Facebook resté ouvert. Boutons vus : ${seen.join(' | ') || 'aucun'}`);
   };
   const buttons = 'button, [role="button"], a[role="button"]';
-  const byText = (pattern) => [...document.querySelectorAll(buttons)].find((node) => visible(node) && pattern.test(textOf(node)));
+  const byText = (pattern, { needEnabled = false } = {}) => [...document.querySelectorAll(buttons)]
+    .find((node) => visible(node) && (!needEnabled || enabled(node)) && labelsOf(node).some((label) => pattern.test(label)));
 
   // kind "image": the photo input of the post composer is usually hidden,
   // so any file input accepting images is used.
@@ -26,6 +33,7 @@
     const pick = () => {
       const inputs = [...document.querySelectorAll('input[type="file"]')];
       if (kind === 'image') return inputs.filter((i) => /image|\*/.test(i.accept || '*')).pop();
+      if (kind === 'video') return inputs.filter((i) => /video|\*/.test(i.accept || '*')).pop();
       return inputs.find(visible);
     };
     const input = await waitFor(pick, 60000, kind === 'image' ? 'l’ajout de photo' : 'le sélecteur de fichier du Reel');
@@ -51,7 +59,8 @@
   }
 
   async function openReel() {
-    const create = await waitFor(() => byText(/create\s+(a\s+)?reel|cr[eé]er\s+(un\s+)?r[eé]el|nouveau\s+r[eé]el/i), 45000, 'le bouton Créer un Reel');
+    const create = await waitFor(() => byText(/create\s+(a\s+)?reel|cr[eé]er\s+(un\s+)?r[eé]el|nouveau\s+r[eé]el/i)
+      || byText(/^r[eé]els?$/i), 45000, 'le bouton Créer un Reel');
     click(create);
     await sleep(1200);
     // Some Business Suite versions first open a generic composer.
@@ -77,7 +86,14 @@
   }
 
   async function publish() {
-    const button = await waitFor(() => byText(/publish|publier|share now|partager maintenant|publier maintenant/i), 60000, 'le bouton Publier');
+    // The Reel composer has one or two "Next" screens before "Publish".
+    for (let i = 0; i < 3; i += 1) {
+      const next = byText(/^(next|suivant)$/i, { needEnabled: true });
+      if (!next || byText(/^(publish|publier|share|partager|post)$/i, { needEnabled: true })) break;
+      click(next);
+      await sleep(2500);
+    }
+    const button = await waitFor(() => byText(/^(publish|publier|share now|share|partager maintenant|partager|publier maintenant|post)$/i, { needEnabled: true }), 120000, 'le bouton Publier');
     click(button);
     await sleep(3000);
     return true;
@@ -103,9 +119,9 @@
   async function sendPost() {
     const next = byText(/^(next|suivant)$/i);
     if (next) { click(next); await sleep(2000); }
-    const button = await waitFor(() => byText(/^(post|publier|share now|partager maintenant|publier maintenant)$/i), 60000, 'le bouton Publier');
+    const button = await waitFor(() => byText(/^(post|publier|publish|share now|share|partager maintenant|partager|publier maintenant)$/i, { needEnabled: true }), 10 * 60000, 'le bouton Publier');
     click(button);
-    await waitFor(() => !byText(/^(post|publier)$/i), 60000, 'la fin de la publication');
+    await waitFor(() => !byText(/^(post|publier|publish)$/i), 5 * 60000, 'la fin de la publication');
     await sleep(2000);
     return true;
   }
