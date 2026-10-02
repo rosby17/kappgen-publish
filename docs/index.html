@@ -3,51 +3,76 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Installer KappGen Publish — le guide pas à pas</title>
-<meta name="description" content="Installe KappGen Publish dans Google Chrome en 5 minutes : téléchargement, installation, premiers réglages. Guide illustré, sans connaissance technique.">
+<title>Installer KappGen Publish : en 1 commande</title>
+<meta name="description" content="Installe KappGen Publish dans Google Chrome en 2 minutes : une commande (ou un message à Claude) fait tout, il ne reste que 3 clics. Sans connaissance technique.">
 <link rel="icon" href="logo.png">
 <style>
-:root{--fond:#f6f6f4;--surface:#fff;--surface2:#f2f2ef;--bord:#e4e3de;--texte:#1b1a18;--texte2:#45433f;--pale:#7b7871;--accent:#2f5bea;--accent-f:#eaf0ff;--vert:#16803c;--vert-f:#e8f5ec;--ambre:#a86603;--ambre-f:#fdf4e3;--r:14px}
+:root{--fond:#f5f6f8;--surface:#fff;--surface2:#f1f2f5;--bord:#e3e5ea;--texte:#14161b;--texte2:#424650;--pale:#767b86;--accent:#2f5bea;--accent2:#7c3aed;--accent-f:#eef2ff;--vert:#15803d;--vert-f:#e9f7ee;--ambre:#a16207;--ambre-f:#fdf6e3;--r:18px}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--fond);color:var(--texte);font:17px/1.6 -apple-system,"SF Pro Text",Inter,system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
 a{color:var(--accent)}
-.page{max-width:760px;margin:0 auto;padding:28px 20px 80px}
-header.haut{display:flex;align-items:center;gap:12px;margin-bottom:28px}
-header.haut img{width:40px;height:40px;border-radius:10px}
-header.haut b{font-size:18px}
-h1{font-size:34px;line-height:1.2;letter-spacing:-.6px;margin:0 0 12px}
-.chapo{font-size:19px;color:var(--texte2);margin:0 0 22px}
-.resume{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--pale);font-size:15px;margin-bottom:26px}
-.resume span{display:inline-flex;align-items:center;gap:6px}
-.telecharger{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;padding:18px 22px;border-radius:14px;background:var(--accent);color:#fff;font-size:19px;font-weight:700;text-decoration:none;box-shadow:0 6px 20px #2f5bea40}
-.telecharger:hover{filter:brightness(1.07)}
-.telecharger svg{width:24px;height:24px;stroke:#fff;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
-.sous-bouton{text-align:center;color:var(--pale);font-size:14px;margin:10px 0 0}
-.sommaire{background:var(--surface);border:1px solid var(--bord);border-radius:var(--r);padding:16px 20px;margin:30px 0 10px}
-.sommaire b{display:block;margin-bottom:6px}
-.sommaire ol{margin:0;padding-left:22px} .sommaire li{margin:3px 0}
-.etape{background:var(--surface);border:1px solid var(--bord);border-radius:var(--r);padding:24px 24px 26px;margin-top:22px;scroll-margin-top:16px}
-.etape .num{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--texte);color:var(--fond);font-weight:700;font-size:17px;margin-right:12px;flex:none}
-.etape h2{display:flex;align-items:center;font-size:23px;margin:0 0 12px;letter-spacing:-.3px}
-.etape p{margin:8px 0}
-.etape ol,.etape ul{padding-left:22px;margin:10px 0} .etape li{margin:6px 0}
-.astuce{background:var(--accent-f);border-radius:10px;padding:12px 16px;margin:14px 0 0;font-size:15.5px;color:#1e3a8a}
-.attention{background:var(--ambre-f);border-radius:10px;padding:12px 16px;margin:14px 0 0;font-size:15.5px;color:#6b4202}
-.ok{background:var(--vert-f);border-radius:10px;padding:12px 16px;margin:14px 0 0;font-size:15.5px;color:#0f5a2a}
-kbd,.code{font:600 15px ui-monospace,Menlo,Consolas,monospace;background:var(--surface2);border:1px solid var(--bord);border-radius:6px;padding:2px 7px;white-space:nowrap}
-.copier{display:inline-flex;align-items:center;gap:10px;margin:6px 0;padding:10px 12px 10px 16px;border:1px solid var(--bord);border-radius:10px;background:var(--surface2);font:600 16px ui-monospace,Menlo,Consolas,monospace}
-.copier button{font:600 14px -apple-system,system-ui,sans-serif;border:0;border-radius:8px;background:var(--texte);color:var(--fond);padding:7px 12px;cursor:pointer}
-.copier button.fait{background:var(--vert)}
-.ia{background:var(--surface);border:2px solid var(--accent);border-radius:var(--r);padding:22px 24px;margin-top:22px}
-.ia h2{font-size:22px;margin:0 0 8px;letter-spacing:-.3px}
-.ia pre{white-space:pre-wrap;word-break:break-word;background:var(--surface2);border:1px solid var(--bord);border-radius:10px;padding:14px 16px;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:260px;overflow:auto;margin:12px 0 10px}
-.ia .bouton-copier{font:700 16px -apple-system,system-ui,sans-serif;border:0;border-radius:10px;background:var(--accent);color:#fff;padding:12px 18px;cursor:pointer;width:100%}
-.ia .bouton-copier.fait{background:var(--vert)}
-.onglets{display:flex;gap:6px;margin:12px 0 4px}
-.onglets button{font:600 15px -apple-system,system-ui,sans-serif;padding:8px 16px;border-radius:9px;border:1px solid var(--bord);background:var(--surface2);color:var(--texte2);cursor:pointer}
-.onglets button.actif{background:var(--texte);color:var(--fond);border-color:var(--texte)}
-.os{display:none} .os.actif{display:block}
+/* ---------- en-tête */
+.hero{background:radial-gradient(1200px 500px at 15% -10%,#3b5bfd55,transparent 60%),radial-gradient(900px 500px at 100% 0,#8b5cf655,transparent 60%),#0d1020;color:#fff;padding:26px 20px 110px}
+.hero .in{max-width:820px;margin:0 auto}
+.marque{display:flex;align-items:center;gap:12px;font-weight:700;font-size:18px}
+.marque img{width:40px;height:40px;border-radius:11px;box-shadow:0 4px 14px #0006}
+.hero h1{font-size:44px;line-height:1.1;letter-spacing:-1.2px;margin:46px 0 14px}
+.hero h1 em{font-style:normal;background:linear-gradient(90deg,#8fb0ff,#c4a6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{font-size:19px;color:#c9cde0;max-width:620px;margin:0}
+.puces{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.puces span{background:#ffffff14;border:1px solid #ffffff22;border-radius:30px;padding:6px 14px;font-size:14.5px;color:#e4e7f5}
+.puces span b{color:#fff}
+.page{max-width:820px;margin:-80px auto 0;padding:0 20px 80px}
+/* ---------- cartes */
+.carte{background:var(--surface);border:1px solid var(--bord);border-radius:var(--r);padding:26px 28px;box-shadow:0 10px 30px #14161b0d;margin-bottom:20px;scroll-margin-top:16px}
+.carte h2{font-size:25px;letter-spacing:-.4px;margin:0 0 6px;display:flex;align-items:center;gap:12px}
+.carte > p.intro{color:var(--texte2);margin:0 0 16px}
+.badge{font:700 12px -apple-system,system-ui,sans-serif;letter-spacing:.4px;text-transform:uppercase;border-radius:20px;padding:4px 10px;background:var(--accent-f);color:var(--accent)}
+.badge.vert{background:var(--vert-f);color:var(--vert)}
+.num{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:700;font-size:16px;flex:none}
+/* ---------- choix Mac / Windows */
+.os-choix{display:inline-flex;background:var(--surface2);border:1px solid var(--bord);border-radius:12px;padding:4px;margin:4px 0 18px}
+.os-choix button{font:600 15px -apple-system,system-ui,sans-serif;padding:8px 18px;border-radius:9px;border:0;background:none;color:var(--texte2);cursor:pointer}
+.os-choix button.actif{background:var(--surface);color:var(--texte);box-shadow:0 1px 4px #0002}
+body:not(.win) .win-seul{display:none} body.win .mac-seul{display:none}
+/* ---------- deux façons */
+.deux{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.voie{border:1px solid var(--bord);border-radius:14px;padding:18px;background:var(--surface2);display:flex;flex-direction:column}
+.voie h3{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:8px}
+.voie p{margin:4px 0 12px;font-size:15.5px;color:var(--texte2)}
+.voie ol{margin:0 0 12px;padding-left:20px;font-size:15.5px;color:var(--texte2)} .voie li{margin:3px 0}
+.voie.reco{background:linear-gradient(180deg,#f3f0ff,#eef2ff);border-color:#d6cffd}
+.bloc{position:relative;margin-top:auto;background:#0f1222;color:#e6e9f7;border-radius:12px;padding:14px 14px 52px;font:500 14px/1.55 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.bloc.cmd{color:#a7f3d0}
+.bloc button{position:absolute;right:10px;bottom:10px;font:700 14px -apple-system,system-ui,sans-serif;border:0;border-radius:9px;background:#fff;color:#0f1222;padding:8px 14px;cursor:pointer}
+.bloc button.fait{background:#22c55e;color:#fff}
+/* ---------- 3 clics */
+.clics{counter-reset:c;list-style:none;padding:0;margin:8px 0 0}
+.clics > li{display:grid;grid-template-columns:34px 1fr;gap:14px;padding:16px 0;border-top:1px solid var(--bord)}
+.clics > li:first-child{border-top:0;padding-top:6px}
+.clics > li::before{counter-increment:c;content:counter(c);display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--texte);color:#fff;font-weight:700}
+.clics h4{margin:4px 0 2px;font-size:18px}
+.clics p{margin:2px 0;color:var(--texte2);font-size:16px}
+kbd,.code{font:600 14.5px ui-monospace,Menlo,Consolas,monospace;background:var(--surface2);border:1px solid var(--bord);border-bottom-width:2px;border-radius:6px;padding:1px 7px;white-space:nowrap}
+.astuce,.attention,.ok{border-radius:12px;padding:13px 16px;margin:16px 0 0;font-size:15.5px}
+.astuce{background:var(--accent-f);color:#1e3a8a}
+.attention{background:var(--ambre-f);color:#6b4202}
+.ok{background:var(--vert-f);color:#0f5a2a}
+.ligne{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;font-weight:700;font-size:15.5px;text-decoration:none;border:1px solid var(--bord);background:var(--surface);color:var(--texte)}
+.btn.plein{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.etapes-main{padding-left:22px;margin:10px 0} .etapes-main li{margin:7px 0}
+details.plie{border:1px solid var(--bord);border-radius:14px;background:var(--surface);margin-top:12px;padding:0 20px}
+details.plie > summary{cursor:pointer;font-weight:650;padding:15px 0;list-style:none;display:flex;align-items:center;gap:10px}
+details.plie > summary::-webkit-details-marker{display:none}
+details.plie > summary::after{content:"";margin-left:auto;width:9px;height:9px;border-right:2px solid var(--pale);border-bottom:2px solid var(--pale);transform:rotate(45deg);transition:transform .2s}
+details.plie[open] > summary::after{transform:rotate(-135deg)}
+details.plie > :not(summary){margin-top:0}
+details.plie > :last-child{margin-bottom:16px}
+h3.section{font-size:24px;margin:40px 0 8px;letter-spacing:-.3px}
+.pied{margin-top:50px;color:var(--pale);font-size:14px;text-align:center}
 /* ---------- dessins d'écran (reproductions simplifiées) */
 .ecran{margin:16px 0 4px;border:1px solid #d9d8d3;border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 8px 28px #1b1a1814;font:14px -apple-system,system-ui,"Segoe UI",sans-serif;color:#202124}
 .ecran .barre{display:flex;align-items:center;gap:10px;background:#dee1e6;padding:8px 12px}
@@ -87,189 +112,133 @@ kbd,.code{font:600 15px ui-monospace,Menlo,Consolas,monospace;background:var(--s
 .panneau .side .b{background:#38bdf8;color:#0f172a;border-radius:7px;padding:7px;text-align:center;font-weight:700;margin-top:8px}
 .panneau .side .g{background:#1e293b;border-radius:7px;padding:7px;margin-top:6px;color:#94a3b8}
 .legende-ecran{font-size:13.5px;color:var(--pale);text-align:center;margin:6px 0 0}
-details.faq{background:var(--surface);border:1px solid var(--bord);border-radius:12px;margin-top:10px;padding:0 18px}
-details.faq summary{cursor:pointer;font-weight:600;padding:14px 0;list-style:none}
-details.faq summary::before{content:"+ ";color:var(--accent);font-weight:700}
-details.faq[open] summary::before{content:"– "}
-details.faq p,details.faq ol{margin:0 0 14px}
-h3.section{font-size:25px;margin:44px 0 6px;letter-spacing:-.3px}
-.pied{margin-top:50px;color:var(--pale);font-size:14px;text-align:center}
-@media (max-width:600px){h1{font-size:27px}.etape{padding:20px 16px}.panneau{grid-template-columns:1fr 150px}.finder{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:680px){.hero h1{font-size:32px}.deux{grid-template-columns:1fr}.carte{padding:20px 18px}.panneau{grid-template-columns:1fr 150px}}
 </style>
 </head>
 <body>
-<div class="page">
 
-<header class="haut"><img src="logo.png" alt=""><b>KappGen Publish</b></header>
+<header class="hero"><div class="in">
+  <div class="marque"><img src="logo.png" alt="">KappGen Publish</div>
+  <h1>Installe KappGen Publish<br><em>en une seule commande.</em></h1>
+  <p>Tes vidéos partent toutes seules sur YouTube, Facebook et TikTok depuis un dossier de ton ordinateur. L'installation se fait presque toute seule : il ne te reste que 3 clics.</p>
+  <div class="puces"><span>⏱ <b>2 minutes</b></span><span>💻 Mac ou Windows</span><span>🌐 Google Chrome</span><span>🎁 <b>7 jours d'essai gratuit</b></span></div>
+</div></header>
 
-<h1>Installer KappGen Publish, pas à pas</h1>
-<p class="chapo">Tes vidéos partent toutes seules sur YouTube, Facebook et TikTok depuis un simple dossier de ton ordinateur. Ce guide t'accompagne de zéro à ta première publication, même si tu n'as jamais installé d'extension.</p>
-<div class="resume"><span>⏱ 5 minutes</span><span>💻 Mac ou Windows</span><span>🌐 Google Chrome obligatoire</span><span>🆓 3 jours d'essai gratuit</span></div>
+<main class="page">
 
-<a class="telecharger" href="https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip">
-  <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>Télécharger KappGen Publish
-</a>
-<p class="sous-bouton">Fichier <b>kappgen-uploader.zip</b> · toujours la dernière version · code source ouvert sur <a href="https://github.com/rosby17/kappgen-uploader">GitHub</a></p>
+<!-- 1. Lancer l'installation -->
+<section class="carte" id="installer">
+  <h2><span class="num">1</span>Lancer l'installation</h2>
+  <p class="intro">Choisis ton ordinateur, puis l'une des deux façons ci-dessous. Les deux font exactement la même chose : télécharger KappGen Publish, le ranger au bon endroit et ouvrir Chrome sur la bonne page.</p>
+  <div class="os-choix" role="tablist"><button data-os="mac" class="actif">🍎 Mac</button><button data-os="win">🪟 Windows</button></div>
 
-<nav class="sommaire"><b>Les étapes</b><ol>
-  <li><a href="#e1">Télécharger le fichier</a></li><li><a href="#e2">Le décompresser et le ranger</a></li>
-  <li><a href="#e3">Ouvrir la page des extensions de Chrome</a></li><li><a href="#e4">Activer le « Mode développeur »</a></li>
-  <li><a href="#e5">Installer KappGen Publish</a></li><li><a href="#e6">L'épingler et l'ouvrir</a></li>
-  <li><a href="#e7">Se connecter et faire les réglages</a></li></ol>
-  <p style="margin:10px 0 0;font-size:15px">Avec une IA : <a href="#ia">un seul texte à copier</a> · Ensuite : <a href="#maj">mettre à jour</a> · <a href="#faq">ça ne marche pas ?</a></p></nav>
+  <div class="deux">
+    <div class="voie reco">
+      <h3>🤖 Avec Claude <span class="badge">le plus simple</span></h3>
+      <p>Tu as l'application <b>Claude</b> sur ton ordinateur ? Ouvre l'onglet <b>Code</b>, colle ce message et envoie-le. Claude installe tout et te guide pour les 3 clics.</p>
+      <div class="bloc mac-seul" id="prompt-mac">Installe pour moi l'extension Chrome KappGen Publish. Je suis sur Mac. Lance cette commande :
+curl -fsSL https://rosby17.github.io/kappgen-uploader/install.sh | bash
+Ensuite, explique-moi très simplement les 3 clics à faire dans Chrome, un seul à la fois, et attends que je te réponde « fait » avant de passer au suivant.<button type="button" data-copie="prompt-mac">Copier le message</button></div>
+      <div class="bloc win-seul" id="prompt-win">Installe pour moi l'extension Chrome KappGen Publish. Je suis sur Windows. Lance cette commande dans PowerShell :
+irm https://rosby17.github.io/kappgen-uploader/install.ps1 | iex
+Ensuite, explique-moi très simplement les 3 clics à faire dans Chrome, un seul à la fois, et attends que je te réponde « fait » avant de passer au suivant.<button type="button" data-copie="prompt-win">Copier le message</button></div>
+    </div>
 
-<section class="ia" id="ia">
-  <h2>🤖 Le plus simple : laisse une IA l'installer pour toi</h2>
-  <p>Tu utilises <b>Claude Code</b>, Claude Desktop, Codex ou une autre IA qui peut agir sur ton ordinateur ? Copie ce texte et colle-le-lui : elle télécharge, décompresse, range le dossier au bon endroit et t'ouvre la bonne page de Chrome. Le même texte sert aussi pour <b>mettre à jour</b>.</p>
-  <pre id="prompt-ia">Installe (ou mets à jour) l'extension Chrome « KappGen Publish » sur cet ordinateur, en faisant toi-même tout ce que tu peux faire, sans me poser de questions techniques :
-
-1. Regarde si l'ordinateur est un Mac ou un Windows.
-2. Télécharge https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip
-3. Décompresse-le dans mon dossier Documents, dans un dossier nommé exactement « kappgen-uploader » (Mac : ~/Documents/kappgen-uploader ; Windows : %USERPROFILE%\Documents\kappgen-uploader). S'il existe déjà, remplace son contenu par le nouveau (c'est une mise à jour : ne touche à rien d'autre). Vérifie que le fichier manifest.json est directement dans ce dossier (pas dans un sous-dossier) ; sinon remonte les fichiers d'un niveau. Supprime ensuite le .zip téléchargé.
-4. Copie le chemin complet de ce dossier dans mon presse-papiers (Mac : pbcopy ; Windows : Set-Clipboard).
-5. Ouvre Google Chrome sur la page chrome://extensions (Mac : open -a "Google Chrome" "chrome://extensions" ; Windows : start chrome "chrome://extensions"). Si Chrome n'est pas installé, dis-le-moi et donne-moi le lien https://www.google.com/chrome/.
-6. Pour finir, explique-moi simplement, en français, les clics que Chrome m'oblige à faire moi-même (par sécurité, aucun programme n'a le droit de les faire à ma place) :
-   - Première installation : activer « Mode développeur » en haut à droite, cliquer « Charger l'extension non empaquetée », puis coller le chemin déjà copié (Mac : Cmd+Maj+G puis Cmd+V ; Windows : clic dans la barre d'adresse de la fenêtre puis Ctrl+V), Entrée, et « Sélectionner ».
-   - Mise à jour : cliquer seulement la flèche ↻ sur la carte KappGen Publish.
-   - Puis épingler l'extension (icône puzzle → punaise), cliquer son icône et suivre le panneau.
-Ne modifie aucun autre fichier de l'ordinateur.</pre>
-  <button class="bouton-copier" type="button" onclick="copier(this,'prompt-ia','Copier le texte pour l\'IA')">Copier le texte pour l'IA</button>
-  <div class="attention">⚠️ Chrome garde <b>3 clics pour toi</b> (Mode développeur, « Charger l'extension non empaquetée », choisir le dossier) : par sécurité, aucun programme ni aucune IA n'a le droit d'installer une extension à ta place. L'IA prépare tout et t'explique ces 3 clics ; le chemin du dossier est déjà copié, tu n'as qu'à le coller.</div>
-</section>
-
-<!-- 1 -->
-<section class="etape" id="e1">
-  <h2><span class="num">1</span>Télécharger le fichier</h2>
-  <p>Ouvre cette page dans <b>Google Chrome</b> (pas Safari, pas Edge, pas Firefox), puis clique sur le gros bouton bleu <b>« Télécharger KappGen Publish »</b> en haut de la page.</p>
-  <p>Le fichier <span class="code">kappgen-uploader.zip</span> arrive dans ton dossier <b>Téléchargements</b>.</p>
-  <div class="astuce">💡 Pas de Chrome sur ton ordinateur ? Installe-le d'abord, gratuitement : <a href="https://www.google.com/chrome/">google.com/chrome</a>.</div>
-</section>
-
-<!-- 2 -->
-<section class="etape" id="e2">
-  <h2><span class="num">2</span>Le décompresser et le ranger</h2>
-  <p>Un fichier <b>.zip</b> est une boîte fermée : il faut l'ouvrir pour sortir le dossier qu'il contient.</p>
-  <div class="onglets" role="tablist"><button class="actif" data-os="mac">Sur Mac</button><button data-os="win">Sur Windows</button></div>
-  <div class="os actif" data-os="mac">
-    <ol>
-      <li>Ouvre le <b>Finder</b>, puis le dossier <b>Téléchargements</b>.</li>
-      <li><b>Double-clique</b> sur <span class="code">kappgen-uploader.zip</span>. Un dossier <b>kappgen-uploader</b> apparaît juste à côté.</li>
-      <li>Glisse ce dossier <b>kappgen-uploader</b> dans ton dossier <b>Documents</b>.</li>
-    </ol>
-    <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url">Téléchargements</div></div>
-      <div class="corps finder"><div class="fichier"><div class="ic">🗜️</div>kappgen-uploader.zip</div><div class="fichier cible"><div class="ic">📁</div>kappgen-uploader <span class="fleche">c'est lui</span></div></div></div>
-    <p class="legende-ecran">Après le double-clic : le dossier à garder apparaît à côté du .zip</p>
+    <div class="voie">
+      <h3>⌨️ Sans Claude</h3>
+      <ol class="mac-seul">
+        <li>Appuie sur <kbd>Cmd</kbd> + <kbd>Espace</kbd>, tape <b>Terminal</b>, puis <kbd>Entrée</kbd>.</li>
+        <li>Copie la commande ci-dessous, colle-la dans le Terminal (<kbd>Cmd</kbd> + <kbd>V</kbd>), puis <kbd>Entrée</kbd>.</li>
+      </ol>
+      <ol class="win-seul">
+        <li>Clique sur <b>Démarrer</b>, tape <b>PowerShell</b>, puis <kbd>Entrée</kbd>.</li>
+        <li>Copie la commande ci-dessous, colle-la dans PowerShell (<kbd>Ctrl</kbd> + <kbd>V</kbd>), puis <kbd>Entrée</kbd>.</li>
+      </ol>
+      <div class="bloc cmd mac-seul" id="cmd-mac">curl -fsSL https://rosby17.github.io/kappgen-uploader/install.sh | bash<button type="button" data-copie="cmd-mac">Copier la commande</button></div>
+      <div class="bloc cmd win-seul" id="cmd-win">irm https://rosby17.github.io/kappgen-uploader/install.ps1 | iex<button type="button" data-copie="cmd-win">Copier la commande</button></div>
+    </div>
   </div>
-  <div class="os" data-os="win">
-    <ol>
-      <li>Ouvre l'<b>Explorateur de fichiers</b>, puis le dossier <b>Téléchargements</b>.</li>
-      <li>Fais un <b>clic droit</b> sur <span class="code">kappgen-uploader.zip</span>, puis choisis <b>« Extraire tout… »</b> et clique <b>« Extraire »</b>.</li>
-      <li>Un dossier <b>kappgen-uploader</b> s'ouvre. Déplace-le dans ton dossier <b>Documents</b>.</li>
-    </ol>
-    <div class="ecran" aria-hidden="true"><div class="barre"><div class="url">Téléchargements</div></div>
-      <div class="corps" style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap"><div class="fichier"><div class="ic">🗜️</div>kappgen-uploader.zip</div>
-        <div class="menu-ctx"><div>Ouvrir</div><div class="sel cible">Extraire tout… <span class="fleche">clique ici</span></div><div>Partager</div><div>Copier</div></div></div></div>
-    <p class="legende-ecran">Clic droit sur le .zip → « Extraire tout… »</p>
-  </div>
-  <div class="attention">⚠️ <b>Ne supprime jamais ce dossier</b> et ne le déplace plus après l'installation : Chrome s'en sert en permanence. Tu peux en revanche supprimer le fichier .zip.</div>
+  <div class="astuce">💡 Pas encore de Google Chrome ? La commande te l'indique et ouvre la page pour l'installer gratuitement (<a href="https://www.google.com/chrome/">google.com/chrome</a>). Relance-la ensuite.</div>
 </section>
 
-<!-- 3 -->
-<section class="etape" id="e3">
-  <h2><span class="num">3</span>Ouvrir la page des extensions de Chrome</h2>
-  <p>Dans Chrome, clique dans la <b>barre d'adresse</b> (là où tu tapes les sites web), colle cette adresse et appuie sur <kbd>Entrée</kbd> :</p>
-  <div class="copier"><span id="adresse">chrome://extensions</span><button type="button" onclick="copier(this)">Copier</button></div>
-  <p style="font-size:15px;color:var(--pale)">Pour des raisons de sécurité, Chrome n'autorise pas les liens vers cette page : il faut la copier-coller (ou la taper).</p>
-  <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url cible"><b>chrome://extensions</b></div></div>
-    <div class="ext-entete"><b>Extensions</b><span class="interrupteur off">Mode développeur <i></i></span></div><div class="corps" style="color:#5f6368">Tes extensions déjà installées s'affichent ici.</div></div>
-</section>
-
-<!-- 4 -->
-<section class="etape" id="e4">
-  <h2><span class="num">4</span>Activer le « Mode développeur »</h2>
-  <p>En <b>haut à droite</b> de cette page, clique sur l'interrupteur <b>« Mode développeur »</b> pour qu'il devienne <b>bleu</b>. Une ligne de boutons apparaît alors en haut.</p>
-  <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url"><b>chrome://extensions</b></div></div>
-    <div class="ext-entete"><b>Extensions</b><span class="interrupteur cible">Mode développeur <i></i><span class="fleche">bleu = activé</span></span></div>
-    <div class="ext-boutons"><span>Charger l'extension non empaquetée</span><span>Empaqueter l'extension</span><span>Mettre à jour</span></div></div>
-  <div class="astuce">💡 Le nom fait peur, mais c'est simplement l'option qui permet d'installer une extension venant d'un fichier, et pas de la boutique de Chrome. Ça ne change rien d'autre à ton navigateur.</div>
-</section>
-
-<!-- 5 -->
-<section class="etape" id="e5">
-  <h2><span class="num">5</span>Installer KappGen Publish</h2>
-  <ol>
-    <li>Clique sur <b>« Charger l'extension non empaquetée »</b> (le premier bouton qui vient d'apparaître).</li>
-    <li>Une fenêtre s'ouvre : va dans <b>Documents</b>, clique <b>une seule fois</b> sur le dossier <b>kappgen-uploader</b> pour le sélectionner (sans entrer dedans).</li>
-    <li>Clique sur <b>« Sélectionner »</b> (Mac) ou <b>« Sélectionner un dossier »</b> (Windows).</li>
+<!-- 2. Les 3 clics -->
+<section class="carte" id="clics">
+  <h2><span class="num">2</span>Les 3 clics dans Chrome</h2>
+  <p class="intro">Chrome s'est ouvert sur la page des extensions. Pour ta sécurité, Chrome n'autorise personne à installer une extension à ta place : ces 3 clics, c'est toi qui les fais.</p>
+  <ol class="clics">
+    <li><div><h4>Allume « Mode développeur »</h4><p>En <b>haut à droite</b> de la page, clique sur l'interrupteur pour qu'il devienne <b>bleu</b>.</p>
+      <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url"><b>chrome://extensions</b></div></div>
+        <div class="ext-entete"><b>Extensions</b><span class="interrupteur cible">Mode développeur <i></i><span class="fleche">bleu = allumé</span></span></div></div></div></li>
+    <li><div><h4>Clique « Charger l'extension non empaquetée »</h4><p>C'est le premier bouton de la ligne qui vient d'apparaître.</p>
+      <div class="ecran" aria-hidden="true"><div class="ext-boutons"><span class="cible">Charger l'extension non empaquetée</span><span>Empaqueter l'extension</span><span>Mettre à jour</span></div></div></div></li>
+    <li><div><h4>Colle le chemin et valide</h4>
+      <p class="mac-seul">Dans la fenêtre qui s'ouvre, appuie sur <kbd>Cmd</kbd> + <kbd>Maj</kbd> + <kbd>G</kbd>, puis <kbd>Cmd</kbd> + <kbd>V</kbd> (le chemin est déjà copié), puis <kbd>Entrée</kbd>, et enfin clique <b>« Sélectionner »</b>.</p>
+      <p class="win-seul">Dans la fenêtre qui s'ouvre, clique dans la <b>barre d'adresse tout en haut</b>, appuie sur <kbd>Ctrl</kbd> + <kbd>V</kbd> (le chemin est déjà copié), puis <kbd>Entrée</kbd>, et enfin clique <b>« Sélectionner un dossier »</b>.</p>
+      <div class="ecran" aria-hidden="true"><div class="carte-ext"><img src="logo.png" alt=""><div><b>KappGen Publish</b><small>Publie tes vidéos depuis un dossier de ton ordinateur…</small></div><span class="interrupteur" style="margin-left:auto"><i></i></span></div></div></div></li>
   </ol>
-  <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url"><b>chrome://extensions</b></div></div>
-    <div class="ext-boutons"><span class="cible">Charger l'extension non empaquetée</span><span>Empaqueter l'extension</span><span>Mettre à jour</span></div>
-    <div class="carte-ext"><img src="logo.png" alt=""><div><b>KappGen Publish</b><small>Publie tes vidéos depuis un dossier de ton ordinateur…</small></div><span class="interrupteur" style="margin-left:auto"><i></i></span></div></div>
-  <div class="ok">✅ C'est installé quand la carte <b>KappGen Publish</b> apparaît dans la liste, avec son interrupteur bleu.</div>
+  <div class="ok">✅ C'est installé quand la carte <b>KappGen Publish</b> apparaît, avec son interrupteur bleu.</div>
 </section>
 
-<!-- 6 -->
-<section class="etape" id="e6">
-  <h2><span class="num">6</span>L'épingler et l'ouvrir</h2>
-  <ol>
-    <li>En haut à droite de Chrome, clique sur l'icône <b>pièce de puzzle 🧩</b>.</li>
-    <li>À côté de <b>KappGen Publish</b>, clique sur la <b>punaise 📌</b> : son logo reste maintenant visible en haut à droite.</li>
-    <li>Clique sur le <b>logo KappGen</b> : le panneau s'ouvre sur le côté droit de Chrome.</li>
+<!-- 3. Connexion -->
+<section class="carte" id="connexion">
+  <h2><span class="num">3</span>L'ouvrir et se connecter</h2>
+  <ol class="etapes-main">
+    <li>En haut à droite de Chrome, clique sur la <b>pièce de puzzle 🧩</b>, puis sur la <b>punaise 📌</b> à côté de KappGen Publish.</li>
+    <li>Clique sur le <b>logo KappGen</b> : le panneau s'ouvre à droite. <b>Connecte-toi</b> avec ton compte KappGen (pas de compte ? <a href="https://app.kappgen.com">crée-le gratuitement</a>).</li>
+    <li>Lance ton <b>essai gratuit de 7 jours</b>. Ensuite : <b>2 $ par mois</b>, <b>20 $ par an</b> ou <b>50 $ à vie</b> (carte, PayPal ou Mobile Money).</li>
+    <li>Dans <b>Réglages</b>, choisis le <b>dossier de tes vidéos</b> et colle le lien de ta chaîne YouTube (et de tes autres pages).</li>
   </ol>
-  <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url">youtube.com</div><div class="icones"><span class="cible">🧩</span></div></div>
-    <div class="puzzle"><div class="liste-ext"><div class="l"><b style="font-weight:500">Extensions</b></div><div class="l"><img src="logo.png" alt="">KappGen Publish<span class="p cible">📌</span></div></div></div></div>
-</section>
-
-<!-- 7 -->
-<section class="etape" id="e7">
-  <h2><span class="num">7</span>Se connecter et faire les réglages</h2>
-  <ol>
-    <li><b>Connecte-toi</b> avec ton compte KappGen (bouton « Se connecter avec Google »). Pas encore de compte ? Crée-le gratuitement sur <a href="https://app.kappgen.com">app.kappgen.com</a>.</li>
-    <li>Commence ton <b>essai gratuit de 3 jours</b>, ou choisis une formule : <b>2 $ par mois</b>, <b>20 $ par an</b> ou <b>50 $ à vie</b> (carte, PayPal ou Mobile Money). Tout se débloque tout seul dès le paiement confirmé.</li>
-    <li>Ouvre <b>Réglages</b> et choisis le <b>dossier de tes vidéos</b> (celui où tu ranges tes vidéos finies), puis clique <b>« Autoriser à chaque visite »</b>.</li>
-    <li>Colle le <b>lien de ta chaîne YouTube</b> et de tes autres pages (Facebook, TikTok…).</li>
-  </ol>
-  <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url">studio.youtube.com</div></div>
+  <div class="ecran" aria-hidden="true"><div class="barre"><div class="points"><i></i><i></i><i></i></div><div class="url">studio.youtube.com</div><div class="icones"><span class="cible">🧩</span></div></div>
     <div class="panneau"><div class="site">ta page YouTube Studio</div><div class="side"><div class="t"><img src="logo.png" alt="">KappGen Publish</div><div class="g">✓ Dossier des vidéos YouTube</div><div class="g">✓ Tes pages et comptes</div><div class="b">Publier maintenant</div></div></div></div>
-  <div class="attention">⚠️ <b>Très important :</b> KappGen publie <b>comme toi, dans ton Chrome</b>. Il n'utilise ni mot de passe ni API : il ouvre YouTube Studio, Facebook ou TikTok et remplit les champs à ta place. <b>Tu dois donc être connecté à ta chaîne YouTube (et à tes autres pages) dans ce même Chrome.</b> Si tu colles le lien d'une page à laquelle tu n'es pas connecté ici, rien ne pourra y être publié.</div>
-  <div class="ok">🎉 C'est prêt. Range une vidéo finie dans ton dossier, avec sa miniature et un fichier texte (1<sup>re</sup> ligne = titre, le reste = description) : KappGen la publie toute seule. Garde simplement Chrome ouvert. Tout est expliqué dans l'onglet <b>Aide</b> du panneau.</div>
+  <div class="attention">⚠️ <b>Important :</b> KappGen publie <b>comme toi, dans ton Chrome</b>, sans jamais te demander de mot de passe. Tu dois donc être <b>connecté à ta chaîne YouTube</b> (et à tes autres pages) dans ce même Chrome.</div>
+  <div class="ok">🎉 C'est prêt. Range une vidéo finie dans ton dossier, avec sa miniature et un fichier texte (1<sup>re</sup> ligne = titre, le reste = description) : KappGen la publie toute seule tant que Chrome reste ouvert.</div>
 </section>
 
-<h3 class="section" id="maj">Mettre à jour vers une nouvelle version</h3>
-<section class="etape" style="margin-top:12px">
-  <ol>
-    <li>Télécharge à nouveau le fichier avec le <a href="https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip">bouton de téléchargement</a> et décompresse-le (étape 2).</li>
-    <li>Remplace l'ancien dossier <b>kappgen-uploader</b> de tes Documents par le nouveau (même nom, même endroit).</li>
-    <li>Ouvre <span class="code">chrome://extensions</span> et clique sur la flèche <b>↻</b> de la carte KappGen Publish.</li>
-  </ol>
-  <div class="astuce">💡 KappGen Publish te prévient par une notification quand une nouvelle version sort. Tu peux aussi donner le <a href="#ia">texte pour l'IA</a> : elle fait les étapes 1 et 2 pour toi.</div>
-  <div class="ok">Tes réglages, ton abonnement et la liste de ce qui a déjà été publié sont conservés.</div>
+<h3 class="section" id="maj">Mettre à jour</h3>
+<section class="carte">
+  <p style="margin:0">Relance simplement <a href="#installer">la même commande</a> (ou renvoie le même message à Claude). La nouvelle version remplace l'ancienne et KappGen Publish se recharge tout seul dans Chrome en moins d'une minute. <b>Aucun clic à refaire</b> : tes réglages, ton abonnement et ce qui a déjà été publié sont conservés.</p>
 </section>
+
+<h3 class="section">Installer à la main (sans commande)</h3>
+<details class="plie"><summary>📦 Je préfère télécharger le fichier moi-même</summary>
+  <ol class="etapes-main">
+    <li>Télécharge le fichier : <a class="btn plein" style="padding:6px 12px;font-size:14.5px" href="https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>kappgen-uploader.zip</a></li>
+    <li><span class="mac-seul">Dans <b>Téléchargements</b>, double-clique sur le .zip : un dossier <b>kappgen-uploader</b> apparaît.</span><span class="win-seul">Dans <b>Téléchargements</b>, clic droit sur le .zip → <b>« Extraire tout… »</b> → <b>« Extraire »</b>.</span> Range ce dossier dans tes <b>Documents</b> et ne le supprime plus.</li>
+    <li>Dans Chrome, tape <span class="code">chrome://extensions</span> dans la barre d'adresse, puis <kbd>Entrée</kbd>.</li>
+    <li>Allume <b>« Mode développeur »</b> → <b>« Charger l'extension non empaquetée »</b> → choisis le dossier <b>kappgen-uploader</b> (clique une seule fois dessus) → <b>« Sélectionner »</b>.</li>
+  </ol>
+  <p style="font-size:15px;color:var(--pale)">Pour une mise à jour à la main : remplace le dossier par le nouveau, puis clique <b>↻</b> sur la carte KappGen Publish.</p>
+</details>
 
 <h3 class="section" id="faq">Ça ne marche pas ?</h3>
-<details class="faq"><summary>Je ne trouve pas le bouton « Charger l'extension non empaquetée »</summary><p>Le <b>Mode développeur</b> n'est pas activé : regarde tout en haut à droite de la page <span class="code">chrome://extensions</span> et clique sur l'interrupteur pour qu'il soit bleu (étape 4).</p></details>
-<details class="faq"><summary>Chrome dit « Fichier manifeste manquant ou illisible »</summary><p>Tu as choisi le mauvais dossier. Il faut choisir le dossier <b>kappgen-uploader</b> décompressé (pas le fichier .zip, et pas un dossier à l'intérieur). Recommence l'étape 5 et clique <b>une seule fois</b> sur kappgen-uploader avant « Sélectionner ».</p></details>
-<details class="faq"><summary>Au démarrage, Chrome affiche « Désactiver les extensions en mode développeur »</summary><p>C'est un simple rappel de Chrome pour les extensions installées depuis un fichier. Clique sur la <b>croix</b> pour le fermer, <b>ne clique pas sur « Désactiver »</b>.</p></details>
-<details class="faq"><summary>L'extension a disparu ou affiche une erreur</summary><p>Le dossier <b>kappgen-uploader</b> a sans doute été supprimé ou déplacé. Remets-le dans tes Documents (ou retélécharge-le), puis sur <span class="code">chrome://extensions</span> clique <b>↻</b> sur sa carte ; si elle n'y est plus, refais l'étape 5.</p></details>
-<details class="faq"><summary>Rien n'est publié</summary><ol><li>Chrome doit rester <b>ouvert</b> (KappGen regarde ton dossier toutes les 5 minutes).</li><li>Tu dois être <b>connecté à ta chaîne YouTube</b> dans ce même Chrome.</li><li>Chaque vidéo doit avoir son <b>fichier texte</b> (titre + description) dans son dossier.</li><li>Les vidéos qui étaient déjà dans le dossier avant que tu le choisisses attendent un clic sur « Publier maintenant » : seules les nouvelles partent toutes seules.</li></ol></details>
-<details class="faq"><summary>Est-ce que c'est sûr ?</summary><p>Oui. Le code est public sur <a href="https://github.com/rosby17/kappgen-uploader">GitHub</a>. KappGen Publish lit <b>uniquement le dossier que tu choisis</b> et n'envoie tes vidéos qu'à YouTube, Facebook ou TikTok, depuis ton propre navigateur. Aucun mot de passe ne lui est donné. Détails : <a href="https://github.com/rosby17/kappgen-uploader/blob/main/PRIVACY.md">politique de confidentialité</a>.</p></details>
-<details class="faq"><summary>J'ai plusieurs chaînes YouTube</summary><p>Utilise un <b>profil Chrome par chaîne</b> (menu Chrome → Profils → Ajouter), connecté au bon compte YouTube. Installe KappGen Publish dans chaque profil (étapes 3 à 7) avec le dossier de vidéos de cette chaîne.</p></details>
+<details class="plie"><summary>Pourquoi Claude ne peut pas faire les 3 clics à ma place ?</summary><p>C'est une protection de Google Chrome : une extension qui ne vient pas de la boutique de Chrome ne peut être ajoutée que par la personne devant l'écran. Ça empêche les logiciels malveillants d'installer des extensions en cachette. Claude fait tout le reste.</p></details>
+<details class="plie"><summary>Je ne trouve pas le bouton « Charger l'extension non empaquetée »</summary><p>Le <b>Mode développeur</b> n'est pas allumé : regarde tout en haut à droite de la page des extensions et clique sur l'interrupteur pour qu'il soit bleu.</p></details>
+<details class="plie"><summary>Chrome dit « Fichier manifeste manquant ou illisible »</summary><p>Le mauvais dossier a été choisi. Relance la commande (elle recopie le bon chemin), puis refais le clic 3 en collant le chemin.</p></details>
+<details class="plie"><summary>Le Terminal dit « command not found » ou PowerShell affiche une erreur rouge</summary><p>La commande a été mal copiée. Utilise le bouton <b>« Copier la commande »</b> plutôt que de la sélectionner à la main, puis colle-la en entier. Sur Windows, ouvre bien <b>PowerShell</b> (pas « Invite de commandes »).</p></details>
+<details class="plie"><summary>Au démarrage, Chrome affiche « Désactiver les extensions en mode développeur »</summary><p>C'est un simple rappel de Chrome. Clique sur la <b>croix</b> pour le fermer, <b>ne clique pas sur « Désactiver »</b>.</p></details>
+<details class="plie"><summary>Rien n'est publié</summary><ol><li>Chrome doit rester <b>ouvert</b> (KappGen regarde ton dossier toutes les 5 minutes).</li><li>Tu dois être <b>connecté à ta chaîne YouTube</b> dans ce même Chrome.</li><li>Chaque vidéo doit avoir son <b>fichier texte</b> (titre + description) dans son dossier.</li><li>Les vidéos déjà présentes avant que tu choisisses le dossier attendent un clic sur « Publier maintenant » : seules les nouvelles partent toutes seules.</li></ol></details>
+<details class="plie"><summary>Est-ce que c'est sûr ?</summary><p>Oui. Le code est public sur <a href="https://github.com/rosby17/kappgen-uploader">GitHub</a>, y compris celui de la commande d'installation (<a href="install.sh">Mac</a>, <a href="install.ps1">Windows</a>). KappGen Publish lit <b>uniquement le dossier que tu choisis</b> et n'envoie tes vidéos qu'à YouTube, Facebook ou TikTok, depuis ton propre navigateur. Aucun mot de passe ne lui est donné. Détails : <a href="https://github.com/rosby17/kappgen-uploader/blob/main/PRIVACY.md">politique de confidentialité</a>.</p></details>
+<details class="plie"><summary>J'ai plusieurs chaînes YouTube</summary><p>Utilise un <b>profil Chrome par chaîne</b> (menu Chrome → Profils → Ajouter), connecté au bon compte YouTube. Dans chaque profil, ouvre la page des extensions et refais les 3 clics (le chemin à coller est le même).</p></details>
 
 <p class="pied">KappGen Publish · <a href="https://app.kappgen.com">app.kappgen.com</a></p>
-</div>
+</main>
 <script>
-document.querySelectorAll('.onglets button').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('.onglets button').forEach(x => x.classList.toggle('actif', x === b));
-  document.querySelectorAll('.os').forEach(x => x.classList.toggle('actif', x.dataset.os === b.dataset.os));
-}));
-if (/Windows/i.test(navigator.userAgent)) document.querySelector('.onglets button[data-os="win"]').click();
-function copier(b, id = 'adresse', label = 'Copier') {
-  const t = document.getElementById(id).textContent;
-  const ok = () => { b.textContent = 'Copié ✓'; b.classList.add('fait'); setTimeout(() => { b.textContent = label; b.classList.remove('fait'); }, 1800); };
+const choix = document.querySelectorAll('.os-choix button');
+function os(v) {
+  document.body.classList.toggle('win', v === 'win');
+  choix.forEach(b => b.classList.toggle('actif', b.dataset.os === v));
+}
+choix.forEach(b => b.addEventListener('click', () => os(b.dataset.os)));
+if (/Windows/i.test(navigator.userAgent)) os('win');
+document.querySelectorAll('[data-copie]').forEach(b => b.addEventListener('click', () => {
+  const bloc = document.getElementById(b.dataset.copie);
+  const t = [...bloc.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
+  const avant = b.textContent;
+  const ok = () => { b.textContent = 'Copié ✓'; b.classList.add('fait'); setTimeout(() => { b.textContent = avant; b.classList.remove('fait'); }, 1800); };
   (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(ok, () => {
     const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); ok();
   });
-}
+}));
 </script>
 </body>
 </html>

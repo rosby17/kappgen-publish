@@ -1057,6 +1057,8 @@ async function renderSubscription({ fresh = false } = {}) {
   $('main').hidden = !active || paywallBack;
   $('paywall').hidden = active && !paywallBack;
   $('pw-trial').hidden = !state.trial_available;
+  const trialDays = state.trial_days || 7;
+  $('pw-trial').textContent = `Essayer gratuitement ${trialDays} jours`;
   $('pw-back').hidden = !(active && paywallBack);
   const forever = state.kind === 'lifetime' || state.kind === 'unlimited';
   $('pw-current').hidden = !active;
@@ -1069,7 +1071,7 @@ async function renderSubscription({ fresh = false } = {}) {
   message.className = 'small muted';
   message.textContent = state.unavailable ? 'Le serveur KappGen n’est pas encore à jour : réessaie un peu plus tard.'
     : state.offline ? 'Impossible de vérifier ton abonnement : vérifie ta connexion Internet.'
-      : state.trial_available ? 'Commence par l’essai gratuit : rien à payer pendant 3 jours.'
+      : state.trial_available ? `Commence par l’essai gratuit : rien à payer pendant ${trialDays} jours.`
         : waitingPayment ? 'En attente de ton paiement… KappGen Publish se débloque tout seul dès qu’il est confirmé.'
           : 'Choisis ta formule. Paiement sécurisé par carte, PayPal ou Mobile Money.';
   const until = state.expires_at ? new Date(state.expires_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '';
