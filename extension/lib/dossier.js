@@ -84,57 +84,96 @@ const KappDossier = (() => {
 
   const saveRoot = (handle) => kv('readwrite', (store) => store.put(handle, 'root'));
   const loadRoot = () => kv('readonly', (store) => store.get('root'));
-  // Second, optional folder: Facebook Reels and posts only. Paths inside it
-  // start with FB_PREFIX so every reader knows which folder they belong to.
-  const FB_PREFIX = 'fb:';
-  const saveFbRoot = (handle) => kv('readwrite', (store) => store.put(handle, 'fbroot'));
-  const loadFbRoot = () => kv('readonly', (store) => store.get('fbroot'));
-  const clearFbRoot = () => kv('readwrite', (store) => store.delete('fbroot'));
 
-  async function fbAccess() {
-    const handle = testFbRoot || await loadFbRoot();
+  // The main folder ("root") serves every network. Each network may have its
+  // own folder instead: YouTube (its videos), Facebook (posts and Reels,
+  // the "fbroot" of older versions), Instagram, TikTok, X, LinkedIn (posts).
+  // Paths inside a network's folder start with its prefix ("fb:", "x:"…) so
+  // every reader knows which folder they belong to.
+  const NETS = ['youtube', 'facebook', 'instagram', 'tiktok', 'x', 'linkedin'];
+  const POST_NETS = ['instagram', 'tiktok', 'x', 'linkedin'];
+  const netKey = (net) => (net === 'facebook' ? 'fbroot' : `root:${net}`);
+  const FB_PREFIX = 'fb:';
+  const MAIN_PREFIX = 'main:';
+  const prefixOf = (net) => (net === 'facebook' ? FB_PREFIX : `${net}:`);
+  // Folder names of a network inside the main folder (<chaîne>/X/A-PUBLIER…).
+  const NET_DIRS = { facebook: ['facebook'], instagram: ['instagram'], tiktok: ['tiktok'], x: ['x', 'twitter'], linkedin: ['linkedin'] };
+  const NET_DIR_NAMES = new Set(Object.values(NET_DIRS).flat());
+  const testNets = {}; // set by tests only
+  const saveNetRoot = (net, handle) => kv('readwrite', (store) => store.put(handle, netKey(net)));
+  const loadNetRoot = async (net) => testNets[net] || kv('readonly', (store) => store.get(netKey(net)));
+  const clearNetRoot = (net) => kv('readwrite', (store) => store.delete(netKey(net)));
+  const saveFbRoot = (handle) => saveNetRoot('facebook', handle);
+  const loadFbRoot = () => loadNetRoot('facebook');
+  const clearFbRoot = () => clearNetRoot('facebook');
+
+  async function stateOf(handle) {
     if (!handle) return { state: 'none' };
-    return { state: testFbRoot ? 'granted' : await handle.queryPermission({ mode: 'readwrite' }), name: handle.name };
+    const testing = handle === testRoot || Object.values(testNets).includes(handle);
+    return { state: testing ? 'granted' : await handle.queryPermission({ mode: 'readwrite' }), name: handle.name };
   }
 
+  // Every folder in use: { main, youtube, facebook, … }, each { state, name,
+  // own } (own: false when the network takes the main folder).
+  async function folders() {
+    const main = await stateOf(testRoot || await loadRoot());
+    const out = { main };
+    for (const net of NETS) {
+      const handle = await loadNetRoot(net);
+      out[net] = handle ? { ...(await stateOf(handle)), own: true } : { ...main, own: false };
+    }
+    return out;
+  }
+
+  async function fbAccess() {
+    const handle = await loadFbRoot();
+    if (!handle) return { state: 'none' };
+    return stateOf(handle);
+  }
+
+  // The folder YouTube's videos are read from (its own, or the main one).
   // state: "granted", "prompt", "denied" or "none" (no folder chosen yet).
   async function access() {
-    const handle = await loadRoot();
-    if (!handle) return { state: 'none' };
-    return { state: await handle.queryPermission({ mode: 'readwrite' }), name: handle.name };
+    const handle = testRoot || await loadNetRoot('youtube') || await loadRoot();
+    return stateOf(handle);
   }
 
   let testRoot = null; // set by tests only
-  let testFbRoot = null;
 
-  async function fbRoot() {
-    if (testFbRoot) return testFbRoot;
-    const handle = await loadFbRoot();
+  async function granted(handle, label) {
     if (!handle) return null;
-    if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-      throw new Error('Accès au dossier Facebook à autoriser : onglet Facebook → « Autoriser l’accès ».');
+    if ((await stateOf(handle)).state !== 'granted') {
+      throw new Error(`Accès au dossier ${label} à autoriser : Réglages → Dossiers → « Autoriser l’accès ».`);
     }
     return handle;
+  }
+  const netRoot = async (net) => granted(await loadNetRoot(net), `« ${(await loadNetRoot(net) || {}).name || net} »`);
+
+  async function mainRoot() {
+    if (testRoot) return testRoot;
+    const handle = await loadRoot();
+    if (!handle) throw new Error('Aucun dossier choisi : Réglages → Dossiers → « Choisir le dossier principal ».');
+    return granted(handle, 'principal');
   }
 
   // The folder a path belongs to, and the path inside it.
   async function dirFor(relativePath) {
-    if (relativePath.startsWith(FB_PREFIX)) {
-      const handle = await fbRoot();
-      if (!handle) throw new Error('Aucun dossier Facebook choisi.');
-      return [handle, relativePath.slice(FB_PREFIX.length)];
+    if (relativePath.startsWith(MAIN_PREFIX)) return [await mainRoot(), relativePath.slice(MAIN_PREFIX.length)];
+    for (const net of NETS) {
+      if (!relativePath.startsWith(prefixOf(net))) continue;
+      const handle = await netRoot(net);
+      if (!handle) throw new Error(`Aucun dossier ${net === 'facebook' ? 'Facebook' : net} choisi.`);
+      return [handle, relativePath.slice(prefixOf(net).length)];
     }
     return [await root(), relativePath];
   }
 
+  // YouTube's folder: its own, otherwise the main one.
   async function root() {
-    if (testRoot) return testRoot;
-    const handle = await loadRoot();
-    if (!handle) throw new Error('Aucun dossier choisi : ouvre les réglages de l’extension KappGen.');
-    if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-      throw new Error('Accès au dossier à autoriser : ouvre les réglages de l’extension KappGen et clique « Autoriser ».');
-    }
-    return handle;
+    if (testRoot && !testNets.youtube) return testRoot;
+    const own = await loadNetRoot('youtube');
+    if (own) return granted(own, `YouTube « ${own.name} »`);
+    return mainRoot();
   }
 
   async function fileAt(relativePath) {
@@ -248,7 +287,7 @@ const KappDossier = (() => {
       if (name.startsWith('.') || name.startsWith('_')) continue;
       if (child.kind === 'file') {
         node.files.set(name, child);
-      } else if (depth < MAX_DEPTH && !SKIP.has(norm(name))) {
+      } else if (depth < MAX_DEPTH && !SKIP.has(norm(name)) && !NET_DIR_NAMES.has(norm(name))) {
         node.dirs.push(await walk(child, path ? `${path}/${name}` : name, node, depth + 1));
       }
     }
@@ -536,6 +575,7 @@ const KappDossier = (() => {
           short_error: record.shortError || null,
           facebook_reel_at: record.facebookReelAt || null, facebook_reel_error: record.facebookReelError || null,
           x_published_at: record.xPublishedAt || null, x_error: record.xError || null,
+          linkedin_published_at: record.linkedinPublishedAt || null, linkedin_error: record.linkedinError || null,
           channel_config: fileConfig });
         continue;
       }
@@ -665,6 +705,8 @@ const KappDossier = (() => {
         if (data.facebookReelError) record.facebookReelError = data.facebookReelError;
         if (data.xPublishedAt) { record.xPublishedAt = data.xPublishedAt; delete record.xError; }
         if (data.xError) record.xError = data.xError;
+        if (data.linkedinPublishedAt) { record.linkedinPublishedAt = data.linkedinPublishedAt; delete record.linkedinError; }
+        if (data.linkedinError) record.linkedinError = data.linkedinError;
         if (data.tiktokPublishedAt) { record.tiktokPublishedAt = data.tiktokPublishedAt; delete record.tiktokError; }
         if (data.tiktokError) record.tiktokError = data.tiktokError;
         if (data.instagramPublishedAt) { record.instagramPublishedAt = data.instagramPublishedAt; delete record.instagramError; }
@@ -698,12 +740,13 @@ const KappDossier = (() => {
     }
   }
 
-  async function findFacebookDirs(dir, path, depth, out) {
+  // The <NETWORK> folders (FACEBOOK, X, LINKEDIN…) inside the main folder.
+  async function findNetDirs(dir, path, depth, out, names) {
     for await (const [name, child] of dir.entries()) {
       if (child.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
       const childPath = path ? `${path}/${name}` : name;
-      if (norm(name) === 'facebook') out.push({ handle: child, path: childPath, channelPath: path, channelName: dir.name });
-      else if (depth < 4 && !SKIP.has(norm(name))) await findFacebookDirs(child, childPath, depth + 1, out);
+      if (names.includes(norm(name))) out.push({ handle: child, path: childPath, channelPath: path, channelName: dir.name });
+      else if (depth < 4 && !SKIP.has(norm(name)) && !NET_DIR_NAMES.has(norm(name))) await findNetDirs(child, childPath, depth + 1, out, names);
     }
   }
 
@@ -716,43 +759,49 @@ const KappDossier = (() => {
     return new Date(y, m - 1, d, hh || 0, mm || 0).getTime();
   }
 
-  // Where the posts are. With a Facebook folder chosen: every folder inside
-  // it that holds an image, a video or a text is one post (any layout, any
-  // names). Without one: the FACEBOOK/A-PUBLIER folders of the videos folder.
-  async function postDirs() {
-    const fbHandle = await fbRoot();
+  // Where a network's posts are. With its own folder chosen: every folder
+  // inside it that holds an image, a video or a text is one post (any layout,
+  // any names). Without one: the <NETWORK>/A-PUBLIER folders of the main
+  // folder (FACEBOOK/A-PUBLIER, X/A-PUBLIER, LINKEDIN/A-PUBLIER…).
+  async function postDirs(net = 'facebook') {
+    const own = await netRoot(net);
     const out = [];
     const join = (...parts) => parts.filter(Boolean).join('/');
-    if (!fbHandle) {
+    if (!own) {
+      const main = testRoot || await loadRoot();
+      if (!main) return out;
+      await mainRoot();
+      // Paths of the main folder are YouTube's paths, unless YouTube has its own folder.
+      const pre = !testRoot && await loadNetRoot('youtube') ? MAIN_PREFIX : '';
       const dirs = [];
-      await findFacebookDirs(await root(), '', 0, dirs);
+      await findNetDirs(main, '', 0, dirs, NET_DIRS[net]);
       for (const fb of dirs) {
         let queue;
         try { queue = await fb.handle.getDirectoryHandle('A-PUBLIER'); } catch { continue; }
         const planning = (await readJson(fb.handle, 'planning.json')) || {};
         for await (const [name, handle] of queue.entries()) {
           if (handle.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
-          out.push({ handle, name, path: join(fb.path, 'A-PUBLIER', name), planning,
+          out.push({ handle, name, path: pre + join(fb.path, 'A-PUBLIER', name), planning,
             channelKey: fb.channelPath || '.', channelName: fb.channelPath ? fb.channelName : `${fb.channelName} (dossier principal)` });
         }
       }
       return out;
     }
-    // Inside the videos folder? Then its channel (and its Page setting) is known.
+    // Inside the main folder? Then its channel (and its Page setting) is known.
     let inside = null;
     try {
       const main = testRoot || await loadRoot();
-      if (main && (testRoot || await main.queryPermission({ mode: 'readwrite' }) === 'granted')) inside = await main.resolve(fbHandle);
+      if (main && (await stateOf(main)).state === 'granted') inside = await main.resolve(own);
     } catch { inside = null; }
     const channelOf = () => {
       // The channel is the folder above « FACEBOOK » / « A-PUBLIER » when there is one.
       const full = inside ? [...inside] : null;
-      while (full && full.length && /^(facebook|a publier)$/.test(norm(full[full.length - 1]))) full.pop();
+      while (full && full.length && (NET_DIR_NAMES.has(norm(full[full.length - 1])) || norm(full[full.length - 1]) === 'a publier')) full.pop();
       if (full && full.length) return { channelKey: full.join('/'), channelName: full[full.length - 1] };
-      return { channelKey: FB_PREFIX, channelName: fbHandle.name };
+      return { channelKey: prefixOf(net), channelName: own.name };
     };
     const { channelKey, channelName } = channelOf();
-    const planning = (await readJson(fbHandle, 'planning.json')) || {};
+    const planning = (await readJson(own, 'planning.json')) || {};
     async function visit(dir, rel, depth) {
       const files = [];
       const children = [];
@@ -764,11 +813,11 @@ const KappDossier = (() => {
       const media = files.some((f) => IMAGE_EXT.test(f) || VIDEO_EXT.test(f));
       const text = files.some((f) => /\.(txt|md)$/i.test(f) && f !== MARKER_FILE && !NOT_A_SHEET.test(norm(stem(f))));
       if (rel && (media || text || files.includes('publication.json'))) {
-        out.push({ handle: dir, name: dir.name, path: `${FB_PREFIX}${rel}`, planning, channelKey, channelName });
+        out.push({ handle: dir, name: dir.name, path: `${prefixOf(net)}${rel}`, planning, channelKey, channelName });
       }
       for (const [name, handle] of children) await visit(handle, join(rel, name), depth + 1);
     }
-    await visit(fbHandle, '', 0);
+    await visit(own, '', 0);
     return out;
   }
 
@@ -779,9 +828,12 @@ const KappDossier = (() => {
       .map((m) => [Number(m[1]), Number(m[2])]).filter(([h, m]) => h < 24 && m < 60).sort((x, y) => x[0] - y[0] || x[1] - y[1]);
   }
 
-  async function facebookPosts({ now = Date.now(), times = '' } = {}) {
+  // net: "facebook" (the posts of the Facebook folder, also shared with the
+  // other networks), or a network's own posts (its folder, or its
+  // <NETWORK>/A-PUBLIER folders): their state is the one of that network.
+  async function facebookPosts({ now = Date.now(), times = '', net = 'facebook' } = {}) {
     const posts = [];
-    for (const dirInfo of await postDirs()) {
+    for (const dirInfo of await postDirs(net)) {
       const postDir = dirInfo.handle;
       const name = dirInfo.name;
       const info = (await readJson(postDir, 'publication.json')) || {};
@@ -801,11 +853,13 @@ const KappDossier = (() => {
       const image = info.image && files.includes(info.image) ? info.image : files.filter((f) => IMAGE_EXT.test(f)).sort()[0];
       const video = files.filter((f) => VIDEO_EXT.test(f)).sort()[0];
       let due = dueTime(info, name);
-      let statut = info.statut || 'a_publier';
+      // A network's own post keeps its state under the network's name.
+      const mine = net === 'facebook' ? info : (info[net] && typeof info[net] === 'object' ? info[net] : {});
+      let statut = mine.statut || 'a_publier';
       // Stuck « en cours » (tab closed, envoi débloqué à la main): offer to retry.
-      if (statut === 'en_cours' && info.started_at && now - Date.parse(info.started_at) > 20 * 60000) {
+      if (statut === 'en_cours' && mine.started_at && now - Date.parse(mine.started_at) > 20 * 60000) {
         statut = 'echec';
-        info.erreur = info.erreur || 'Publication interrompue : vérifie sur Facebook si elle est partie, sinon « Réessayer ».';
+        mine.erreur = mine.erreur || 'Publication interrompue : vérifie si elle est partie, sinon « Réessayer ».';
       }
       const post = {
         id: path,
@@ -817,15 +871,18 @@ const KappDossier = (() => {
         text: text.slice(0, 63000),
         image_path: image ? `${path}/${image}` : null,
         video_path: video ? `${path}/${video}` : null,
+        network: net,
         due_at: due,
         statut,
-        error: info.erreur || null,
-        started_at: info.started_at || null,
-        published_at: info.published_at || null,
+        error: mine.erreur || null,
+        started_at: mine.started_at || null,
+        published_at: mine.published_at || null,
         tiktok_statut: (info.tiktok && info.tiktok.statut) || null,
         tiktok_error: (info.tiktok && info.tiktok.erreur) || null,
         x_statut: (info.x && info.x.statut) || null,
         x_error: (info.x && info.x.erreur) || null,
+        linkedin_statut: (info.linkedin && info.linkedin.statut) || null,
+        linkedin_error: (info.linkedin && info.linkedin.erreur) || null,
         instagram_statut: (info.instagram && info.instagram.statut) || null,
         instagram_error: (info.instagram && info.instagram.erreur) || null,
         // Facebook groups: "groupes" in publication.json overrides the panel's
@@ -859,6 +916,8 @@ const KappDossier = (() => {
     return info;
   }
 
-  return { saveRoot, loadRoot, access, saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost,
-    _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testFbRoot = h; } };
+  return { NETS, POST_NETS, saveRoot, loadRoot, access, folders, saveNetRoot, loadNetRoot, clearNetRoot,
+    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost,
+    _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testNets.facebook = h; },
+    _setTestNetRoot: (net, h) => { testNets[net] = h; } };
 })();

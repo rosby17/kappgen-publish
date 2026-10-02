@@ -208,9 +208,10 @@ async function ensureOffscreen() {
 const ASK_URL = chrome.runtime.getURL('autorisation.html');
 async function askAccess({ wait = false, force = false } = {}) {
   const access = await folder('access').catch(() => ({ state: 'none' }));
-  // The Facebook folder (Reels and posts) is asked in the same small window.
-  const fbAccess = await folder('fbAccess').catch(() => ({ state: 'none' }));
-  if (access.state !== 'prompt' && (fbAccess.state !== 'prompt' || wait)) return access.state === 'granted';
+  // The other folders (main, each network's own) are asked in the same small window.
+  const all = await folder('folders').catch(() => ({}));
+  const otherAsks = Object.values(all).some((f) => f && f.state === 'prompt');
+  if (access.state !== 'prompt' && (!otherAsks || wait)) return access.state === 'granted';
   const [open] = await chrome.tabs.query({ url: ASK_URL });
   if (open) {
     await chrome.windows.update(open.windowId, { focused: true, drawAttention: true }).catch(() => {});
@@ -269,8 +270,23 @@ async function folder(type, payload = {}) {
 }
 
 // Facebook posts: each one at the time written in it (or right away).
-async function postsList() {
-  return folder('posts', {});
+// net: a network's own posts (its folder, or its <NETWORK>/A-PUBLIER folders).
+async function postsList(net = 'facebook') {
+  return folder('posts', { net });
+}
+const POST_NETS = ['instagram', 'tiktok', 'x', 'linkedin'];
+// A post by its path, whichever list it is in.
+async function findPost(postPath) {
+  for (const net of ['facebook', ...POST_NETS]) {
+    const post = (await postsList(net).catch(() => [])).find((p) => p.path === postPath);
+    if (post) return post;
+  }
+  return null;
+}
+// True when the network has its own folder (Réglages → Dossiers).
+async function ownFolders() {
+  const all = await folder('folders').catch(() => ({}));
+  return (net) => !!(all[net] && all[net].own);
 }
 
 async function folderQueue() {
@@ -383,6 +399,7 @@ async function tabToReuse(pattern, patterns) {
 const tiktokTabToReuse = () => tabToReuse(/^https:\/\/www\.tiktok\.com\//, ['https://www.tiktok.com/*']);
 const instagramTabToReuse = () => tabToReuse(/^https:\/\/www\.instagram\.com\//, ['https://www.instagram.com/*']);
 const xTabToReuse = () => tabToReuse(/^https:\/\/(x|twitter)\.com\//, ['https://x.com/*', 'https://twitter.com/*']);
+const linkedinTabToReuse = () => tabToReuse(/^https:\/\/www\.linkedin\.com\//, ['https://www.linkedin.com/*']);
 const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
 const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
   ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
@@ -1196,7 +1213,7 @@ async function publishXVideo(relativePath, { auto = false } = {}) {
 
 // A post of the posts folder: its text, and its photo or video.
 async function publishXPost(postPath, { auto = false } = {}) {
-  const post = (await postsList()).find((p) => p.path === postPath);
+  const post = await findPost(postPath);
   try {
     if (!post) throw new Error('Post introuvable (déplacé ?).');
     await sendToX({ text: xText(post.text), mediaPath: post.video_path || post.image_path || null,
@@ -1206,6 +1223,86 @@ async function publishXPost(postPath, { auto = false } = {}) {
   } catch (error) {
     const message = friendly(error);
     await folder('markPost', { path: postPath, patch: { x: { statut: 'echec', erreur: message } } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// ---------------------------------------------------------------- LinkedIn
+
+// LinkedIn's « Commencer un post » window, in the LinkedIn tab already open if there is one.
+const LINKEDIN_COMPOSE = 'https://www.linkedin.com/feed/?shareActive=true';
+async function openLinkedin() {
+  const tab = await reuseOrOpen(linkedinTabToReuse, LINKEDIN_COMPOSE);
+  const start = Date.now();
+  let asked = false;
+  while (Date.now() - start < 90000) {
+    const current = await chrome.tabs.get(tab.id);
+    const url = current.url || current.pendingUrl || '';
+    if (/\/(login|signup|checkpoint|authwall|uas\/login)/.test(url)) throw new Error('Connecte-toi d’abord à LinkedIn dans ce navigateur, puis relance.');
+    if (url.startsWith('https://www.linkedin.com/') && current.status === 'complete') {
+      if (!asked && !/shareActive=true/.test(url)) {
+        asked = true;
+        await chrome.tabs.update(tab.id, { url: LINKEDIN_COMPOSE });
+        await sleep(2500);
+        continue;
+      }
+      await sleep(1500);
+      await injectScripts(tab.id, ['lib/page-kit.js', 'linkedin.js']);
+      return tab.id;
+    }
+    await sleep(700);
+  }
+  throw new Error('LinkedIn ne s’est pas ouvert.');
+}
+
+async function sendToLinkedin({ text, mediaPath, title, channel, path }) {
+  await chrome.storage.session.set({ job: { running: true, source: 'linkedin', kind: 'linkedin', path, title, channel, message: 'Ouverture de LinkedIn…', startedAt: Date.now() } });
+  const tabId = await openLinkedin();
+  await whileShown(tabId, async () => {
+    await stepIn(tabId, '__kappgenLinkedin', 'openComposer');
+    await setJob({ message: 'Texte du post…' });
+    await stepIn(tabId, '__kappgenLinkedin', 'writePost', { text });
+    if (mediaPath) {
+      await setJob({ message: 'Envoi du média à LinkedIn…' });
+      await stepIn(tabId, '__kappgenLinkedin', 'addMedia', { path: mediaPath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(mediaPath)}`) });
+    }
+    await setJob({ message: 'Publication sur LinkedIn…' });
+    await stepIn(tabId, '__kappgenLinkedin', 'send');
+  });
+  closeStudioTab(tabId); // only a tab opened for this post is closed
+}
+
+// A video already on YouTube: its title, description start and link
+// (LinkedIn shows the YouTube preview).
+async function publishLinkedinVideo(relativePath, { auto = false } = {}) {
+  try {
+    const { sent } = await folderQueue();
+    const video = sent.find((item) => item.relative_path === relativePath);
+    if (!video || !video.youtube_id) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
+    const intro = String(video.description || '').split(/\n\s*\n/)[0].slice(0, 600);
+    await sendToLinkedin({ text: [video.title, intro, `https://youtu.be/${video.youtube_id}`].filter(Boolean).join('\n\n'),
+      mediaPath: null, title: video.title, channel: video.channel_name, path: relativePath });
+    await folder('mark', { path: relativePath, status: 'published', data: { linkedinPublishedAt: new Date().toISOString() } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur LinkedIn.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('mark', { path: relativePath, status: 'published', data: { linkedinError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// A post (Facebook's, or LinkedIn's own): its text, and its photo or video.
+async function publishLinkedinPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
+  try {
+    if (!post) throw new Error('Post introuvable (déplacé ?).');
+    await sendToLinkedin({ text: post.text.slice(0, 3000), mediaPath: post.video_path || post.image_path || null,
+      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath });
+    await folder('markPost', { path: postPath, patch: { linkedin: { statut: 'publie', published_at: new Date().toISOString() } } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur LinkedIn.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('markPost', { path: postPath, patch: { linkedin: { statut: 'echec', erreur: message } } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1267,13 +1364,13 @@ async function publishInstagramVideo(relativePath, { auto = false } = {}) {
 }
 
 // A video of the posts folder, as a Reel.
-async function publishInstagramPost(postPath) {
-  const post = (await postsList()).find((p) => p.path === postPath);
+async function publishInstagramPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
   try {
     if (!post || !post.video_path) throw new Error('Ce post n’a pas de vidéo pour Instagram.');
     await sendToInstagram({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath });
     await folder('markPost', { path: postPath, patch: { instagram: { statut: 'publie', published_at: new Date().toISOString() } } });
-    await setJob({ running: false, done: true, error: null, message: 'Publié sur Instagram.' });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur Instagram.' });
   } catch (error) {
     const message = friendly(error);
     await folder('markPost', { path: postPath, patch: { instagram: { statut: 'echec', erreur: message } } }).catch(() => {});
@@ -1282,13 +1379,13 @@ async function publishInstagramPost(postPath) {
 }
 
 // A Reel (vertical video) of the posts folder.
-async function publishTikTokPost(postPath) {
-  const post = (await postsList()).find((p) => p.path === postPath);
+async function publishTikTokPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
   try {
     if (!post || !post.video_path) throw new Error('Ce post n’a pas de vidéo pour TikTok.');
     await sendToTikTok({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath });
     await folder('markPost', { path: postPath, patch: { tiktok: { statut: 'publie', published_at: new Date().toISOString() } } });
-    await setJob({ running: false, done: true, error: null, message: 'Publié sur TikTok.' });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur TikTok.' });
   } catch (error) {
     const message = friendly(error);
     await folder('markPost', { path: postPath, patch: { tiktok: { statut: 'echec', erreur: message } } }).catch(() => {});
@@ -1646,7 +1743,8 @@ const STALE_JOB_MS = 30 * 60 * 1000;
 // Wakes up exactly at the time of the next Facebook post (the regular pass
 // is only every 5 minutes, and Chrome may have put the extension to sleep).
 async function planNextDue() {
-  const posts = await postsList().catch(() => []);
+  const posts = [];
+  for (const net of ['facebook', ...POST_NETS]) posts.push(...await postsList(net).catch(() => []));
   let next = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at > Date.now())
     .reduce((min, p) => Math.min(min, p.due_at), Infinity);
   // Catching up late posts: wake up for the next one of them.
@@ -1666,6 +1764,92 @@ async function autoTick() {
 }
 
 const isPaused = async () => !!(await chrome.storage.local.get('autoPaused')).autoPaused;
+
+// After a publication that went well, straight on to the next step (the
+// same publication on the next network). After a failure, the regular pass.
+async function chainIfDone(since) {
+  const { job } = await chrome.storage.session.get('job');
+  if (job && job.done && !job.error && (job.startedAt || 0) >= since) autoTick();
+}
+
+// What is already out (a video on YouTube, a post on Facebook) goes on to
+// the person's other networks: all the networks of one publication, in
+// order, before the next publication. A network with its own folder
+// (Réglages → Dossiers) only takes that folder's posts. Nothing is retried
+// on its own after a failure (the panel shows « Réessayer »).
+async function spreadNext(settings, sent, own) {
+  const on = (net) => networkOn(settings, net);
+  // X / LinkedIn ticked before their start date was kept: from now on.
+  for (const net of ['x', 'linkedin']) {
+    if (on(net) && !settings[`${net}Since`]) {
+      settings[`${net}Since`] = Date.now();
+      await chrome.storage.local.set({ folder: settings });
+    }
+  }
+  const after = (v, since) => !!v.published_at && v.published_at >= (since || Infinity);
+  const videos = sent.filter((v) => v.youtube_id).sort((a, b) => (a.published_at || 0) - (b.published_at || 0));
+  const todo = [];
+  for (const v of videos) {
+    const ch = ownOf(settings, v);
+    const fb = on('facebook') && ch.facebook && ch.facebookPageUrl && after(v, ch.facebookSince || 1);
+    const steps = [
+      // Its Short (vertical version) on YouTube.
+      [on('youtube') && v.vertical_path && !v.short_youtube_id && !v.short_error && ch.auto !== false,
+        () => publishShortOnly(v.relative_path, { auto: true })],
+      // On the Facebook Page: the long video, then its Short as a Reel.
+      [fb && !v.facebook_published_at && !v.facebook_error, () => publishFacebookOnly(v.relative_path, { auto: true, as: 'video' })],
+      [fb && v.vertical_path && v.short_youtube_id && !v.facebook_reel_at && !v.facebook_reel_error,
+        () => publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' })],
+      [on('tiktok') && settings.tiktokAuto && !own('tiktok') && !v.tiktok_published_at && !v.tiktok_error && after(v, settings.tiktokSince),
+        () => publishTikTokVideo(v.relative_path, { auto: true })],
+      [on('instagram') && settings.instagramAuto && !own('instagram') && v.vertical_path && !v.instagram_published_at && !v.instagram_error
+        && after(v, settings.instagramSince), () => publishInstagramVideo(v.relative_path, { auto: true })],
+      [on('x') && !own('x') && settings.xFromYoutube !== false && !v.x_published_at && !v.x_error && after(v, settings.xSince),
+        () => publishXVideo(v.relative_path, { auto: true })],
+      [on('linkedin') && !own('linkedin') && settings.linkedinFromYoutube !== false && !v.linkedin_published_at && !v.linkedin_error && after(v, settings.linkedinSince),
+        () => publishLinkedinVideo(v.relative_path, { auto: true })],
+    ];
+    const step = steps.find(([due]) => due);
+    // The oldest publication first, video or post.
+    if (step) { todo.push([v.published_at || 0, step[1]]); break; }
+  }
+  // Facebook's posts on X and LinkedIn: once out on Facebook; without
+  // Facebook, at their own time.
+  const now = Date.now();
+  const fbOn = on('facebook');
+  const posts = (await postsList().catch(() => []))
+    .sort((a, b) => (Date.parse(a.published_at || 0) || a.due_at || 0) - (Date.parse(b.published_at || 0) || b.due_at || 0));
+  find: for (const p of posts) {
+    for (const [net, send] of [['x', publishXPost], ['linkedin', publishLinkedinPost]]) {
+      if (!on(net) || own(net) || settings[`${net}FromFacebook`] === false || p[`${net}_statut`]) continue;
+      const since = settings[`${net}Since`];
+      const due = p.statut === 'publie' ? p.published_at && Date.parse(p.published_at) >= since
+        : !fbOn && p.statut === 'a_publier' && p.due_at && p.due_at <= now && p.due_at >= since;
+      if (due) { todo.push([Date.parse(p.published_at || 0) || p.due_at || 0, () => send(p.path, { auto: true })]); break find; }
+    }
+  }
+  todo.sort((a, b) => a[0] - b[0]);
+  if (!todo.length) return false;
+  await todo[0][1]();
+  return true;
+}
+
+// The next post of a network's own folder whose time has come (TikTok and
+// Instagram need a video).
+async function ownPostNext(settings) {
+  const ready = [];
+  for (const net of POST_NETS) {
+    if (!networkOn(settings, net)) continue;
+    ready.push(...(await postsList(net).catch(() => []))
+      .filter((p) => p.ready && (!['tiktok', 'instagram'].includes(net) || p.video_path)));
+  }
+  ready.sort((a, b) => (a.due_at || 0) - (b.due_at || 0));
+  const post = ready[0];
+  if (!post) return false;
+  const send = { x: publishXPost, linkedin: publishLinkedinPost, tiktok: publishTikTokPost, instagram: publishInstagramPost }[post.network];
+  await send(post.path, { auto: true });
+  return true;
+}
 
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
@@ -1717,15 +1901,22 @@ async function autoPass() {
   await autoState('ok');
   await chrome.storage.session.remove('permissionNotified');
   if ((await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
-  // A post whose time has come goes first: it has a time, a new video has not.
+  const { videos, sent } = await folderQueue();
+  const own = await ownFolders();
+  const passAt = Date.now();
+  // What is already out somewhere goes on to the other networks first: one
+  // publication on all its networks, then the next one.
+  if (await spreadNext(settings, sent, own)) { await chainIfDone(passAt); return; }
+  // A post whose time has come: it has a time, a new video has not.
   const duePost = networkOn(settings, 'facebook') ? await nextDuePost() : null;
   if (duePost) {
     await chrome.storage.local.set({ lastAutoPostAt: Date.now() });
     await publishFacebookPost(duePost, { auto: true });
-    autoPass(); // another may be due
+    await chainIfDone(passAt); // then the same post on the other networks
     return;
   }
-  const { videos, sent } = await folderQueue();
+  // Each network's own posts (its folder, or <NETWORK>/A-PUBLIER), at their time.
+  if (await ownPostNext(settings)) { await chainIfDone(passAt); return; }
   let next = null;
   for (const candidate of networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
@@ -1742,71 +1933,6 @@ async function autoPass() {
     await publish('folder', next.id, visibility, { auto: true });
     autoTick(); // more may be waiting
     return;
-  }
-  // TikTok, when switched on: videos published on YouTube since then
-  // (vertical version if any, otherwise the video; never retried after a failure).
-  if (settings.tiktokAuto && networkOn(settings, 'tiktok')) {
-    const next = sent.find((v) => v.youtube_id && !v.tiktok_published_at && !v.tiktok_error
-      && v.published_at && v.published_at >= (settings.tiktokSince || Infinity));
-    if (next) {
-      await publishTikTokVideo(next.relative_path, { auto: true });
-      return;
-    }
-  }
-  // The Short of a video already on YouTube whose vertical version came later
-  // (never retried after a failure: the panel shows it with « Réessayer »).
-  if (networkOn(settings, 'youtube')) {
-    const shortNext = sent.find((v) => v.youtube_id && v.vertical_path && !v.short_youtube_id && !v.short_error
-      && ownOf(settings, v).auto !== false);
-    if (shortNext) {
-      await publishShortOnly(shortNext.relative_path, { auto: true });
-      return;
-    }
-  }
-  // Instagram, when its automatic mode is on: videos with a vertical version
-  // published on YouTube since then.
-  if (settings.instagramAuto && networkOn(settings, 'instagram')) {
-    const igNext = sent.find((v) => v.youtube_id && v.vertical_path && !v.instagram_published_at && !v.instagram_error
-      && v.published_at && v.published_at >= (settings.instagramSince || Infinity));
-    if (igNext) {
-      await publishInstagramVideo(igNext.relative_path, { auto: true });
-      return;
-    }
-  }
-  // X, when ticked in « Réseaux utilisés »: what is published from then on
-  // (YouTube videos, then the posts already out on Facebook), never retried
-  // on its own after a failure.
-  if (networkOn(settings, 'x')) {
-    // X ticked before its start date was kept (before 1.17.1): from now on.
-    if (!settings.xSince) {
-      settings.xSince = Date.now();
-      await chrome.storage.local.set({ folder: settings });
-    }
-    const xNext = sent.find((v) => v.youtube_id && !v.x_published_at && !v.x_error && v.published_at && v.published_at >= settings.xSince);
-    if (xNext) { await publishXVideo(xNext.relative_path, { auto: true }); return; }
-    // Posts: once out on Facebook; without Facebook, at their own time.
-    const now = Date.now();
-    const fbOn = networkOn(settings, 'facebook');
-    const xPost = (await postsList().catch(() => [])).find((p) => !p.x_statut && (p.statut === 'publie'
-      ? p.published_at && Date.parse(p.published_at) >= settings.xSince
-      : !fbOn && p.statut === 'a_publier' && p.due_at && p.due_at <= now && p.due_at >= settings.xSince));
-    if (xPost) { await publishXPost(xPost.path, { auto: true }); return; }
-  }
-  // Then a video already on YouTube, for a channel whose Facebook publishing
-  // is automatic (videos published on YouTube since it was switched on).
-  // (the long video as a video post, then its Short as a Reel).
-  for (const v of sent) {
-    const own = ownOf(settings, v);
-    if (!own.facebook || !own.facebookPageUrl || !v.youtube_id) continue;
-    if (!v.published_at || v.published_at < (own.facebookSince || 0)) continue;
-    if (!v.facebook_published_at && !v.facebook_error) {
-      await publishFacebookOnly(v.relative_path, { auto: true, as: 'video' });
-      return;
-    }
-    if (v.vertical_path && v.short_youtube_id && !v.facebook_reel_at && !v.facebook_reel_error) {
-      await publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' });
-      return;
-    }
   }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
   let stale = null;
@@ -2043,6 +2169,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       publishXPost(message.path).catch(() => {});
       return { started: true };
     },
+    linkedin: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishLinkedinVideo(message.path).catch(() => {});
+      return { started: true };
+    },
+    linkedinPost: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishLinkedinPost(message.path).catch(() => {});
+      return { started: true };
+    },
+    networkPosts: async () => postsList(message.net),
+    folders: async () => folder('folders'),
     tiktok: async () => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
