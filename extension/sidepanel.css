@@ -385,3 +385,10 @@ li.row .acts .btn { height: 26px; }
 .networks > li.network-row label > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .networks > li.network-row label > div > strong { flex: none; }
 .networks > li.network-row label > div > .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ------------------------------------------------- version, update notice */
+.brand { display: flex; flex-direction: column; min-width: 0; flex: 0 1 auto; }
+.brand h1 { line-height: 1.15; }
+.brand-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.version { flex: none; font-size: 11px; font-weight: 600; color: var(--muted); }
+.update-pill { flex: none; height: 18px; line-height: 16px; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  text-decoration: none; white-space: nowrap; background: rgba(255, 207, 110, 0.14); color: #ffcf6e; border: 1px solid rgba(255, 207, 110, 0.45); }

@@ -1356,6 +1356,31 @@ $('save-url').addEventListener('click', async () => {
   start();
 });
 
+// Version next to the logo, and a notice when a newer one is out on GitHub
+// (the zip install cannot update itself: the link explains how).
+const newerVersion = (a, b) => {
+  const x = String(a).split('.').map(Number);
+  const y = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+function renderVersion(releaseCheck) {
+  const current = chrome.runtime.getManifest().version;
+  $('version').textContent = `v${current}`;
+  const latest = releaseCheck && releaseCheck.latest;
+  const pill = $('update-pill');
+  pill.hidden = !(latest && newerVersion(latest, current));
+  if (!pill.hidden) {
+    pill.textContent = `Mise à jour ${latest}`;
+    pill.title = `Tu as la version ${current}, la ${latest} est sortie : clique pour voir comment mettre à jour (2 minutes, tes réglages sont gardés).`;
+  }
+}
+chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.releaseCheck) renderVersion(changes.releaseCheck.newValue);
+});
+send({ type: 'checkRelease' }).catch(() => {});
+
 async function start() {
   const { appUrl } = await chrome.storage.local.get('appUrl');
   $('app-url').value = appUrl || '';
