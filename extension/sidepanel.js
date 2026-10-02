@@ -67,25 +67,79 @@ function pillIcon(kind, text, name) {
 
 // One compact line for a video (YouTube, Facebook, TikTok, Instagram):
 // picture, title, details, state and small buttons, like the posts.
-function mediaRow({ path, preview, youtubeId, emptyLabel = 'Vidéo', title, detail, status, actions = [], extra = [] }) {
+// vertical: a Short — its own vertical picture (YouTube's vertical thumbnail,
+// or a frame of short.mp4 before it is online), a « SHORT » badge, same height.
+// extra (a field…) and then the buttons take the whole width under the line.
+function mediaRow({ path, preview, youtubeId, emptyLabel = 'Vidéo', title, detail, status, actions = [], extra = [], vertical = null }) {
   const item = el('li', 'row media');
   if (path) item.dataset.path = path;
   const mini = el('div', 'mini wide', emptyLabel);
   const show = (src) => { const img = document.createElement('img'); img.src = src; img.alt = ''; mini.replaceChildren(img); };
-  if (youtubeId) show(`https://i.ytimg.com/vi/${youtubeId}/mqdefault.jpg`);
+  if (vertical) {
+    mini.classList.add('vertical');
+    const tall = (src) => {
+      const bg = document.createElement('img'); bg.className = 'bg'; bg.alt = ''; bg.src = src;
+      const fg = document.createElement('img'); fg.className = 'fg'; fg.alt = ''; fg.src = src;
+      mini.replaceChildren(bg, fg, el('span', 'badge-short', 'SHORT'));
+    };
+    mini.replaceChildren(el('span', 'badge-short', 'SHORT'));
+    const fromFile = () => vertical.file && KappDossier.fileAt(vertical.file).then(frameOf).then(tall).catch(() => {});
+    if (vertical.youtubeId) {
+      // oardefault = the Short's own vertical thumbnail (absent for some: then the file)
+      const probe = new Image();
+      probe.onload = () => (probe.naturalHeight > probe.naturalWidth ? tall(probe.src) : (fromFile() || tall(probe.src)));
+      probe.onerror = () => fromFile() || tall(`https://i.ytimg.com/vi/${vertical.youtubeId}/hqdefault.jpg`);
+      probe.src = `https://i.ytimg.com/vi/${vertical.youtubeId}/oardefault.jpg`;
+    } else fromFile();
+  } else if (youtubeId) show(`https://i.ytimg.com/vi/${youtubeId}/mqdefault.jpg`);
   else if (preview) KappDossier.fileAt(preview).then((file) => show(URL.createObjectURL(file))).catch(() => {});
   const what = el('div', 'what');
-  what.append(el('div', 't', title));
+  const t = el('div', 't', title);
+  t.title = title || '';
+  what.append(t);
   if (detail) what.append(el('div', 'd', detail));
   const live = el('div', 'live');
-  if (status) live.append(status);
+  const hint = (node) => { if (node && !node.title) node.title = node.textContent || ''; return node; };
+  if (status) live.append(hint(status));
   what.append(live);
-  for (const node of extra) what.append(node);
   const acts = el('div', 'acts');
   acts.append(...actions);
-  item.append(mini, what, acts);
-  item.say = (kind, text) => live.replaceChildren(pill(kind, text));
+  item.append(mini, what);
+  if (extra.length) {
+    // A field under the line: the buttons go with it, full width.
+    for (const node of extra) { node.classList.add('row-extra'); item.append(node); }
+    acts.classList.add('below');
+  }
+  item.append(acts);
+  item.say = (kind, text) => live.replaceChildren(hint(pill(kind, text)));
   return item;
+}
+// A small picture of a video file (a frame at 1 s), for Shorts not yet online.
+function frameOf(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    const url = URL.createObjectURL(file);
+    video.muted = true;
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => { video.currentTime = Math.min(1, (video.duration || 2) / 3); };
+    video.onseeked = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(video.videoWidth / 6));
+      canvas.height = Math.max(1, Math.round(video.videoHeight / 6));
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    video.onerror = () => { URL.revokeObjectURL(url); reject(new Error('frame')); };
+    video.src = url;
+  });
+}
+// Studio's long error messages, said short on one line (full text on hover).
+function shortError(text) {
+  const msg = String(text || '');
+  if (/Adéquation publicitaire/i.test(msg)) return 'Questionnaire « Adéquation publicitaire » à finir dans Studio';
+  if (/Monétisation/i.test(msg)) return 'Étape « Monétisation » à finir dans Studio';
+  return msg;
 }
 function iconLink(name, label, href) {
   const a = el('a', 'btn ghost icon-btn');
@@ -508,23 +562,24 @@ function sentItem(video) {
     status = pill('ok', 'Publiée à la main (rien à envoyer).');
   } else if (!video.youtube_id) {
     // Sent, but its YouTube link is unknown: give it, or send it again.
-    status = pill('warn', 'Le lien YouTube de cette vidéo n’a pas été enregistré.');
+    status = pill('warn', 'Lien YouTube pas enregistré.');
     const group = el('div', 'input-group');
     const input = document.createElement('input');
     input.type = 'url';
-    input.placeholder = 'Colle le lien YouTube de la vidéo';
+    input.placeholder = 'https://youtu.be/…';
     const save = button('Enregistrer', 'btn secondary', async () => {
       const data = await act(item, save, { type: 'linkYoutube', path: video.relative_path, url: input.value.trim() });
       if (data) { item.say('busy', 'Lien enregistré : titre, description et miniature vont être appliqués…'); setTimeout(renderFolder, 1500); }
     });
     group.append(input, save);
     const field = el('div', 'field');
-    field.append(el('label', null, 'Elle est déjà sur YouTube ? Colle son lien pour la mettre à jour :'), group);
+    field.append(el('label', null, 'Déjà sur YouTube ? Colle son lien :'), group);
     extra.push(field);
-    const again = button('Republier avec les infos à jour', 'btn ghost', async () => {
+    const again = button('Republier', 'btn ghost', async () => {
       if (!confirm('La vidéo sera envoyée de nouveau sur YouTube, avec le titre, la description et la miniature du dossier.\n\nPense à supprimer l’ancienne version dans YouTube Studio.')) return;
       await act(item, again, { type: 'republish', path: video.relative_path }, 'Nouvel envoi vers YouTube en cours…');
     });
+    again.title = 'Republier sur YouTube avec le titre, la description et la miniature du dossier';
     actions.push(again);
   } else {
     if (!video.has_content) status = pill('neutral', 'Aucune fiche ni miniature dans le dossier.');
@@ -535,8 +590,9 @@ function sentItem(video) {
     // itself. "Mettre à jour" only shows when an update failed.
     actions.push(iconLink('link', 'Voir', `https://youtu.be/${video.youtube_id}`));
     if (video.update_error && video.update_tried_hash === video.hash) {
-      const update = button('Réessayer la mise à jour', 'btn primary', () => act(item, update,
+      const update = button('Réessayer', 'btn primary', () => act(item, update,
         { type: 'update', path: video.relative_path }, 'Mise à jour sur YouTube en cours…'));
+      update.title = 'Réessayer la mise à jour sur YouTube';
       update.dataset.publish = '1';
       actions.push(update);
     }
@@ -570,18 +626,24 @@ function shortItem(video) {
   let item;
   if (video.short_youtube_id) {
     status = pill('ok', 'Short publié sur YouTube.');
+    actions.push(iconLink('link', 'Voir', `https://youtube.com/shorts/${video.short_youtube_id}`));
   } else {
-    status = video.short_error ? pill('warn', `Échec : ${video.short_error}`) : pill('neutral', 'Part sur YouTube après sa vidéo.');
-    const go = button(video.short_error ? 'Réessayer' : 'Publier le Short', 'btn secondary', () => act(item, go,
+    if (video.short_error) {
+      status = pill('warn', `Échec : ${shortError(video.short_error)}`);
+      status.title = video.short_error;
+    } else status = pill('neutral', 'Part sur YouTube après sa vidéo.');
+    const go = button(video.short_error ? 'Réessayer' : 'Publier', 'btn secondary', () => act(item, go,
       { type: 'shortYoutube', path: video.relative_path }, 'Envoi du Short sur YouTube en cours… (Studio s’ouvre)'));
+    go.title = video.short_error ? 'Renvoyer le Short sur YouTube' : 'Publier le Short sur YouTube';
     go.dataset.publish = '1';
     actions.push(go);
   }
   item = mediaRow({
-    path: video.relative_path, preview: video.preview_path, youtubeId: video.short_youtube_id, emptyLabel: 'Short',
-    title: video.title || video.relative_path.split('/').pop(),
-    detail: [chan(video.channel_name), 'Short'].filter(Boolean).join(' · '),
-    status, actions,
+    path: video.relative_path, emptyLabel: 'Short',
+    vertical: { youtubeId: video.short_youtube_id, file: video.vertical_path },
+    title: String(video.title || video.relative_path.split('/').pop()).replace(/\s*[—-]\s*Short$/i, ''),
+    detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
+    status, actions: actions.filter((x) => !(x.tagName === 'A' && /youtube\.com\/shorts/.test(x.href))),
   });
   item.classList.add('is-short');
   const mini = item.querySelector('.mini');

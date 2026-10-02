@@ -664,7 +664,9 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
   }
 }
 
-async function publishShortYouTube(video, channelId, visibility, { reuse = false } = {}) {
+// monetization: the channel's choice, like its long videos ("on" answers the
+// « Adéquation publicitaire » questionnaire; before 1.18.1 Shorts always stopped there).
+async function publishShortYouTube(video, channelId, visibility, { reuse = false, monetization = 'on' } = {}) {
   const tabId = await openStudioUpload(channelId, false, { reuse });
   const shortVisibility = visibility === 'SCHEDULE' ? 'UNLISTED' : visibility;
   const job = { source: 'folder', social: true, videoId: video.id, tabId,
@@ -684,7 +686,7 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
       });
       await step(tabId, 'fillDetails', { title: `${video.title} — Short`, description: video.description });
       if (video.tags && video.tags.length) await step(tabId, 'fillTags', { tags: video.tags }).catch(() => {});
-      await step(tabId, 'chooseVisibility', { visibility: shortVisibility, monetization: 'manual' });
+      await step(tabId, 'chooseVisibility', { visibility: shortVisibility, monetization });
     });
     await finishUpload(job);
     const { job: finished } = await chrome.storage.session.get('job');
@@ -710,7 +712,7 @@ async function publishShortOnly(relativePath, { auto = false } = {}) {
     const own = ownOf(await folderSettings(), video);
     const channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
     await setJob({ title: video.title, message: 'Envoi du Short sur YouTube…' });
-    const shortId = await publishShortYouTube(video, channelId, channelVisibility(own), { reuse: !auto });
+    const shortId = await publishShortYouTube(video, channelId, channelVisibility(own), { reuse: !auto, monetization: own.monetization || 'on' });
     if (shortId) await folder('mark', { path: relativePath, status: 'published', data: { shortYoutubeId: shortId } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Short publié sur YouTube.' });
   } catch (error) {
@@ -923,7 +925,7 @@ async function finishUpload(job) {
           let shortId = published.short_youtube_id;
           if (!shortId) {
             const channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
-            shortId = await publishShortYouTube(published, channelId, visibility, { reuse: !job.auto });
+            shortId = await publishShortYouTube(published, channelId, visibility, { reuse: !job.auto, monetization: own.monetization || 'on' });
             await folder('mark', { path: video.relative_path, status: 'published', data: { shortYoutubeId: shortId } });
           }
           if (!published.facebook_published_at) {

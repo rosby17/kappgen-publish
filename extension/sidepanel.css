@@ -545,7 +545,7 @@ li.row .when span.was { text-decoration: line-through; color: #ff6b6b; opacity: 
 .pw-account strong { color: var(--text); }
 .pw-account-hint { margin: 4px 0 0; text-align: center; font-size: 11.5px; }
 /* A Short's row: vertical thumbnail, same height as a video's. */
-li.row.is-short .mini.wide { width: 25px; }
+/* (1.18.1) les Shorts gardent la même vignette que les vidéos : image verticale au centre, fond flouté. */
 /* -------------------------------------------- settings rows (tabs) */
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); cursor: pointer; }
 .tab-settings > .set-row:first-of-type { border-top: 0; padding-top: 2px; }
@@ -602,3 +602,18 @@ div.set-row { cursor: default; }
 .net-folder.own .net-folder-where { color: var(--text); font-weight: 600; }
 .net-folder-where .ico { width: 14px; height: 14px; flex: none; color: var(--accent); }
 .net-folder-acts { display: flex; align-items: center; gap: 4px; }
+
+/* 1.18.1 : Shorts (vignette verticale, badge) et lignes avec un champ. */
+li.row .mini.vertical { position: relative; background: #000; display: flex; justify-content: center; }
+li.row .mini.vertical img.bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  filter: blur(6px) brightness(0.5); transform: scale(1.25); }
+li.row .mini.vertical img.fg { position: relative; width: auto; height: 100%; aspect-ratio: 9 / 16; object-fit: cover; }
+li.row .mini .badge-short { position: absolute; left: 3px; bottom: 3px; z-index: 1; font-size: 8px; font-weight: 800; line-height: 1;
+  letter-spacing: 0.04em; color: #fff; background: #ff0033; padding: 2px 4px; border-radius: 3px; }
+li.row.media .what .d { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+li.row.media .row-extra { grid-column: 1 / -1; margin: 2px 0 0; }
+li.row.media .row-extra label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
+li.row.media .row-extra .input-group input { height: 30px; font-size: 12px; }
+li.row.media .row-extra .input-group .btn { height: 30px; }
+li.row.media .acts.below { grid-column: 1 / -1; justify-content: flex-end; }
+li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
