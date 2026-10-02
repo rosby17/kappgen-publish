@@ -692,6 +692,9 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
     const { job: finished } = await chrome.storage.session.get('job');
     return finished && finished.youtubeId;
   } catch (error) {
+    // 1.18.2 : sans ça, la marque « envoi en cours » restait et bloquait toute
+    // la file (posts Facebook compris) jusqu'à 8 h après un Short raté.
+    await chrome.storage.local.remove('pending');
     closeStudioTab(tabId);
     throw error;
   }
@@ -985,6 +988,20 @@ async function resume() {
   if (!pending) return;
   resuming = true;
   try {
+    // 1.18.2 : un Short pas encore enregistré n'est jamais « suivi » après un
+    // redémarrage : Studio peut l'avoir arrêté sur une question (ex. le
+    // questionnaire « Adéquation publicitaire ») et le suivi bloquait alors
+    // toutes les autres publications pendant des heures. On le note en échec
+    // (« Réessayer le Short ») et la file repart.
+    if (pending.social && pending.stage !== 'saved') {
+      await chrome.storage.local.remove('pending');
+      const message = 'Short interrompu par un redémarrage de l’extension : termine-le dans YouTube Studio, ou clique « Réessayer le Short ».';
+      if (pending.video && pending.video.relative_path) {
+        await folder('mark', { path: pending.video.relative_path, status: 'published', data: { shortError: message } }).catch(() => {});
+      }
+      await setJob({ running: false, done: false, error: message, message });
+      return;
+    }
     const tab = await chrome.tabs.get(pending.tabId).catch(() => null);
     if (!tab || !(tab.url || '').startsWith('https://studio.youtube.com')) {
       await chrome.storage.local.remove('pending');
