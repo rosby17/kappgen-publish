@@ -649,6 +649,16 @@ function postRow(post) {
     again.dataset.publish = '1';
     acts.append(again);
   }
+  if ((post.statut === 'a_publier' || post.statut === 'echec') && groupsDefault !== null) {
+    // Groups for this post: the panel's choice, unless this post says otherwise.
+    const on = post.groups === false ? false : post.groups === true || Array.isArray(post.groups) ? true : groupsDefault;
+    const chip = button(on ? 'Groupes : oui' : 'Groupes : non', `chip-toggle${on ? ' on' : ''}`, async () => {
+      await KappDossier.markPost(post.path, { groupes: !on, groupes_tires: null });
+      renderPosts();
+    });
+    chip.title = on ? 'Ce post sera aussi partagé dans des groupes. Cliquer pour ne pas le partager.' : 'Ce post ne sera pas partagé dans les groupes. Cliquer pour le partager.';
+    acts.append(chip);
+  }
   if (post.statut === 'a_publier' || post.statut === 'echec') {
     const change = timeButton(() => item, post.due_at, async (at) => {
       const d = new Date(at);
@@ -733,17 +743,21 @@ async function renderGroups() {
   const config = await settings();
   const groups = config.facebookGroups || [];
   if (document.activeElement !== $('fb-groups')) $('fb-groups').value = groups.join('\n');
+  $('fb-groups-count').textContent = groups.length;
+  if (document.activeElement !== $('fb-groups-per')) $('fb-groups-per').value = config.facebookGroupsPerPost || 9;
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
+  const per = Math.min(config.facebookGroupsPerPost || 9, groups.length);
   const state = $('fb-groups-state');
   state.className = `pill ${config.facebookGroupsOn && groups.length ? 'ok' : 'neutral'}`;
-  state.textContent = config.facebookGroupsOn && groups.length ? `${groups.length} groupe(s)` : 'Désactivé';
+  state.textContent = config.facebookGroupsOn && groups.length ? `${per} par post sur ${groups.length}` : 'Désactivé';
 }
 async function saveGroups() {
   const lines = $('fb-groups').value.split(/\s+/).filter(Boolean);
-  const valid = [...new Set(lines.map(groupLink).filter(Boolean))].slice(0, 25);
+  const valid = [...new Set(lines.map(groupLink).filter(Boolean))].slice(0, 500);
   const wrong = lines.filter((l) => !groupLink(l));
   const current = await settings();
   current.facebookGroups = valid;
+  current.facebookGroupsPerPost = Math.min(25, Math.max(1, Number($('fb-groups-per').value) || 9));
   current.facebookGroupsOn = $('fb-groups-on').checked && valid.length > 0;
   await chrome.storage.local.set({ folder: current });
   $('fb-groups').value = valid.join('\n');
@@ -754,12 +768,12 @@ async function saveGroups() {
   setTimeout(() => { saved.hidden = true; }, 5000);
   renderGroups();
 }
-// « Trouver mes groupes »: the first 10 groups of the connected Facebook account.
+// « Trouver mes groupes »: all the groups of the connected Facebook account.
 async function findGroups() {
   const find = $('fb-groups-find');
   const saved = $('fb-groups-saved');
   find.disabled = true;
-  find.textContent = 'Recherche dans Facebook…';
+  find.textContent = 'Chargement de tous tes groupes…';
   const reply = await send({ type: 'findGroups' });
   find.disabled = false;
   find.textContent = 'Trouver mes groupes';
@@ -769,20 +783,25 @@ async function findGroups() {
     saved.hidden = false;
     return false;
   }
-  // Found groups first, the ones already typed kept after them (25 at most).
+  // Found groups first, the ones already typed kept after them.
   const typed = $('fb-groups').value.split(/\s+/).filter(Boolean);
-  $('fb-groups').value = [...new Set([...reply.data.groups, ...typed.map(groupLink).filter(Boolean)])].slice(0, 25).join('\n');
+  $('fb-groups').value = [...new Set([...reply.data.groups, ...typed.map(groupLink).filter(Boolean)])].slice(0, 500).join('\n');
   return true;
 }
 $('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
 $('fb-groups-save').addEventListener('click', saveGroups);
-// Ticked with no group yet: the 10 first groups of the account, by default.
+$('fb-groups-per').addEventListener('change', saveGroups);
+// Ticked with no group yet: all the groups of the account are loaded first.
 $('fb-groups-on').addEventListener('change', async () => {
   if ($('fb-groups-on').checked && !$('fb-groups').value.trim()) await findGroups();
   saveGroups();
 });
 
+// null when no group list is set (no per-post button then).
+let groupsDefault = null;
 async function renderPosts() {
+  const groupConfig = await settings();
+  groupsDefault = (groupConfig.facebookGroups || []).length ? !!groupConfig.facebookGroupsOn : null;
   renderGroups().catch(() => {});
   renderSetup().catch(() => {});
   const access = await renderFbAccess();

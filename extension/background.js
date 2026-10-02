@@ -1200,33 +1200,68 @@ async function publishFacebookPost(post, { auto = false } = {}) {
 // otherwise the panel's list when « Partager dans les groupes » is ticked.
 // One group after another, with a pause, so Facebook does not take it for spam.
 const GROUP_PAUSE_MS = 40000;
-const MAX_GROUPS = 25;
-const SHARE_BATCH = 9; // Facebook's share window takes 9 groups at most at once
-const FOUND_GROUPS = 10; // « Trouver mes groupes »: the first 10, the ones Facebook suggests first
+const MAX_GROUPS = 25;   // groups for one post
+const POOL_MAX = 500;    // groups in the list a post's groups are drawn from
+const SHARE_BATCH = 9;   // Facebook's share window takes 9 groups at most at once
 function groupUrl(url) {
   const m = facebookWww(String(url || '').trim()).match(/^https:\/\/www\.facebook\.com\/groups\/[^/?#\s]+/i);
   return m ? `${m[0]}/` : null;
 }
+// A post's groups: its own list ("groupes" in publication.json), otherwise,
+// when sharing is switched on, N groups drawn at random from the creator's
+// list (N = « groupes par publication »), once: the draw is written into the
+// post ("groupes_tires") so a retry uses the same groups.
 async function groupsFor(post) {
   if (post.groups === false) return [];
+  const clean = (list) => [...new Set((list || []).map(groupUrl).filter(Boolean))];
+  if (Array.isArray(post.groups)) return clean(post.groups).slice(0, MAX_GROUPS);
+  if (Array.isArray(post.groups_drawn) && post.groups_drawn.length) return clean(post.groups_drawn).slice(0, MAX_GROUPS);
   const settings = await folderSettings();
-  const list = Array.isArray(post.groups) ? post.groups : (settings.facebookGroupsOn ? settings.facebookGroups || [] : []);
-  return [...new Set(list.map(groupUrl).filter(Boolean))].slice(0, MAX_GROUPS);
+  if (!settings.facebookGroupsOn && post.groups !== true) return []; // true: this post, even with sharing off
+  const pool = clean(settings.facebookGroups).slice(0, POOL_MAX);
+  const count = Math.min(MAX_GROUPS, Math.max(1, Number(settings.facebookGroupsPerPost) || 9));
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const drawn = pool.slice(0, count);
+  post.groups_drawn = drawn;
+  if (drawn.length) await folder('markPost', { path: post.path, patch: { groupes_tires: drawn } }).catch(() => {});
+  return drawn;
 }
 const groupsText = (r) => (!r || !r.total ? '' : `, partagé dans ${r.ok} groupe(s) sur ${r.total}${r.bad ? ` (${r.bad} échec(s) : « Repartager » dans le panneau)` : ''}`);
 
-// The groups this Facebook account is a member of (its « Vos groupes » page),
-// the first FOUND_GROUPS of them: the default list, completed by hand up to MAX_GROUPS.
+// All the groups this Facebook account is a member of: its « Vos groupes »
+// page (then the groups feed, whose side list holds them too), scrolled until
+// no new group appears. The list a post's groups are drawn from.
 async function findMyGroups() {
-  const tabId = await openFacebookReel('https://www.facebook.com/groups/joins/?nav_source=tab');
+  let found = [];
+  for (const url of ['https://www.facebook.com/groups/joins/?nav_source=tab', 'https://www.facebook.com/groups/feed/']) {
+    found = await groupsOnPage(url).catch(() => []);
+    if (found.length) break;
+  }
+  if (!found.length) throw new Error('Aucun groupe trouvé. Vérifie que tu es connecté à Facebook dans ce Chrome, ou colle les liens de tes groupes à la main.');
+  found = found.slice(0, POOL_MAX);
+  await rememberGroupNames(Object.fromEntries(found.filter((g) => g.name).map((g) => [g.url, g.name])));
+  return found.map((g) => g.url);
+}
+
+async function groupsOnPage(pageUrl) {
+  const tabId = await openFacebookReel(pageUrl);
   try {
-    let found = [];
-    for (let i = 0; i < 12 && found.length < FOUND_GROUPS; i += 1) {
-      await sleep(1500);
+    const found = [];
+    let quiet = 0;
+    for (let i = 0; i < 120 && quiet < 6; i += 1) {
+      await sleep(i ? 1500 : 3000);
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
-          window.scrollBy(0, 1200);
+          // The page and every scrolling list in it (Facebook keeps the
+          // groups in a side list that scrolls on its own).
+          window.scrollBy(0, 1500);
+          for (const el of document.querySelectorAll('div, ul, nav')) {
+            if (el.scrollHeight > el.clientHeight + 80 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) el.scrollTop += 1500;
+          }
           const skip = /^(feed|joins|discover|create|notifications|search|category|you|explore|membership_requests)$/i;
           return [...document.querySelectorAll('a[href*="/groups/"]')].map((a) => {
             const m = a.href.match(/facebook\.com\/groups\/([^/?#]+)/i);
@@ -1235,16 +1270,15 @@ async function findMyGroups() {
           }).filter(Boolean);
         },
       });
+      const before = found.length;
       for (const g of result || []) {
         const known = found.find((f) => f.url === g.url);
         if (!known) found.push(g);
         else if (!known.name && g.name) known.name = g.name;
       }
+      quiet = found.length > before ? 0 : quiet + 1;
     }
-    if (!found.length) throw new Error('Aucun groupe trouvé : vérifie que tu es connecté à Facebook dans ce Chrome et membre de groupes.');
-    found = found.slice(0, FOUND_GROUPS);
-    await rememberGroupNames(Object.fromEntries(found.filter((g) => g.name).map((g) => [g.url, g.name])));
-    return found.map((g) => g.url);
+    return found;
   } finally {
     closeStudioTab(tabId); // a tab opened for this is closed, the creator's own stays
   }

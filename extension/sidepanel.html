@@ -166,10 +166,14 @@
 
     <details id="fb-groups-box" class="card groups-card">
       <summary><span class="groups-title">Partage dans les groupes</span><span id="fb-groups-state" class="pill neutral"></span></summary>
-      <p class="small muted">Pendant la publication sur ta Page, KappGen coche ces groupes dans la fenêtre de Facebook (9 au plus, la limite de Facebook) : le post part sur la Page et dans les groupes en une fois. Les groupes en plus sont partagés juste après, par paquets de 9, sinon un par un avec 40 secondes de pause. Tu dois être membre de chaque groupe avec le compte connecté dans ce Chrome.</p>
-      <label class="small" for="fb-groups">Tes groupes, un lien par ligne : « Trouver mes groupes » met les 10 premiers, ajoute les autres jusqu’à 25</label>
-      <textarea id="fb-groups" rows="4" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
-      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager chaque post dans ces groupes</label>
+      <p class="small muted">Facultatif. Pour chaque post, KappGen tire au hasard le nombre de groupes choisi dans ta liste et les coche dans la fenêtre de publication de Facebook (9 par envoi, la limite de Facebook). Tu peux aussi l’activer ou non post par post (bouton « Groupes » sur chaque post). Tu dois être membre de chaque groupe avec le compte connecté dans ce Chrome.</p>
+      <label class="small" for="fb-groups">Tes groupes (<span id="fb-groups-count">0</span>) : « Trouver mes groupes » les charge tous, ou colle leurs liens, un par ligne</label>
+      <textarea id="fb-groups" rows="5" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
+      <div class="groups-per">
+        <label class="small" for="fb-groups-per">Nombre de groupes par publication</label>
+        <input id="fb-groups-per" type="number" min="1" max="25" value="9">
+      </div>
+      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager mes posts dans des groupes (tirés au hasard à chaque post)</label>
       <div class="groups-actions"><button id="fb-groups-find" class="btn secondary">Trouver mes groupes</button><button id="fb-groups-save" class="btn secondary">Enregistrer</button><span id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</span></div>
     </details>
 
