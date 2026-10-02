@@ -335,18 +335,31 @@ async function postStep(tabId, name, args) {
 }
 
 async function step(tabId, name, args) {
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: async (fn, input) => {
-      try {
-        return { ok: true, value: await window.__kappgen[fn](input) };
-      } catch (error) {
-        return { ok: false, error: String((error && error.message) || error) };
-      }
-    },
-    args: [name, args || {}],
-  });
-  if (!result || !result.ok) throw new Error((result && result.error) || `Étape « ${name} » impossible.`);
+  // Studio sometimes reloads the page under the script (after a thumbnail, a
+  // redirect...): window.__kappgen is then gone. Inject the script again and
+  // retry the step once instead of failing with « reading '...' of undefined ».
+  const run = async () => {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (fn, input) => {
+        if (!window.__kappgen) return { ok: false, missing: true };
+        try {
+          return { ok: true, value: await window.__kappgen[fn](input) };
+        } catch (error) {
+          return { ok: false, error: String((error && error.message) || error) };
+        }
+      },
+      args: [name, args || {}],
+    });
+    return result;
+  };
+  let result = await run();
+  if (result && result.missing) {
+    await sleep(4000); // let the reloaded page settle
+    await injectScripts(tabId, ['studio.js']);
+    result = await run();
+  }
+  if (!result || !result.ok) throw new Error((result && !result.missing && result.error) || `Étape « ${name} » impossible.`);
   return result.value;
 }
 
