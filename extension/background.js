@@ -1776,11 +1776,20 @@ async function autoPass() {
   // X, when ticked in « Réseaux utilisés »: what is published from then on
   // (YouTube videos, then the posts already out on Facebook), never retried
   // on its own after a failure.
-  if (networkOn(settings, 'x') && settings.xSince) {
+  if (networkOn(settings, 'x')) {
+    // X ticked before its start date was kept (before 1.17.1): from now on.
+    if (!settings.xSince) {
+      settings.xSince = Date.now();
+      await chrome.storage.local.set({ folder: settings });
+    }
     const xNext = sent.find((v) => v.youtube_id && !v.x_published_at && !v.x_error && v.published_at && v.published_at >= settings.xSince);
     if (xNext) { await publishXVideo(xNext.relative_path, { auto: true }); return; }
-    const xPost = (await postsList().catch(() => [])).find((p) => p.statut === 'publie' && !p.x_statut
-      && p.published_at && Date.parse(p.published_at) >= settings.xSince);
+    // Posts: once out on Facebook; without Facebook, at their own time.
+    const now = Date.now();
+    const fbOn = networkOn(settings, 'facebook');
+    const xPost = (await postsList().catch(() => [])).find((p) => !p.x_statut && (p.statut === 'publie'
+      ? p.published_at && Date.parse(p.published_at) >= settings.xSince
+      : !fbOn && p.statut === 'a_publier' && p.due_at && p.due_at <= now && p.due_at >= settings.xSince));
     if (xPost) { await publishXPost(xPost.path, { auto: true }); return; }
   }
   // Then a video already on YouTube, for a channel whose Facebook publishing
