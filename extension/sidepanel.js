@@ -1234,8 +1234,15 @@ function facebookItem(video, page, as = 'video') {
   if (doneAt) {
     status = pill('ok', `${reel ? 'Réel publié' : 'Vidéo publiée'} sur Facebook le ${new Date(doneAt).toLocaleDateString('fr-FR')}.`);
   } else {
+    // Why it goes, or waits (the same rules as background.js).
+    const since = fbConfig.facebookFromYoutubeSince || Date.now() - 7 * 24 * 3600000;
+    const auto = fbConfig.facebookFromYoutube !== false && (video.published_at || 0) >= since;
+    const shortFirst = reel && !video.short_youtube_id && !video.short_error;
     status = error ? pill('warn', `Échec : ${error}`)
-      : page ? pill('neutral', reel ? 'Réel prêt à partir.' : 'Vidéo prête à partir.') : pill('warn', 'Colle le lien de ta page Facebook (Réglages).');
+      : !page ? pill('warn', 'Colle le lien de ta page Facebook (Réglages).')
+        : !auto ? pill('neutral', 'Publiée sur YouTube avant l’activation : clique « Publier ».')
+          : shortFirst ? pill('neutral', 'Part tout seul juste après le Short sur YouTube.')
+            : pill('ok', reel ? 'Part tout seul (à la suite).' : 'Part toute seule (à la suite).');
     const publish = button(error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, publish,
       { type: 'facebook', path: video.relative_path, as }, 'Publication sur Facebook en cours…'));
     publish.dataset.publish = '1';
@@ -1420,8 +1427,10 @@ function renderInstagram() {
   applyJob();
 }
 
+let fbConfig = {};
 async function renderFacebook(data) {
   const config = await settings();
+  fbConfig = config;
   const pageOf = (v) => ({ ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) }).facebookPageUrl || config.facebookPageUrl;
   const recent = (a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0);
   // Each YouTube video: the long video, and its Short as a Reel when there is one.
@@ -1942,8 +1951,14 @@ function applyJob() {
   const job = currentJob;
   for (const node of document.querySelectorAll('[data-publish]')) node.disabled = !!(job && job.running);
   if (!job || !job.path) return;
+  // A job's news shows on its own network's tab only (a YouTube failure is
+  // not the Facebook Reel's state).
+  const tabOf = { facebook: 'facebook', post: 'facebook', image: 'facebook', groups: 'facebook', x: 'x', linkedin: 'linkedin', tiktok: 'tiktok', instagram: 'instagram' };
+  const jobTab = `tab-${tabOf[job.kind] || 'youtube'}`;
   for (const item of document.querySelectorAll('li.item, li.row')) {
     if (item.dataset.path !== job.path || !item.say) continue;
+    const tab = item.closest('.tab');
+    if (tab && tab.id !== jobTab) continue;
     if (job.running) item.say('busy', job.message || 'En cours…');
     else if (job.error) item.say('warn', job.error);
     else if (job.done) item.say('ok', job.message || 'Terminé.');
