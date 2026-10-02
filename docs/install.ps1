@@ -98,7 +98,7 @@ Write-Host "  3/3  Version $version en place."
 Write-Host ''
 if ($updated.Count -gt 0) {
   Write-Host "  OK  MIS A JOUR dans $($updated.Count) profil(s) Chrome :" -ForegroundColor Green
-  foreach ($p in $updated) { Write-Host "      - $($p.Name)" }
+  foreach ($p in $updated) { Write-Host "      - $($p.Name)  ($($p.Path))" }
   Write-Host '      Rien d''autre a faire : KappGen Publish s''y recharge tout seul d''ici une minute.'
   Write-Host ''
 }

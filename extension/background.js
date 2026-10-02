@@ -1633,10 +1633,14 @@ async function ensureAlarms() {
 // code it loaded until someone clicks ↻. When the files on disk carry a newer
 // version, reload by ourselves (never in the middle of an upload).
 async function selfUpdate() {
+  // Never in the middle of a publication; but one with no news for 30 min is
+  // dead (it would otherwise block every update forever), and an upload being
+  // followed is picked up again after the reload (resume()).
   const { job } = await chrome.storage.session.get('job');
-  if (job && job.running) return;
+  const quiet = job && job.running ? Date.now() - (job.updatedAt || job.startedAt || 0) : Infinity;
+  if (quiet < STALE_JOB_MS) return;
   const { pending } = await chrome.storage.local.get('pending');
-  if (pending) return;
+  if (pending && resuming) return;
   const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
   if (disk.version && disk.version !== chrome.runtime.getManifest().version) chrome.runtime.reload();
 }
