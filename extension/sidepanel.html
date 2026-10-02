@@ -72,6 +72,14 @@
         <span class="offer-name">À vie</span><span class="offer-price"><strong>50 $</strong> une seule fois</span><span class="offer-note">Payé une fois, à toi pour toujours</span>
       </button>
     </div>
+    <details id="pw-ref-box" class="pw-ref">
+      <summary>J’ai un code partenaire</summary>
+      <div class="input-group">
+        <input id="pw-ref" type="text" maxlength="32" placeholder="ex. VINCENT7K" autocomplete="off">
+        <button id="pw-ref-apply" class="btn secondary">Valider</button>
+      </div>
+      <p id="pw-ref-msg" class="small muted" hidden></p>
+    </details>
     <div class="paywall-actions">
       <button id="pw-trial" class="btn secondary wide" hidden>Essayer gratuitement 7 jours</button>
       <button id="pw-subscribe" class="btn primary wide">S’abonner</button>
@@ -292,6 +300,22 @@
       <div class="field-head"><h2>Réseaux utilisés</h2></div>
       <p class="small muted">Coche seulement les réseaux sur lesquels tu publies. Un réseau décoché disparaît du panneau et KappGen n'y envoie plus rien, même automatiquement.</p>
       <ul id="networks" class="networks"></ul>
+    </section>
+
+    <section id="partner-card" class="card partner-card" hidden>
+      <div class="field-head"><h2>Mon lien partenaire</h2><span id="partner-rate" class="pill ok"></span></div>
+      <p class="small muted">Partage ce lien. Chaque client qui arrive par lui (ou qui tape ton code avant de payer) t’est rattaché, et tu touches ta part sur chacun de ses paiements de l’extension.</p>
+      <div class="input-group">
+        <input id="partner-link" type="text" readonly>
+        <button id="partner-copy" class="btn secondary">Copier</button>
+      </div>
+      <p class="small muted">Ton code : <strong id="partner-code"></strong></p>
+      <div class="partner-stats">
+        <div><strong id="partner-referred">0</strong><span>clients</span></div>
+        <div><strong id="partner-sales">0</strong><span>ventes</span></div>
+        <div><strong id="partner-due">0</strong><span>à recevoir</span></div>
+        <div><strong id="partner-paid">0</strong><span>déjà reçu</span></div>
+      </div>
     </section>
 
     <section class="card">

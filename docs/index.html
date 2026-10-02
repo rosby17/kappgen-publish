@@ -77,6 +77,8 @@ body:not(.win) .win-seul{display:none} body.win .mac-seul{display:none}
 .bandeau.info{background:var(--accent-f);color:#1e3a8a}
 .bandeau.attention{background:var(--ambre-f);color:#6b4202}
 .bandeau.ok{background:var(--vert-f);color:#0f5a2a}
+.parrain{margin:28px 0 0;background:#ffffff14;border:1px solid #ffffff2e;color:#e4e7f5;border-radius:12px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start;font-size:15px}
+.parrain b{color:#fff}.parrain a{color:#a9bcff}
 
 /* ---------- sections */
 section.bloc-page{margin-top:56px;scroll-margin-top:16px}
@@ -191,6 +193,7 @@ details.plie ol{padding-left:20px}
         <div><svg class="i"><use href="#i-gift"/></svg><span><b>7 jours gratuits</b>pour essayer</span></div>
       </div>
     </div>
+    <div class="parrain" id="parrain" hidden><svg class="i"><use href="#i-gift"/></svg><span>Tu viens de la part d'un partenaire KappGen (code <b id="parrain-code"></b>). <a id="parrain-compte" href="https://app.kappgen.com">Crée ton compte KappGen avec ce lien</a> avant d'installer, ou tape ce code dans l'extension au moment de payer (« J'ai un code partenaire »).</span></div>
   </div>
 </header>
 
@@ -332,6 +335,18 @@ function os(v) {
 }
 choix.forEach(b => b.addEventListener('click', () => os(b.dataset.os)));
 if (/Windows/i.test(navigator.userAgent)) os('win');
+// Partner link (?ref=CODE): shown, and carried to every KappGen sign-up link.
+(() => {
+  let ref = null;
+  try { ref = new URLSearchParams(location.search).get('ref'); } catch { /* old browser */ }
+  if (!ref || !/^[A-Za-z0-9]{3,32}$/.test(ref)) return;
+  ref = ref.toUpperCase();
+  document.getElementById('parrain').hidden = false;
+  document.getElementById('parrain-code').textContent = ref;
+  document.querySelectorAll('a[href^="https://app.kappgen.com"]').forEach(a => {
+    const url = new URL(a.href); url.searchParams.set('ref', ref); a.href = url.toString();
+  });
+})();
 document.querySelectorAll('[data-copie]').forEach(b => b.addEventListener('click', () => {
   const bloc = document.getElementById(b.dataset.copie);
   const t = [...bloc.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();

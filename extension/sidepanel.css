@@ -416,3 +416,13 @@ li.row .acts .btn { height: 26px; }
 .groups-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .groups-line { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
 .groups-line.warn { color: #ffcf6e; }
+/* ------------------------------------------------------ sales partners */
+.pw-ref { margin: 12px 0 0; font-size: 12.5px; }
+.pw-ref > summary { cursor: pointer; color: var(--muted); list-style: none; }
+.pw-ref > summary::-webkit-details-marker { display: none; }
+.pw-ref .input-group { margin-top: 8px; }
+.partner-card #partner-link { font: 11.5px ui-monospace, Menlo, Consolas, monospace; }
+.partner-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.partner-stats div { background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border); border-radius: 10px; padding: 8px 6px; text-align: center; min-width: 0; }
+.partner-stats strong { display: block; font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.partner-stats span { font-size: 10.5px; color: var(--muted); }
