@@ -1408,12 +1408,40 @@ async function shareInGroups(post) {
   return { ok, bad, total: Math.max(target, ok + bad) };
 }
 
-// Next post whose time has come (one per pass, so posts stay spread out).
+// Next post whose time has come. On time, it goes at its time. When posts
+// are late (Chrome closed, computer asleep…), they never go out all at once:
+// they leave one by one, twice as fast as the usual spacing between posts
+// (2 min 30 at least), until the delay is caught up, then the normal rhythm.
+const ON_TIME_MS = 10 * 60000;
+function catchUpGap(posts) {
+  const times = posts.map((p) => p.due_at).filter(Boolean).sort((a, b) => a - b);
+  const gaps = [];
+  for (let i = 1; i < times.length; i += 1) {
+    const gap = times[i] - times[i - 1];
+    if (gap > 0 && gap <= 24 * 3600000) gaps.push(gap);
+  }
+  gaps.sort((a, b) => a - b);
+  const usual = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 30 * 60000;
+  return Math.min(30 * 60000, Math.max(150000, usual / 2));
+}
 async function nextDuePost() {
   const posts = await postsList().catch(() => []);
   // A post without a known Page waits (no failure) until the link is given.
-  for (const post of posts.filter((p) => p.ready)) if (await postPage(post)) return post;
-  return null;
+  const ready = [];
+  for (const post of posts.filter((p) => p.ready)) if (await postPage(post)) ready.push(post);
+  if (!ready.length) { await chrome.storage.local.remove('catchUp'); return null; }
+  const now = Date.now();
+  const late = ready.length > 1 || (ready[0].due_at && now - ready[0].due_at > ON_TIME_MS);
+  if (late) {
+    const gap = catchUpGap(posts);
+    const { lastAutoPostAt } = await chrome.storage.local.get('lastAutoPostAt');
+    const next = (lastAutoPostAt || 0) + gap;
+    await chrome.storage.local.set({ catchUp: { count: ready.length, gap, next: Math.max(now, next) } });
+    if (now < next) return null; // the precise alarm wakes up at `next`
+  } else {
+    await chrome.storage.local.remove('catchUp');
+  }
+  return ready[0];
 }
 
 // Last uploads of this profile, shown in the popup.
@@ -1452,8 +1480,11 @@ const STALE_JOB_MS = 30 * 60 * 1000;
 // is only every 5 minutes, and Chrome may have put the extension to sleep).
 async function planNextDue() {
   const posts = await postsList().catch(() => []);
-  const next = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at > Date.now())
+  let next = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at > Date.now())
     .reduce((min, p) => Math.min(min, p.due_at), Infinity);
+  // Catching up late posts: wake up for the next one of them.
+  const { catchUp } = await chrome.storage.local.get('catchUp');
+  if (catchUp && catchUp.next > Date.now()) next = Math.min(next, catchUp.next);
   await chrome.storage.local.set({ nextDueAt: Number.isFinite(next) ? next : null });
   if (Number.isFinite(next)) await chrome.alarms.create('due', { when: next + 5000 });
   else await chrome.alarms.clear('due');
@@ -1518,6 +1549,7 @@ async function autoPass() {
   // A post whose time has come goes first: it has a time, a new video has not.
   const duePost = networkOn(settings, 'facebook') ? await nextDuePost() : null;
   if (duePost) {
+    await chrome.storage.local.set({ lastAutoPostAt: Date.now() });
     await publishFacebookPost(duePost, { auto: true });
     autoPass(); // another may be due
     return;

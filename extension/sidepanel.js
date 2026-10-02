@@ -197,18 +197,26 @@ let setupOpened = false;
 async function renderSetup() {
   const config = await settings();
   const folderOk = (await KappDossier.access()).state === 'granted';
-  const pagesOk = PAGE_FIELDS.filter(([name]) => networkIsOn(config, name)).every(([name]) => pageUrlOf(config, name));
+  // Only the networks ticked (and that really publish) need their link.
+  const pagesOk = PAGE_FIELDS.filter(([name]) => LIVE_NETWORKS.has(name) && networkIsOn(config, name)).every(([name]) => pageUrlOf(config, name));
   const fbOk = (await KappDossier.fbAccess().catch(() => ({}))).state === 'granted';
   $('setup-folder').classList.toggle('done', folderOk);
   $('setup-fb').classList.toggle('done', fbOk);
   $('setup-pages').classList.toggle('done', pagesOk);
-  // The posts folder is optional: the card goes once the videos folder and the links are set.
-  $('setup').hidden = folderOk && pagesOk;
+  // The posts folder is optional: the card goes once the videos folder and the
+  // links are set, or for good when closed with its ✕.
+  const { setupClosed } = await chrome.storage.local.get('setupClosed');
+  $('setup').hidden = !!setupClosed || (folderOk && pagesOk);
   if (!folderOk && !setupOpened) {
     setupOpened = true;
     document.querySelector('.topbar [data-tab="settings"]').click();
   }
 }
+$('setup-close').addEventListener('click', async () => {
+  await chrome.storage.local.set({ setupClosed: true });
+  $('setup').hidden = true;
+});
+
 // Each step opens the settings right on its own card, which lights up briefly.
 for (const stepButton of document.querySelectorAll('.setup-steps button')) {
   stepButton.addEventListener('click', () => {
@@ -486,7 +494,12 @@ const NETWORKS = [
   ['snapchat', 'Snapchat', 'En développement.', 'snapchat'],
   ['x', 'X', 'En développement.', 'x'],
 ];
-const networkIsOn = (config, name) => ((config.networks || {})[name] !== false);
+// Networks still in development are off unless ticked; the others on unless unticked.
+const LIVE_NETWORKS = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);
+const networkIsOn = (config, name) => {
+  const value = (config.networks || {})[name];
+  return value === undefined ? LIVE_NETWORKS.has(name) : value !== false;
+};
 
 // Hides the tabs (and the per-channel Facebook fields) of the networks switched off.
 async function applyNetworks() {
@@ -629,7 +642,7 @@ function postRow(post) {
   const live = el('div', 'live');
   const due = post.due_at && post.due_at > Date.now();
   const states = {
-    a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'Part dans les 5 min'),
+    a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'En retard : part bientôt, un par un'),
     en_cours: pill('busy', 'Publication en cours…'),
     publie: pill('ok', 'Publié'),
     echec: pill('warn', post.error || 'Échec de la publication.'),
@@ -726,9 +739,11 @@ for (const chip of document.querySelectorAll('#fb-filters .chip')) {
     renderPosts();
   });
 }
-for (const b of $('fb-sort').querySelectorAll('button')) b.addEventListener('click', () => {
-  postSort = b.dataset.value;
-  for (const x of $('fb-sort').querySelectorAll('button')) { x.classList.toggle('active', x === b); x.setAttribute('aria-checked', String(x === b)); }
+// One small button flips the order (earliest / latest first).
+$('fb-sort').addEventListener('click', () => {
+  postSort = postSort === 'desc' ? 'asc' : 'desc';
+  $('fb-sort').textContent = postSort === 'desc' ? '↓' : '↑';
+  $('fb-sort').title = `Ordre : ${postSort === 'desc' ? 'plus tard' : 'plus tôt'} d’abord (cliquer pour inverser)`;
   renderPosts();
 });
 
@@ -746,6 +761,7 @@ async function renderGroups() {
   $('fb-groups-count').textContent = groups.length;
   if (document.activeElement !== $('fb-groups-per')) $('fb-groups-per').value = config.facebookGroupsPerPost || 9;
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
+  $('fb-groups-more').hidden = !config.facebookGroupsOn; // the number only once ticked
   const per = Math.min(config.facebookGroupsPerPost || 9, groups.length);
   const state = $('fb-groups-state');
   state.className = `pill ${config.facebookGroupsOn ? 'ok' : 'neutral'}`;
@@ -792,7 +808,7 @@ async function findGroups() {
 $('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
 $('fb-groups-save').addEventListener('click', saveGroups);
 $('fb-groups-per').addEventListener('change', saveGroups);
-$('fb-groups-on').addEventListener('change', saveGroups);
+$('fb-groups-on').addEventListener('change', () => { $('fb-groups-more').hidden = !$('fb-groups-on').checked; saveGroups(); });
 
 // null when no group list is set (no per-post button then).
 let groupsDefault = null;
@@ -1553,7 +1569,7 @@ function timeZoneLabel() {
   return `${zone.replace(/_/g, ' ')}, UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
 }
 async function renderAutoStatus() {
-  const { autoStatus, lastAutoTick, nextDueAt } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt']);
+  const { autoStatus, lastAutoTick, nextDueAt, catchUp } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt', 'catchUp']);
   const box = $('auto-status');
   const now = Date.now();
   // Folder access closed by Chrome: a card with one button instead of a sentence.
@@ -1576,7 +1592,9 @@ async function renderAutoStatus() {
     tone = autoStatus && autoStatus.state === 'busy' ? 'busy' : '';
     const later = nextDueAt && new Date(nextDueAt).toDateString() !== new Date().toDateString()
       ? ` le ${new Date(nextDueAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : '';
-    text = `Publication automatique active${nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${later}` : ''} · heure de ton ordinateur : ${clock(now)} (${timeZoneLabel().split(',')[0].split('/').pop()})`;
+    text = catchUp && catchUp.count > 1
+      ? `Rattrapage : ${catchUp.count} posts en retard, un toutes les ${Math.round(catchUp.gap / 60000 * 10) / 10} min (prochain à ${clock(catchUp.next)})`
+      : `Publication automatique active${nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${later}` : ''} · heure de ton ordinateur : ${clock(now)} (${timeZoneLabel().split(',')[0].split('/').pop()})`;
   }
   box.className = `auto-status ${tone}`.trim();
   $('auto-status-text').textContent = text;
@@ -1608,7 +1626,7 @@ $('auto-resume').addEventListener('click', async () => {
   setTimeout(renderAutoStatus, 1500);
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt)) renderAutoStatus();
+  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt || changes.catchUp)) renderAutoStatus();
 });
 setInterval(() => { if (!document.hidden) renderAutoStatus(); }, 30000);
 

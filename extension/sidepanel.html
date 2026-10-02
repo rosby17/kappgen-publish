@@ -123,6 +123,7 @@
   </section>
 
   <section id="setup" class="card setup-card" hidden>
+    <button id="setup-close" class="icon-close" title="Fermer cette carte" aria-label="Fermer">✕</button>
     <h2>Bienvenue ! Pour commencer</h2>
     <p class="small muted">À faire une seule fois. Clique sur une étape pour y aller.</p>
     <ol class="setup-steps">
@@ -164,18 +165,6 @@
 
   <div id="tab-facebook" class="tab" hidden>
 
-    <details id="fb-groups-box" class="card groups-card">
-      <summary><span class="groups-title">Partage dans les groupes</span><span id="fb-groups-state" class="pill neutral"></span></summary>
-      <p class="small muted">Facultatif. Pendant la publication, après « Suivant », KappGen clique « Partager dans les groupes » et coche le nombre de groupes choisi, au hasard parmi ceux que Facebook te propose (9 au plus, la limite de Facebook), puis publie. Tu peux l’activer ou non post par post (bouton « Groupes » sur chaque post).</p>
-      <label class="small" for="fb-groups">Facultatif : tes groupes préférés (<span id="fb-groups-count">0</span>), cochés en priorité. « Trouver mes groupes » les charge, ou colle leurs liens, un par ligne</label>
-      <textarea id="fb-groups" rows="5" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
-      <div class="groups-per">
-        <label class="small" for="fb-groups-per">Nombre de groupes par publication</label>
-        <input id="fb-groups-per" type="number" min="1" max="25" value="9">
-      </div>
-      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager mes posts dans des groupes (tirés au hasard à chaque post)</label>
-      <div class="groups-actions"><button id="fb-groups-find" class="btn secondary">Trouver mes groupes</button><button id="fb-groups-save" class="btn secondary">Enregistrer</button><span id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</span></div>
-    </details>
 
     <div class="list-head"><h2>Posts programmés</h2><span id="fb-summary" class="muted small"></span></div>
     <div id="fb-filters" class="filters">
@@ -186,10 +175,7 @@
         <button data-type="reel" class="chip">Vidéos</button>
         <button data-type="echec" class="chip">Échecs</button>
       </div>
-      <div id="fb-sort" class="segmented small-seg" role="radiogroup" aria-label="Ordre">
-        <button type="button" data-value="asc" role="radio" class="active" aria-checked="true">Plus tôt d’abord</button>
-        <button type="button" data-value="desc" role="radio" aria-checked="false">Plus tard d’abord</button>
-      </div>
+      <button type="button" id="fb-sort" class="sort-btn" title="Ordre : plus tôt d’abord (cliquer pour inverser)" aria-label="Inverser l’ordre">↑</button>
     </div>
     <div id="fb-days"></div>
     <ul id="fb-posts" class="rows" hidden></ul>
@@ -240,11 +226,7 @@
   </div>
 
   <div id="tab-settings" class="tab" hidden>
-    <section class="card how-card">
-      <h2>Comment KappGen publie</h2>
-      <p class="small">KappGen publie <strong>comme toi, dans ce Chrome</strong> : il ouvre YouTube Studio, Facebook, TikTok… et remplit les champs à ta place. Il ne passe pas par une API ni par un mot de passe. <strong>Chaque compte doit donc être ouvert et connecté dans ce même Chrome</strong> (ce profil) : une page non connectée ici ne peut pas recevoir de publication.</p>
-    </section>
-
+    <h3 class="set-group">Dossiers</h3>
     <section class="card" id="set-folder">
       <h2>Dossier des vidéos YouTube</h2>
       <p class="small muted folder-what">Tes vidéos longues finies, une par dossier (vidéo + miniature + texte). Elles partent sur YouTube, puis, si tu veux, sur Facebook et TikTok.</p>
@@ -274,14 +256,19 @@
       </div>
       <p id="fb-folder-hint" class="muted small">L’heure de chaque post est celle écrite dans son dossier ; un post sans heure part tout de suite.</p>
     </section>
-
+    <h3 class="set-group">Réseaux et pages</h3>
+    <section class="card">
+      <div class="field-head"><h2>Réseaux utilisés</h2></div>
+      <p class="small muted">Coche seulement les réseaux sur lesquels tu publies. Un réseau décoché disparaît du panneau et KappGen n'y envoie plus rien, même automatiquement.</p>
+      <ul id="networks" class="networks"></ul>
+    </section>
     <section class="card" id="set-pages">
       <div class="field-head"><h2>Tes pages et comptes</h2><span id="pages-state" class="pill warn"></span></div>
       <p class="small muted">Colle le lien de chaque page ou compte où publier. Ouvre-le une fois dans ce Chrome pour vérifier que tu y es bien connecté.</p>
       <div id="pages" class="pages"></div>
       <p id="pages-saved" class="small ok-text" hidden>Liens enregistrés.</p>
     </section>
-
+    <h3 class="set-group">Publication</h3>
     <section class="card">
       <h2>Publication sur YouTube</h2>
       <div class="field">
@@ -305,13 +292,30 @@
         </div>
       </div>
     </section>
-
-    <section class="card">
-      <div class="field-head"><h2>Réseaux utilisés</h2></div>
-      <p class="small muted">Coche seulement les réseaux sur lesquels tu publies. Un réseau décoché disparaît du panneau et KappGen n'y envoie plus rien, même automatiquement.</p>
-      <ul id="networks" class="networks"></ul>
+    <section class="card" id="set-groups">
+      <div class="field-head"><h2>Groupes Facebook</h2><span id="fb-groups-state" class="pill neutral"></span></div>
+      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager aussi mes posts Facebook dans des groupes</label>
+      <div id="fb-groups-more" hidden>
+        <div class="groups-per">
+          <label class="small" for="fb-groups-per">Nombre de groupes par post (9 au plus par publication)</label>
+          <input id="fb-groups-per" type="number" min="1" max="25" value="9">
+        </div>
+        <p class="small muted">Après « Suivant », KappGen clique « Partager dans les groupes » et coche ce nombre de groupes au hasard parmi ceux que Facebook te propose. Bouton « Groupes : oui / non » sur chaque post pour faire une exception.</p>
+        <details class="mini-details">
+          <summary>Groupes préférés (facultatif, <span id="fb-groups-count">0</span>)</summary>
+          <p class="small muted">Cochés en priorité. « Trouver mes groupes » les charge, ou colle leurs liens, un par ligne.</p>
+          <textarea id="fb-groups" rows="4" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
+          <div class="groups-actions"><button id="fb-groups-find" class="btn secondary">Trouver mes groupes</button><button id="fb-groups-save" class="btn secondary">Enregistrer</button></div>
+        </details>
+        <span id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</span>
+      </div>
     </section>
-
+    <h3 class="set-group">Plus</h3>
+    <section class="card">
+      <div class="field-head"><h2>Bilan du soir par mail</h2></div>
+      <p class="small muted">Un seul mail par jour, vers 21 h (heure de cet ordinateur), avec tout ce qui a été publié dans la journée : vidéos et Shorts YouTube, posts et vidéos Facebook, TikTok, Instagram, et ce qui a échoué. Aucun mail les jours sans publication.</p>
+      <label class="check-line small"><input type="checkbox" id="daily-report"> Recevoir le bilan du soir par mail</label>
+    </section>
     <section id="partner-card" class="card partner-card" hidden>
       <div class="field-head"><h2>Mon lien partenaire</h2><span id="partner-rate" class="pill ok"></span></div>
       <p class="small muted">Partage ce lien. Chaque client qui arrive par lui (ou qui tape ton code avant de payer) t’est rattaché, et tu touches ta part sur chacun de ses paiements de l’extension.</p>
@@ -327,12 +331,16 @@
         <div><strong id="partner-paid">0</strong><span>déjà reçu</span></div>
       </div>
     </section>
+    <details class="card how-card mini-details">
+      <summary>Comment KappGen publie</summary>
+      <p class="small">KappGen publie <strong>comme toi, dans ce Chrome</strong> : il ouvre YouTube Studio, Facebook, TikTok… et remplit les champs à ta place. Il ne passe pas par une API ni par un mot de passe. <strong>Chaque compte doit donc être ouvert et connecté dans ce même Chrome</strong> (ce profil) : une page non connectée ici ne peut pas recevoir de publication.</p>
+    </details>
 
-    <section class="card">
-      <div class="field-head"><h2>Bilan du soir par mail</h2></div>
-      <p class="small muted">Un seul mail par jour, vers 21 h (heure de cet ordinateur), avec tout ce qui a été publié dans la journée : vidéos et Shorts YouTube, posts et vidéos Facebook, TikTok, Instagram, et ce qui a échoué. Aucun mail les jours sans publication.</p>
-      <label class="check-line small"><input type="checkbox" id="daily-report"> Recevoir le bilan du soir par mail</label>
-    </section>
+
+
+
+
+
   </div>
 
   <div id="tab-help" class="tab" hidden>
