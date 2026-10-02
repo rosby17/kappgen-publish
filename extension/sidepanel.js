@@ -1322,11 +1322,8 @@ async function renderApp() {
     const go = button('Envoyer (non répertoriée)', 'btn primary', async () => {
       go.disabled = true;
       // Videos of the KappGen app are handed to Studio by path, which needs
-      // the optional "debugger" permission: asked once, on this click.
-      if (!await chrome.permissions.request({ permissions: ['debugger'] }).catch(() => false)) {
-        go.disabled = false;
-        return;
-      }
+      // the "debugger" permission. Chrome refuses it as an optional one, so
+      // without it the job explains to put the video in the folder instead.
       const reply = await send({ type: 'publish', source: 'app', videoId: video.id, visibility: 'UNLISTED' });
       if (!reply || !reply.ok) go.disabled = false;
     });
