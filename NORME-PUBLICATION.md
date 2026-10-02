@@ -125,6 +125,7 @@ Ordre : YouTube d'abord ; Facebook juste après, une fois l'envoi YouTube termin
         └── image.jpg        ← facultatif : post photo (sinon post texte ; un .mp4 vertical = Reel)
 ```
 
-- L'extension publie chaque post **à son heure** (au plus un toutes les 5 minutes), sur la page de `planning.json` (ou de `publication.json`, ou du réglage `facebook.page` de la chaîne).
+- L'extension publie chaque post **à son heure** (réveil à l'heure exacte, heure de l'ordinateur), sur la page de `planning.json` (ou de `publication.json`, ou du réglage `facebook.page` de la chaîne).
 - Après publication, elle écrit `"statut": "publie"` et `published_at` dans `publication.json`. Un post en échec passe en `"statut": "echec"` avec l'erreur, et n'est **jamais** relancé tout seul (pas de double post) : bouton « Publier maintenant » dans le panneau.
-- Les vidéos YouTube passent avant les posts quand les deux sont prêts en même temps.
+- Un post dont l'heure est arrivée passe avant une nouvelle vidéo YouTube.
+- **Groupes** : juste après la Page, le post est publié dans les groupes Facebook choisis dans le panneau (onglet Facebook → « Partage dans les groupes » : « Trouver mes groupes » met les 10 premiers groupes du compte, on peut en ajouter jusqu'à 25), avec 40 secondes entre deux groupes. `"groupes": ["https://www.facebook.com/groups/…"]` dans `publication.json` remplace cette liste pour ce post, `"groupes": false` n'en partage aucun. Le résultat de chaque groupe est écrit dans `"groupes_partages"` ; un groupe en échec se relance avec « Repartager ».

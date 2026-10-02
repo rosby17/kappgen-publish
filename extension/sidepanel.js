@@ -624,7 +624,19 @@ function postRow(post) {
   };
   live.append(states[post.statut] || pill('neutral', post.statut));
   what.append(live);
+  const shared = Object.values(post.groups_shared || {});
+  const failedGroups = shared.filter((g) => g.statut === 'echec');
+  if (shared.length) {
+    const line = el('div', `groups-line${failedGroups.length ? ' warn' : ''}`,
+      `Groupes : ${shared.length - failedGroups.length} partagé(s)${failedGroups.length ? `, ${failedGroups.length} en échec (${failedGroups[0].erreur || 'erreur'})` : ''}`);
+    what.append(line);
+  }
   const acts = el('div', 'acts');
+  if (post.statut === 'publie' && failedGroups.length) {
+    const again = button('Repartager', 'btn ghost', () => act(item, again, { type: 'shareGroups', path: post.path }, 'Partage dans les groupes en cours…'));
+    again.dataset.publish = '1';
+    acts.append(again);
+  }
   if (post.statut === 'a_publier' || post.statut === 'echec') {
     const change = timeButton(() => item, post.due_at, async (at) => {
       const d = new Date(at);
@@ -698,7 +710,68 @@ for (const b of $('fb-sort').querySelectorAll('button')) b.addEventListener('cli
   renderPosts();
 });
 
+// ---------------------------------------------------------- Facebook groups
+
+const groupLink = (url) => {
+  const m = String(url || '').trim().replace(/^https?:\/\/(?:www\.|web\.|m\.|mobile\.)?facebook\.com/i, 'https://www.facebook.com')
+    .match(/^https:\/\/www\.facebook\.com\/groups\/[^/?#\s]+/i);
+  return m ? `${m[0]}/` : null;
+};
+async function renderGroups() {
+  const config = await settings();
+  const groups = config.facebookGroups || [];
+  if (document.activeElement !== $('fb-groups')) $('fb-groups').value = groups.join('\n');
+  $('fb-groups-on').checked = !!config.facebookGroupsOn;
+  const state = $('fb-groups-state');
+  state.className = `pill ${config.facebookGroupsOn && groups.length ? 'ok' : 'neutral'}`;
+  state.textContent = config.facebookGroupsOn && groups.length ? `${groups.length} groupe(s)` : 'Désactivé';
+}
+async function saveGroups() {
+  const lines = $('fb-groups').value.split(/\s+/).filter(Boolean);
+  const valid = [...new Set(lines.map(groupLink).filter(Boolean))].slice(0, 25);
+  const wrong = lines.filter((l) => !groupLink(l));
+  const current = await settings();
+  current.facebookGroups = valid;
+  current.facebookGroupsOn = $('fb-groups-on').checked && valid.length > 0;
+  await chrome.storage.local.set({ folder: current });
+  $('fb-groups').value = valid.join('\n');
+  const saved = $('fb-groups-saved');
+  saved.className = `small ${wrong.length ? 'warn' : 'ok-text'}`;
+  saved.textContent = wrong.length ? `Enregistré. Ignoré (pas un lien de groupe) : ${wrong.slice(0, 3).join(', ')}` : 'Enregistré.';
+  saved.hidden = false;
+  setTimeout(() => { saved.hidden = true; }, 5000);
+  renderGroups();
+}
+// « Trouver mes groupes »: the first 10 groups of the connected Facebook account.
+async function findGroups() {
+  const find = $('fb-groups-find');
+  const saved = $('fb-groups-saved');
+  find.disabled = true;
+  find.textContent = 'Recherche dans Facebook…';
+  const reply = await send({ type: 'findGroups' });
+  find.disabled = false;
+  find.textContent = 'Trouver mes groupes';
+  if (!reply || !reply.ok) {
+    saved.className = 'small warn';
+    saved.textContent = reply ? reply.error : 'Recherche impossible.';
+    saved.hidden = false;
+    return false;
+  }
+  // Found groups first, the ones already typed kept after them (25 at most).
+  const typed = $('fb-groups').value.split(/\s+/).filter(Boolean);
+  $('fb-groups').value = [...new Set([...reply.data.groups, ...typed.map(groupLink).filter(Boolean)])].slice(0, 25).join('\n');
+  return true;
+}
+$('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
+$('fb-groups-save').addEventListener('click', saveGroups);
+// Ticked with no group yet: the 10 first groups of the account, by default.
+$('fb-groups-on').addEventListener('change', async () => {
+  if ($('fb-groups-on').checked && !$('fb-groups').value.trim()) await findGroups();
+  saveGroups();
+});
+
 async function renderPosts() {
+  renderGroups().catch(() => {});
   const access = await renderFbAccess();
   const reply = await send({ type: 'facebookPosts' });
   const posts = reply && reply.ok ? reply.data : [];

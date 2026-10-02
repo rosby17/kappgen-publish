@@ -820,6 +820,10 @@ const KappDossier = (() => {
         tiktok_error: (info.tiktok && info.tiktok.erreur) || null,
         instagram_statut: (info.instagram && info.instagram.statut) || null,
         instagram_error: (info.instagram && info.instagram.erreur) || null,
+        // Facebook groups: "groupes" in publication.json overrides the panel's
+        // list for this post (false = none); what happened in each one.
+        groups: Array.isArray(info.groupes) || info.groupes === false ? info.groupes : null,
+        groups_shared: info.groupes_partages && typeof info.groupes_partages === 'object' ? info.groupes_partages : {},
       };
       posts.push(post);
     }

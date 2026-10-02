@@ -1169,12 +1169,97 @@ async function publishFacebookPost(post, { auto = false } = {}) {
       closeStudioTab(tabId); // only a tab opened for this post is closed
     }
     await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null } });
-    await setJob({ running: false, done: true, error: null, message: 'Post publié sur Facebook.' });
+    // Then the same post in the creator's Facebook groups, right away.
+    const shared = await shareInGroups(post).catch(() => null);
+    await setJob({ running: false, done: true, error: null, message: `Post publié sur Facebook${groupsText(shared)}.` });
   } catch (error) {
     const message = friendly(error);
     await folder('markPost', { path: post.path, patch: { statut: 'echec', erreur: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
+}
+
+// ------------------------------------------------------ Facebook groups
+
+// The groups a post is shared in: its own "groupes" list (publication.json),
+// otherwise the panel's list when « Partager dans les groupes » is ticked.
+// One group after another, with a pause, so Facebook does not take it for spam.
+const GROUP_PAUSE_MS = 40000;
+const MAX_GROUPS = 25;
+const FOUND_GROUPS = 10; // « Trouver mes groupes »: the first 10, the ones Facebook suggests first
+function groupUrl(url) {
+  const m = facebookWww(String(url || '').trim()).match(/^https:\/\/www\.facebook\.com\/groups\/[^/?#\s]+/i);
+  return m ? `${m[0]}/` : null;
+}
+async function groupsFor(post) {
+  if (post.groups === false) return [];
+  const settings = await folderSettings();
+  const list = Array.isArray(post.groups) ? post.groups : (settings.facebookGroupsOn ? settings.facebookGroups || [] : []);
+  return [...new Set(list.map(groupUrl).filter(Boolean))].slice(0, MAX_GROUPS);
+}
+const groupsText = (r) => (!r || !r.total ? '' : `, partagé dans ${r.ok} groupe(s) sur ${r.total}${r.bad ? ` (${r.bad} échec(s) : « Repartager » dans le panneau)` : ''}`);
+
+// The groups this Facebook account is a member of (its « Vos groupes » page),
+// the first FOUND_GROUPS of them: the default list, completed by hand up to MAX_GROUPS.
+async function findMyGroups() {
+  const tabId = await openFacebookReel('https://www.facebook.com/groups/joins/?nav_source=tab');
+  try {
+    let found = [];
+    for (let i = 0; i < 12 && found.length < FOUND_GROUPS; i += 1) {
+      await sleep(1500);
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          window.scrollBy(0, 1200);
+          const skip = /^(feed|joins|discover|create|notifications|search|category|you|explore|membership_requests)$/i;
+          return [...document.querySelectorAll('a[href*="/groups/"]')].map((a) => {
+            const m = a.href.match(/facebook\.com\/groups\/([^/?#]+)/i);
+            return m && !skip.test(m[1]) ? `https://www.facebook.com/groups/${m[1]}/` : null;
+          }).filter(Boolean);
+        },
+      });
+      found = [...new Set([...found, ...(result || [])])];
+    }
+    if (!found.length) throw new Error('Aucun groupe trouvé : vérifie que tu es connecté à Facebook dans ce Chrome et membre de groupes.');
+    return found.slice(0, FOUND_GROUPS);
+  } finally {
+    closeStudioTab(tabId); // a tab opened for this is closed, the creator's own stays
+  }
+}
+
+async function shareInGroups(post) {
+  const groups = await groupsFor(post);
+  const done = { ...(post.groups_shared || {}) };
+  const todo = groups.filter((url) => !(done[url] && done[url].statut === 'publie'));
+  let ok = groups.length - todo.length;
+  let bad = 0;
+  const media = post.video_path || post.image_path;
+  for (const [i, url] of todo.entries()) {
+    if (i) await sleep(GROUP_PAUSE_MS);
+    await setJob({ message: `Partage dans les groupes Facebook (${i + 1}/${todo.length})…` });
+    try {
+      const tabId = await openFacebookReel(url);
+      const tab = await chrome.tabs.get(tabId);
+      if (!/\/groups\//.test(tab.url || '')) throw new Error('Groupe introuvable, ou tu n’en es pas membre avec ce compte.');
+      await whileShown(tabId, async () => {
+        await step(tabId, 'openPost', { photo: !!media });
+        if (media) {
+          await step(tabId, 'receiveFile', { kind: post.video_path ? 'video' : 'image', path: media,
+            src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(media)}`) });
+          await sleep(post.video_path ? 3000 : 2500);
+        }
+        await step(tabId, 'fillCaption', { caption: post.text });
+        await step(tabId, 'sendPost', { timeout: post.video_path ? 15 * 60000 : 90000 });
+      });
+      done[url] = { statut: 'publie', published_at: new Date().toISOString() };
+      ok += 1;
+    } catch (error) {
+      done[url] = { statut: 'echec', erreur: friendly(error) };
+      bad += 1;
+    }
+    await folder('markPost', { path: post.path, patch: { groupes_partages: done } }).catch(() => {});
+  }
+  return { ok, bad, total: groups.length };
 }
 
 // Next post whose time has come (one per pass, so posts stay spread out).
@@ -1460,6 +1545,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     folderMark: () => folder('mark', { path: message.path, status: message.status }),
     channelVideos: () => channelVideos(message.channelId),
     facebookPosts: () => postsList(),
+    findGroups: async () => ({ groups: await findMyGroups() }),
+    // The groups where an already published post failed (or new ones).
+    shareGroups: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      const post = (await postsList()).find((p) => p.path === message.path);
+      if (!post) throw new Error('Post introuvable (déplacé ?).');
+      for (const [url, state] of Object.entries(post.groups_shared || {})) if (state.statut === 'echec') delete post.groups_shared[url];
+      await chrome.storage.session.set({ job: { running: true, source: 'facebook', kind: 'groups', path: post.path,
+        title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', message: 'Partage dans les groupes Facebook…', startedAt: Date.now() } });
+      shareInGroups(post).then(
+        (r) => setJob({ running: false, done: true, error: r.bad ? `${r.bad} groupe(s) en échec.` : null, message: `Partagé dans ${r.ok} groupe(s) sur ${r.total}.` }),
+        (e) => setJob({ running: false, done: false, error: friendly(e), message: friendly(e) }));
+      return { started: true };
+    },
     postNow: async () => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');

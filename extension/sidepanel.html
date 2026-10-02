@@ -150,6 +150,15 @@
 
   <div id="tab-facebook" class="tab" hidden>
 
+    <details id="fb-groups-box" class="card groups-card">
+      <summary><span class="groups-title">Partage dans les groupes</span><span id="fb-groups-state" class="pill neutral"></span></summary>
+      <p class="small muted">Juste après sa publication sur ta Page, chaque post (texte, photo ou vidéo) est publié aussi dans ces groupes, l’un après l’autre, avec une pause de 40 secondes entre deux groupes pour que Facebook ne le prenne pas pour du spam. Tu dois être membre de chaque groupe avec le compte connecté dans ce Chrome.</p>
+      <label class="small" for="fb-groups">Tes groupes, un lien par ligne : « Trouver mes groupes » met les 10 premiers, ajoute les autres jusqu’à 25</label>
+      <textarea id="fb-groups" rows="4" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
+      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager chaque post dans ces groupes</label>
+      <div class="groups-actions"><button id="fb-groups-find" class="btn secondary">Trouver mes groupes</button><button id="fb-groups-save" class="btn secondary">Enregistrer</button><span id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</span></div>
+    </details>
+
     <div class="list-head"><h2>Posts programmés</h2><span id="fb-summary" class="muted small"></span></div>
     <div id="fb-filters" class="filters">
       <div class="chips" role="group" aria-label="Type de post">
