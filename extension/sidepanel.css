@@ -499,5 +499,51 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outlin
 .tabs button[data-tab] { display: inline-flex; align-items: center; gap: 6px; }
 .networks strong { display: inline-flex; align-items: center; gap: 6px; }
 .retry-all { width: 100%; margin: 0 0 10px; }
-li.row .when span.was { text-decoration: line-through; opacity: 0.7; }
+li.row .when span.was { text-decoration: line-through; color: #ff6b6b; opacity: 1; }
 .networks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+/* ------------------------------------------------------- date/time picker */
+.dt-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(3, 8, 16, 0.65); display: grid; place-items: center; padding: 16px; }
+.dt-box { width: 100%; max-width: 320px; background: #0f1828; border: 1px solid var(--border); border-radius: 14px; padding: 14px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); }
+.dt-title { font-weight: 800; font-size: 13.5px; margin-bottom: 10px; }
+.dt-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dt-month { font-size: 13px; text-transform: capitalize; }
+.dt-nav { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.04); color: var(--text); cursor: pointer; font-size: 15px; line-height: 1; }
+.dt-nav:hover { border-color: var(--accent, #00c2ff); }
+.dt-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.dt-dow { text-align: center; font-size: 10.5px; color: var(--muted); padding: 2px 0 4px; font-weight: 700; }
+.dt-day { height: 32px; border-radius: 8px; border: 0; background: none; color: var(--text); font-size: 12.5px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.dt-day:hover:not(:disabled) { background: rgba(0, 194, 255, 0.12); }
+.dt-day:disabled { opacity: 0.3; cursor: default; }
+.dt-day.today { box-shadow: inset 0 0 0 1px rgba(0, 194, 255, 0.6); }
+.dt-day.chosen { background: var(--accent, #00c2ff); color: #07101a; font-weight: 800; }
+.dt-time { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dt-label { font-size: 12px; color: var(--muted); margin-right: auto; }
+.dt-step { display: flex; align-items: center; gap: 6px; }
+.dt-num { min-width: 26px; text-align: center; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.dt-sep { font-weight: 800; }
+.dt-error { color: #ffcf6e; font-size: 12px; margin: 8px 0 0; }
+.dt-foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+/* --------------------------------------------- per-tab settings, page links */
+.tab-settings { padding: 10px 14px; margin-bottom: 12px; }
+.tab-settings > summary { cursor: pointer; list-style: none; font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.tab-settings > summary::-webkit-details-marker { display: none; }
+.tab-settings > summary::before { content: "›"; color: var(--muted); transition: transform 0.15s; }
+.tab-settings[open] > summary::before { transform: rotate(90deg); }
+.tab-settings > summary .pill { margin-left: auto; }
+.tab-settings[open] > summary { margin-bottom: 10px; }
+.tab-settings .check-line { margin: 6px 0; }
+.page-copy { flex: none; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.04); color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.page-copy:hover:not(:disabled) { color: var(--text); border-color: var(--accent, #00c2ff); }
+.page-copy:disabled { opacity: 0.35; cursor: default; }
+.page-copy.done { color: var(--ok); border-color: var(--ok); }
+/* -------------------------------------------- YouTube: video + Short thumbnails */
+.mini-link { display: block; flex: none; position: relative; line-height: 0; border-radius: 8px; overflow: hidden; }
+.mini-link:hover { outline: 2px solid var(--accent, #00c2ff); }
+li.row.with-short { grid-template-columns: auto 30px minmax(0, 1fr) auto; }
+.short-thumb { width: 30px; height: 44px; }
+.short-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.short-tag { position: absolute; left: 0; right: 0; bottom: 0; font-size: 8.5px; font-weight: 800; text-align: center; line-height: 1.5; background: rgba(255, 0, 51, 0.85); color: #fff; }
+#yt-filters { margin-top: 4px; flex-wrap: nowrap; }
+.pw-account { margin: 10px 0 0; text-align: center; }
+.pw-account strong { color: var(--text); }
+.pw-account-hint { margin: 4px 0 0; text-align: center; font-size: 11.5px; }

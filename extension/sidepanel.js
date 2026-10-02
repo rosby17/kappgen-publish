@@ -122,35 +122,86 @@ function card({ path, preview, emptyLabel, title, details = [], status, actions 
 const pad2 = (n) => String(n).padStart(2, '0');
 const localInput = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const whenText = (ts) => new Date(ts).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-function timeButton(getItem, current, onSave, { label = 'Modifier l’heure', clearable = false } = {}) {
-  const open = button(label, 'btn ghost', () => {
-    const item = getItem();
-    const existing = item.querySelector(':scope > .field.when');
-    if (existing) { existing.remove(); return; }
-    const field = el('div', 'field when');
-    const group = el('div', 'input-group');
-    const input = document.createElement('input');
-    input.type = 'datetime-local';
-    input.value = localInput(current || Date.now() + 3600 * 1000);
-    input.min = localInput(Date.now());
-    const save = button('Enregistrer', 'btn secondary', async () => {
-      const at = new Date(input.value).getTime();
-      if (!Number.isFinite(at) || at < Date.now() + 60 * 1000) {
-        input.setCustomValidity('Choisis une date et une heure à venir.');
-        input.reportValidity();
-        return;
-      }
-      save.disabled = true;
-      await onSave(at);
+// Date and time picker drawn in the panel's own style (Chrome's default one
+// does not fit): a month to browse, the day, then hour and minutes.
+const MONTHS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+function pickDateTime(current, { clearable = false, title = 'Date et heure de publication' } = {}) {
+  return new Promise((resolve) => {
+    const start = new Date(current || Date.now() + 3600 * 1000);
+    let chosen = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    let shown = new Date(start.getFullYear(), start.getMonth(), 1);
+    let hour = start.getHours();
+    let minute = Math.round(start.getMinutes() / 5) * 5 % 60;
+    const overlay = el('div', 'dt-overlay');
+    const box = el('div', 'dt-box');
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', title);
+    const head = el('div', 'dt-head');
+    const prev = button('‹', 'dt-nav', () => { shown = new Date(shown.getFullYear(), shown.getMonth() - 1, 1); draw(); });
+    const next = button('›', 'dt-nav', () => { shown = new Date(shown.getFullYear(), shown.getMonth() + 1, 1); draw(); });
+    const monthLabel = el('strong', 'dt-month');
+    head.append(prev, monthLabel, next);
+    const grid = el('div', 'dt-grid');
+    const time = el('div', 'dt-time');
+    const hourOut = el('span', 'dt-num');
+    const minOut = el('span', 'dt-num');
+    const stepper = (out, onMinus, onPlus) => {
+      const wrap = el('div', 'dt-step');
+      wrap.append(button('−', 'dt-nav', onMinus), out, button('+', 'dt-nav', onPlus));
+      return wrap;
+    };
+    time.append(el('span', 'dt-label', 'Heure'),
+      stepper(hourOut, () => { hour = (hour + 23) % 24; drawTime(); }, () => { hour = (hour + 1) % 24; drawTime(); }),
+      el('span', 'dt-sep', ':'),
+      stepper(minOut, () => { minute = (minute + 55) % 60; drawTime(); }, () => { minute = (minute + 5) % 60; drawTime(); }));
+    const error = el('p', 'dt-error');
+    error.hidden = true;
+    const foot = el('div', 'dt-foot');
+    const close = (value) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(value); };
+    const save = button('Enregistrer', 'btn primary', () => {
+      const at = new Date(chosen.getFullYear(), chosen.getMonth(), chosen.getDate(), hour, minute).getTime();
+      if (at < Date.now() + 60 * 1000) { error.textContent = 'Choisis une date et une heure à venir.'; error.hidden = false; return; }
+      close(at);
     });
-    input.addEventListener('input', () => input.setCustomValidity(''));
-    group.append(input, save);
-    if (clearable && current) group.append(button('Retirer', 'btn ghost', async () => { await onSave(null); }));
-    field.append(el('label', null, 'Nouvelle date et heure de publication :'), group);
-    item.insertBefore(field, item.querySelector(':scope > .actions-row'));
-    input.focus();
+    foot.append(button('Annuler', 'btn ghost', () => close(undefined)));
+    if (clearable) foot.append(button('Retirer l’heure', 'btn ghost', () => close(null)));
+    foot.append(save);
+    box.append(el('div', 'dt-title', title), head, grid, time, error, foot);
+    overlay.append(box);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(undefined); });
+    const onKey = (e) => { if (e.key === 'Escape') close(undefined); };
+    document.addEventListener('keydown', onKey);
+    function drawTime() { hourOut.textContent = String(hour).padStart(2, '0'); minOut.textContent = String(minute).padStart(2, '0'); error.hidden = true; }
+    function draw() {
+      monthLabel.textContent = `${MONTHS_FR[shown.getMonth()]} ${shown.getFullYear()}`;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const cells = ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((d) => el('span', 'dt-dow', d));
+      const offset = (shown.getDay() + 6) % 7;
+      for (let i = 0; i < offset; i += 1) cells.push(el('span', 'dt-empty'));
+      const days = new Date(shown.getFullYear(), shown.getMonth() + 1, 0).getDate();
+      for (let d = 1; d <= days; d += 1) {
+        const date = new Date(shown.getFullYear(), shown.getMonth(), d);
+        const cell = button(String(d), 'dt-day', () => { chosen = date; error.hidden = true; draw(); });
+        if (date < today) cell.disabled = true;
+        if (date.getTime() === today.getTime()) cell.classList.add('today');
+        if (date.getTime() === chosen.getTime()) cell.classList.add('chosen');
+        cells.push(cell);
+      }
+      grid.replaceChildren(...cells);
+    }
+    draw();
+    drawTime();
+    document.body.append(overlay);
+    save.focus();
   });
-  return open;
+}
+
+function timeButton(getItem, current, onSave, { label = 'Modifier l’heure', clearable = false } = {}) {
+  return button(label, 'btn ghost', async () => {
+    const at = await pickDateTime(current, { clearable });
+    if (at === undefined) return; // cancelled
+    await onSave(at);
+  });
 }
 
 // What a click returns: an error is shown on the card itself.
@@ -308,6 +359,8 @@ function videoItem(video) {
     status, actions: [drop, already, plan, go],
   });
   if (video.thumbnail_warning && !video.last_error) item.querySelector('.info').append(pill('warn', video.thumbnail_warning));
+  item.dataset.ytKinds = video.vertical_path ? 'video short' : 'video';
+  item.dataset.ytFailed = video.last_error ? '1' : '';
   return item;
 }
 
@@ -419,6 +472,22 @@ function channelItem(channel, panelOwn) {
   return item;
 }
 
+// YouTube tab filters: Tout / Vidéos / Shorts / Échecs, on the waiting and the published lists.
+let ytFilter = '';
+function applyYtFilter() {
+  for (const item of document.querySelectorAll('#videos > li, #sent > li')) {
+    const kinds = (item.dataset.ytKinds || 'video').split(' ');
+    item.hidden = ytFilter === 'echec' ? item.dataset.ytFailed !== '1' : !!ytFilter && !kinds.includes(ytFilter);
+  }
+}
+for (const chip of document.querySelectorAll('#yt-filters .chip')) {
+  chip.addEventListener('click', () => {
+    ytFilter = chip.dataset.type;
+    for (const other of document.querySelectorAll('#yt-filters .chip')) other.classList.toggle('active', other === chip);
+    applyYtFilter();
+  });
+}
+
 function sentItem(video) {
   const actions = [];
   const extra = [];
@@ -477,8 +546,32 @@ function sentItem(video) {
     title: video.title || video.relative_path.split('/').pop(),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null,
       video.short_youtube_id ? 'Short publié' : video.vertical_path ? 'Short prêt' : null].filter(Boolean).join(' · '),
-    status, actions, extra,
+    status, actions: actions.filter((a) => !(a.tagName === 'A' && /youtu/.test(a.href))), extra,
   });
+  // The video's thumbnail opens it on YouTube; its Short's thumbnail next to it opens the Short.
+  const mini = item.querySelector('.mini');
+  if (video.youtube_id && mini) {
+    const link = el('a', 'mini-link');
+    link.href = `https://youtu.be/${video.youtube_id}`;
+    link.target = '_blank';
+    link.title = 'Voir la vidéo sur YouTube';
+    mini.replaceWith(link);
+    link.append(mini);
+    if (video.short_youtube_id) {
+      const short = el('a', 'mini-link short-thumb');
+      short.href = `https://youtube.com/shorts/${video.short_youtube_id}`;
+      short.target = '_blank';
+      short.title = 'Voir le Short sur YouTube';
+      const img = document.createElement('img');
+      img.src = `https://i.ytimg.com/vi/${video.short_youtube_id}/mqdefault.jpg`;
+      img.alt = '';
+      short.append(img, el('span', 'short-tag', 'Short'));
+      link.after(short);
+      item.classList.add('with-short');
+    }
+  }
+  item.dataset.ytKinds = video.vertical_path || video.short_youtube_id ? 'video short' : 'video';
+  item.dataset.ytFailed = (video.update_error && video.update_tried_hash === video.hash) || video.short_error ? '1' : '';
   return item;
 }
 
@@ -520,13 +613,14 @@ const NETWORKS = [
   ['instagram', 'Instagram', 'Reels (versions verticales) sur ton compte.', 'instagram'],
   ['linkedin', 'LinkedIn', 'En développement.', 'linkedin'],
   ['snapchat', 'Snapchat', 'En développement.', 'snapchat'],
-  ['x', 'X', 'En développement.', 'x'],
+  ['x', 'X', 'Posts et vidéos sur ton compte.', 'x'],
 ];
 // Networks still in development are off unless ticked; the others on unless unticked.
-const LIVE_NETWORKS = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);
+const LIVE_NETWORKS = new Set(['youtube', 'facebook', 'tiktok', 'instagram', 'x']); // they really publish
+const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);          // on until unticked
 const networkIsOn = (config, name) => {
   const value = (config.networks || {})[name];
-  return value === undefined ? LIVE_NETWORKS.has(name) : value !== false;
+  return value === undefined ? DEFAULT_ON.has(name) : value !== false;
 };
 
 // Hides the tabs (and the per-channel Facebook fields) of the networks switched off.
@@ -562,6 +656,8 @@ async function renderNetworks() {
     box.addEventListener('change', async () => {
       const current = await settings();
       current.networks = { ...(current.networks || {}), [name]: box.checked };
+      // X: what is published from now on goes there (never the older catalogue).
+      if (name === 'x' && box.checked) current.xSince = Date.now();
       await chrome.storage.local.set({ folder: current });
       await applyNetworks();
       renderPages();
@@ -637,7 +733,7 @@ for (const id of ['yt-times']) {
 // ------------------------------------------------------ Facebook posts
 
 const POST_STATES = { a_publier: 'prévu', en_cours: 'en cours', publie: 'publié', echec: 'échec' };
-const POST_TYPES = { photo: 'Photo', texte: 'Texte', reel: 'Reel' };
+const POST_TYPES = { photo: 'Photo', texte: 'Texte', reel: 'Réel' };
 
 let lastScan = null;  // last scan of the videos folder
 let lastPosts = [];   // last list of Facebook posts
@@ -663,7 +759,7 @@ function postRow(post) {
     // Late (catching up): the estimated new time, the planned one under it.
     const eta = new Date(lateEta.get(post.path));
     const was = new Date(post.due_at);
-    when.append(el('strong', null, `≈${pad2(eta.getHours())}:${pad2(eta.getMinutes())}`), el('span', 'was', `prévu ${pad2(was.getHours())}:${pad2(was.getMinutes())}`));
+    when.append(el('strong', null, `${pad2(eta.getHours())}:${pad2(eta.getMinutes())}`), el('span', 'was', `${pad2(was.getHours())}:${pad2(was.getMinutes())}`));
     when.title = 'En retard : nouvelle heure estimée (les posts en retard partent un par un).';
   } else if (post.due_at) {
     const d = new Date(post.due_at);
@@ -733,7 +829,7 @@ function dayLabel(key) {
   const name = diff === 0 ? 'Aujourd’hui' : diff === 1 ? 'Demain' : diff === -1 ? 'Hier' : d.toLocaleDateString('fr-FR', { weekday: 'long' });
   return `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${date}`;
 }
-function dayGroups(list, timeOf, scope, { openToday = false } = {}) {
+function dayGroups(list, timeOf, scope, { openToday = false, openFirst = false } = {}) {
   const groups = new Map();
   for (const post of list) {
     const key = dayKey(timeOf(post));
@@ -741,10 +837,10 @@ function dayGroups(list, timeOf, scope, { openToday = false } = {}) {
     groups.get(key).push(post);
   }
   const today = dayKey(Date.now());
-  return [...groups].map(([key, posts]) => {
+  return [...groups].map(([key, posts], index) => {
     const box = el('details', 'day');
     const id = `${scope}:${key}`;
-    box.open = openDays.has(id) || (openToday && key === today && !openDays.has(`${id}:closed`));
+    box.open = openDays.has(id) || ((openToday && key === today) || (openFirst && index === 0)) && !openDays.has(`${id}:closed`);
     const summary = el('summary');
     const failed = posts.filter((p) => p.statut === 'echec').length;
     summary.append(el('span', 'day-name', dayLabel(key)), el('span', 'day-count', `${posts.length} post${posts.length > 1 ? 's' : ''}${failed ? ` · ${failed} en échec` : ''}`));
@@ -764,6 +860,7 @@ for (const chip of document.querySelectorAll('#fb-filters .chip')) {
     postFilter = chip.dataset.type;
     for (const other of document.querySelectorAll('#fb-filters .chip')) other.classList.toggle('active', other === chip);
     renderPosts();
+    if (lastScan) renderFacebook(lastScan);
   });
 }
 // One small button flips the order (earliest / latest first).
@@ -789,7 +886,7 @@ async function renderGroups() {
   if (document.activeElement !== $('fb-groups-per')) $('fb-groups-per').value = config.facebookGroupsPerPost || 9;
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
   $('fb-groups-more').hidden = !config.facebookGroupsOn; // the number only once ticked
-  $('set-groups').hidden = !networkIsOn(config, 'facebook'); // Facebook groups: only with Facebook on
+  $('fb-from-yt').checked = config.facebookFromYoutube !== false;
   const per = Math.min(config.facebookGroupsPerPost || 9, groups.length);
   const state = $('fb-groups-state');
   state.className = `pill ${config.facebookGroupsOn ? 'ok' : 'neutral'}`;
@@ -835,6 +932,14 @@ async function findGroups() {
 }
 $('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
 $('fb-groups-save').addEventListener('click', saveGroups);
+// YouTube videos and Shorts on the Page too (from the moment it is switched on).
+$('fb-from-yt').addEventListener('change', async () => {
+  const current = await settings();
+  current.facebookFromYoutube = $('fb-from-yt').checked;
+  if ($('fb-from-yt').checked) current.facebookFromYoutubeSince = Date.now();
+  await chrome.storage.local.set({ folder: current });
+  send({ type: 'autoNow' });
+});
 $('fb-groups-per').addEventListener('change', saveGroups);
 $('fb-groups-on').addEventListener('change', () => { $('fb-groups-more').hidden = !$('fb-groups-on').checked; saveGroups(); });
 
@@ -901,13 +1006,16 @@ async function renderPosts() {
   const upcoming = toCome.filter(shown);
   if (postSort === 'desc') upcoming.sort((a, b) => (b.due_at || 0) - (a.due_at || 0));
   $('fb-days').replaceChildren(...dayGroups(upcoming, (p) => p.due_at, 'come', { openToday: true }));
-  $('fb-done-box').hidden = !done.length;
-  $('fb-done-title').textContent = `Déjà publiés (${done.length})`;
-  $('fb-done-days').replaceChildren(...dayGroups(done.filter(shown), (p) => Date.parse(p.published_at || 0) || p.due_at, 'done'));
+  // « Déjà publiés » follows the chosen filter too; the latest day is open.
+  const doneShown = done.filter(shown);
+  $('fb-done-box').hidden = !doneShown.length;
+  $('fb-done-title').textContent = `Déjà publiés (${doneShown.length})`;
+  $('fb-done-days').replaceChildren(...dayGroups(doneShown, (p) => Date.parse(p.published_at || 0) || p.due_at, 'done', { openFirst: true }));
   $('no-posts').hidden = !(posts.length && !upcoming.length);
   applyJob();
   renderTikTok();
   renderInstagram();
+  renderX();
   renderPages();
 }
 
@@ -928,22 +1036,33 @@ const pageUrlOf = (config, name) => (name === 'facebook' ? config.facebookPageUr
 async function renderPages() {
   const config = await settings();
   const used = PAGE_FIELDS.filter(([name]) => networkIsOn(config, name));
-  const missing = used.filter(([name]) => !pageUrlOf(config, name)).length;
+  const active = used.filter(([name]) => pageUrlOf(config, name)).length;
   const state = $('pages-state');
-  state.className = `pill ${missing ? 'warn' : 'ok'}`;
-  state.textContent = missing ? `${missing} lien(s) à coller` : 'Tout est renseigné';
+  state.className = `pill ${active ? 'ok' : 'neutral'}`;
+  state.textContent = `${active} lien${active > 1 ? 's' : ''} actif${active > 1 ? 's' : ''}`;
   $('pages').replaceChildren(...used.map(([name, label, placeholder, pattern]) => {
     const row = el('label', 'page-row');
     const input = document.createElement('input');
     input.type = 'url';
     input.placeholder = placeholder;
     input.value = pageUrlOf(config, name);
-    const open = el('a', 'page-open', 'Ouvrir');
-    open.target = '_blank';
-    open.title = 'Ouvre la page dans ce Chrome pour vérifier que tu y es connecté';
-    const syncOpen = () => { open.href = input.value.trim() || '#'; open.hidden = !input.value.trim(); };
-    syncOpen();
-    input.addEventListener('input', () => { input.setCustomValidity(''); syncOpen(); });
+    // A small « copy » icon next to each link.
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'page-copy';
+    copy.title = 'Copier le lien';
+    copy.setAttribute('aria-label', `Copier le lien ${label}`);
+    copy.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
+    copy.addEventListener('click', async (event) => {
+      event.preventDefault();
+      if (!input.value.trim()) return;
+      try { await navigator.clipboard.writeText(input.value.trim()); } catch { input.select(); document.execCommand('copy'); }
+      copy.classList.add('done');
+      setTimeout(() => copy.classList.remove('done'), 1500);
+    });
+    const syncCopy = () => { copy.disabled = !input.value.trim(); };
+    syncCopy();
+    input.addEventListener('input', () => { input.setCustomValidity(''); syncCopy(); });
     input.addEventListener('change', async () => {
       const url = input.value.trim();
       if (url && !pattern.test(url)) {
@@ -966,7 +1085,7 @@ async function renderPages() {
       renderPages();
       if (name === 'facebook') { renderPosts(); if (lastScan) renderFacebook(lastScan); }
     });
-    row.append(el('span', 'page-label', label), input, open);
+    row.append(el('span', 'page-label', label), input, copy);
     return row;
   }));
   renderSetup().catch(() => {});
@@ -1014,38 +1133,88 @@ async function renderFolder() {
   const total = data.sent.reduce((sum, v) => sum + v.size_bytes, 0);
   $('sent-summary').textContent = '';
   renderOnYoutube(data, config);
+  applyYtFilter();
   renderFacebook(data);
   renderTikTok();
   renderInstagram();
+  renderX();
   renderPages();
 }
 
-function facebookItem(video, page) {
+// One YouTube publication on the Facebook Page: `as` "video" (the long video)
+// or "reel" (its Short, the vertical version).
+function facebookItem(video, page, as = 'video') {
+  const reel = as === 'reel';
+  const doneAt = reel ? video.facebook_reel_at : video.facebook_published_at;
+  const error = reel ? video.facebook_reel_error : video.facebook_error;
   const actions = [];
   let status;
   let item;
-  if (video.facebook_published_at) {
-    status = pill('ok', `Publiée sur Facebook le ${new Date(video.facebook_published_at).toLocaleDateString('fr-FR')}.`);
+  if (doneAt) {
+    status = pill('ok', `${reel ? 'Réel publié' : 'Vidéo publiée'} sur Facebook le ${new Date(doneAt).toLocaleDateString('fr-FR')}.`);
   } else {
-    status = video.facebook_error ? pill('warn', `Échec sur Facebook : ${video.facebook_error}`)
-      : page ? pill('neutral', 'Prête à partir sur Facebook.') : pill('warn', 'Colle le lien de ta page Facebook en haut pour la publier.');
-    const publish = button(video.facebook_error ? 'Réessayer' : 'Publier sur Facebook', 'btn primary', () => act(item, publish,
-      { type: 'facebook', path: video.relative_path }, 'Publication sur Facebook en cours… (un onglet Facebook s’ouvre)'));
+    status = error ? pill('warn', `Échec : ${error}`)
+      : page ? pill('neutral', reel ? 'Réel prêt à partir.' : 'Vidéo prête à partir.') : pill('warn', 'Colle le lien de ta page Facebook (Réglages).');
+    const publish = button(error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, publish,
+      { type: 'facebook', path: video.relative_path, as }, 'Publication sur Facebook en cours…'));
     publish.dataset.publish = '1';
     actions.push(publish);
   }
   item = mediaRow({
-    path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
+    path: video.relative_path, preview: video.preview_path, youtubeId: reel ? (video.short_youtube_id || video.youtube_id) : video.youtube_id,
     title: video.title || video.relative_path.split('/').pop(),
-    detail: [chan(video.channel_name), video.vertical_path ? 'version verticale (Reel)' : 'vidéo longue'].filter(Boolean).join(' · '),
+    detail: [reel ? 'Réel (Short)' : 'Vidéo', chan(video.channel_name)].filter(Boolean).join(' · '),
     status, actions,
   });
+  item.dataset.fbKind = as;
+  item.dataset.fbFailed = error && !doneAt ? '1' : '';
   return item;
 }
 
 // TikTok: every video already on YouTube (its vertical version if there is
 // one, otherwise the video itself, horizontal or not) and the videos of the
 // posts folder.
+// X: YouTube videos and Facebook posts published since X was ticked, and the rest on request.
+function renderX() {
+  const items = [];
+  for (const v of (lastScan && lastScan.sent) || []) {
+    if (!v.youtube_id) continue;
+    items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), youtubeId: v.youtube_id,
+      detail: [v.vertical_path ? 'Vidéo + Short' : 'Vidéo (lien)', chan(v.channel_name)].filter(Boolean).join(' · '),
+      done: v.x_published_at, error: v.x_error, date: v.date });
+  }
+  for (const p of lastPosts) {
+    if (p.statut !== 'publie') continue;
+    items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Post', preview: p.image_path,
+      detail: [POST_TYPES[p.type] || 'Post', chan(p.channel_name)].filter(Boolean).join(' · '),
+      done: p.x_statut === 'publie', error: p.x_error, date: p.published_at });
+  }
+  const xCard = (it) => {
+    let item;
+    const actions = [];
+    let status;
+    if (it.done) status = pill('ok', 'Publié sur X.');
+    else {
+      status = it.error ? pill('warn', `Échec : ${it.error}`) : pill('neutral', 'Prêt pour X.');
+      const go = button(it.error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
+        { type: it.kind === 'video' ? 'x' : 'xPost', path: it.path }, 'Publication sur X en cours…'));
+      go.dataset.publish = '1';
+      actions.push(go);
+    }
+    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
+    return item;
+  };
+  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
+  const waiting = items.filter((it) => !it.done).sort(recent).slice(0, 40);
+  const done = items.filter((it) => it.done).sort(recent);
+  $('x-list').replaceChildren(...waiting.map(xCard));
+  $('no-x').hidden = waiting.length > 0;
+  $('x-done-box').hidden = !done.length;
+  $('x-done-title').textContent = `Déjà sur X (${done.length})`;
+  $('x-done').replaceChildren(...done.map(xCard));
+  applyJob();
+}
+
 function renderTikTok() {
   const items = [];
   for (const v of (lastScan && lastScan.sent) || []) {
@@ -1141,12 +1310,22 @@ async function renderFacebook(data) {
   const config = await settings();
   const pageOf = (v) => ({ ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) }).facebookPageUrl || config.facebookPageUrl;
   const recent = (a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0);
-  const waiting = data.sent.filter((v) => !v.facebook_published_at).sort(recent);
-  const posted = data.sent.filter((v) => v.facebook_published_at).sort(recent);
-  $('facebook').replaceChildren(...waiting.map((video) => facebookItem(video, pageOf(video))));
+  // Each YouTube video: the long video, and its Short as a Reel when there is one.
+  const rows = [];
+  for (const v of [...data.sent].sort(recent)) {
+    rows.push({ v, as: 'video', done: !!v.facebook_published_at, failed: !!v.facebook_error && !v.facebook_published_at });
+    if (v.vertical_path) rows.push({ v, as: 'reel', done: !!v.facebook_reel_at, failed: !!v.facebook_reel_error && !v.facebook_reel_at });
+  }
+  const kept = rows.filter((r) => !postFilter || (postFilter === 'echec' ? r.failed : r.as === postFilter));
+  const waiting = kept.filter((r) => !r.done);
+  const posted = kept.filter((r) => r.done);
+  $('facebook').replaceChildren(...waiting.map((r) => facebookItem(r.v, pageOf(r.v), r.as)));
   $('facebook-done-box').hidden = !posted.length;
   $('facebook-done-title').textContent = `Déjà sur Facebook (${posted.length})`;
-  $('facebook-done').replaceChildren(...posted.map((video) => facebookItem(video, pageOf(video))));
+  $('facebook-done').replaceChildren(...posted.map((r) => facebookItem(r.v, pageOf(r.v), r.as)));
+  // Photos / texts only: no YouTube videos; videos / Reels: shown open.
+  $('fb-videos-box').hidden = postFilter === 'photo' || postFilter === 'texte' || !kept.length;
+  if (postFilter === 'video' || postFilter === 'reel' || postFilter === 'echec') $('fb-videos-box').open = true;
   applyJob();
   $('no-facebook').hidden = data.sent.length > 0;
 }
@@ -1405,6 +1584,7 @@ async function renderAccount() {
     return false;
   }
   $('account-email').textContent = user.email;
+  $('pw-account-email').textContent = user.email; // shown on the paywall: the right account?
   $('account-name').textContent = user.name || user.email.split('@')[0];
   // Profile photo (Google account), otherwise the first letter.
   const avatar = $('avatar');
@@ -1496,6 +1676,14 @@ $('avatar').addEventListener('click', (event) => { event.stopPropagation(); togg
 document.addEventListener('click', (event) => { if (!$('profile').contains(event.target)) toggleProfile(false); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') toggleProfile(false); });
 
+// Paywall: signed in with another address than the one that paid.
+$('pw-switch').addEventListener('click', async () => {
+  await send({ type: 'logout' });
+  paywallBack = false;
+  renderAccount();
+  chrome.tabs.create({ url: 'https://app.kappgen.com/login' });
+});
+
 $('logout').addEventListener('click', async () => {
   toggleProfile(false);
   await send({ type: 'logout' });
@@ -1563,7 +1751,8 @@ function renderJob(job) {
     $('job-clear').hidden = jobRunning;
     // Stuck for more than 5 minutes without news: offer to unblock.
     const quiet = Date.now() - (job.updatedAt || job.startedAt || Date.now());
-    $('job-unblock').hidden = !(job.running && quiet > 5 * 60 * 1000);
+    $('job-unblock').hidden = !job.running; // « Annuler »: always there while it runs
+    void quiet;
   }
   applyJob();
   clearTimeout(jobHideTimer);
@@ -1574,8 +1763,8 @@ function renderJob(job) {
 }
 
 $('job-unblock').addEventListener('click', async () => {
-  if (!confirm('Arrêter le suivi de cet envoi ? Vérifie ensuite sur YouTube / Facebook s’il est parti avant de relancer.')) return;
-  await send({ type: 'unblockJob' });
+  if (!confirm('Annuler cette publication ? Elle s’arrête tout de suite et ne repartira pas toute seule (bouton « Réessayer » ensuite).')) return;
+  await send({ type: 'cancelJob' });
 });
 setInterval(() => { if (currentJob && currentJob.running) renderJob(currentJob); }, 30000);
 

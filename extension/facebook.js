@@ -77,6 +77,9 @@
     }
     return false;
   };
+  // « Publier » clicked: written in the tab, so a page reload right after
+  // (Facebook often does it) does not turn a published post into a failure.
+  const markClicked = () => { try { sessionStorage.setItem('kappgenPublishClicked', String(Date.now())); } catch { /* private mode */ } };
   const byText = (pattern, { needEnabled = false, root = document } = {}) => [...root.querySelectorAll(S('buttons'))]
     .find((node) => visible(node) && (!needEnabled || enabled(node)) && labelsOf(node).some((label) => pattern.test(label)));
 
@@ -182,6 +185,7 @@
       button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 60000, 'le bouton Publier');
     }
     silence();
+    markClicked();
     click(button);
     await sleep(3000);
     keepQuiet(false);
@@ -234,6 +238,7 @@
         picked = await tickGroupsInComposer(groups, groupCount).catch(() => ({ groups: [], extra: [] }));
         target = await waitFor(() => findButton(final, { needEnabled: true }), timeout, 'le bouton Publier');
       }
+      if (isFinal(target)) markClicked();
       click(target);
       await sleep(2500);
       if (isFinal(target)) break;
