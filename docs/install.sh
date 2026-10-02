@@ -119,38 +119,58 @@ clicks() {
 EOF
 }
 
-echo "  KappGen Publish n'est pas encore dans ${#MISSING_DIRS[@]} profil(s) :"
-for n in "${MISSING_NAMES[@]}"; do echo "      - $n"; done
-echo ""
-
-# The command is piped into bash: questions are read from the keyboard (/dev/tty).
+# The command is piped into bash: answers are read from the keyboard (/dev/tty).
 ASK=""
 if ( : </dev/tty ) 2>/dev/null; then exec 3</dev/tty; ASK=1; fi
 
-if [ -n "$ASK" ] && [ ${#UPDATED[@]} -gt 0 ]; then
-  printf "  L'ajouter aussi dans ces profils ? (o = oui, n = non) [o] : "
-  read -r REPLY <&3 || REPLY=n
-  case "$REPLY" in n|N|non|NON) echo "  D'accord. Relance la commande quand tu veux l'ajouter."; exit 0 ;; esac
+# Profiles without the extension: the creator picks which ones (none by default).
+CHOSEN=()
+if [ ${#UPDATED[@]} -eq 0 ] && [ ${#MISSING_DIRS[@]} -eq 1 ]; then
+  CHOSEN=(0) # first install, one profile: nothing to choose
+else
+  echo "  Profils Chrome sans KappGen Publish :"
+  i=0
+  for n in "${MISSING_NAMES[@]}"; do i=$((i + 1)); echo "      $i. $n"; done
+  echo ""
+  if [ -z "$ASK" ]; then
+    echo "  Pour l'ajouter dans l'un d'eux, relance cette commande dans le Terminal et choisis-le."
+    exit 0
+  fi
+  echo "  Dans lesquels l'installer ? Tape leurs numéros (ex. 1 3), t pour tous,"
+  printf "  ou appuie juste sur Entrée pour n'en ajouter aucun : "
+  read -r REPLY <&3 || REPLY=""
+  case "$REPLY" in
+    t|T|tous|TOUS) i=0; for _ in "${MISSING_DIRS[@]}"; do CHOSEN+=("$i"); i=$((i + 1)); done ;;
+    *) for n in $(echo "$REPLY" | tr -c '0-9' ' '); do
+         [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le ${#MISSING_DIRS[@]} ] && CHOSEN+=("$((n - 1))")
+       done ;;
+  esac
+  if [ ${#CHOSEN[@]} -eq 0 ]; then
+    echo "  D'accord, aucun profil ajouté. C'est terminé."
+    echo ""
+    exit 0
+  fi
 fi
 
-i=0
-for PDIR in "${MISSING_DIRS[@]}"; do
-  PNAME="${MISSING_NAMES[$i]}"
-  i=$((i + 1))
+k=0
+for idx in "${CHOSEN[@]}"; do
+  PDIR="${MISSING_DIRS[$idx]}"
+  PNAME="${MISSING_NAMES[$idx]}"
+  k=$((k + 1))
   printf '%s' "$DIR" | pbcopy
   echo ""
-  echo "  ▶ Profil « $PNAME » ($i/${#MISSING_DIRS[@]}) : Chrome s'ouvre sur ses extensions."
+  echo "  ▶ Profil « $PNAME » ($k/${#CHOSEN[@]}) : Chrome s'ouvre sur ses extensions."
   open -na "$CHROME" --args --profile-directory="$PDIR" "chrome://extensions/"
   clicks
-  if [ -n "$ASK" ] && [ $i -lt ${#MISSING_DIRS[@]} ]; then
-    printf "  Appuie sur Entrée quand c'est fait pour passer au profil suivant (s = sauter) : "
+  if [ -n "$ASK" ] && [ $k -lt ${#CHOSEN[@]} ]; then
+    printf "  Appuie sur Entrée quand c'est fait pour passer au profil suivant : "
     read -r REPLY <&3 || true
   fi
 done
 
 cat <<EOF
 
-  La carte « KappGen Publish » apparaît dans chaque profil : c'est installé.
+  La carte « KappGen Publish » apparaît dans le profil : c'est installé.
   Ensuite, dans chaque profil : pièce de puzzle en haut à droite de Chrome,
   épingle KappGen Publish, puis clique son logo pour te connecter.
   Les prochaines mises à jour : relance juste cette commande, tous les
