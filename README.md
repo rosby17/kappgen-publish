@@ -60,5 +60,6 @@ L'extension lit uniquement le dossier que tu choisis et n'envoie tes vidéos qu'
 
 ## Pour le développeur
 - Code de l'extension : `extension/` (Manifest V3, aucun code distant).
-- Publier une nouvelle version : augmenter `version` dans `extension/manifest.json`, puis `./publier-version.sh` (crée la Release GitHub avec `kappgen-uploader.zip`, qui sert aussi pour le Chrome Web Store).
+- Publier une nouvelle version : augmenter `version` dans `extension/manifest.json`, puis `./publier-version.sh` (crée la Release GitHub avec `kappgen-uploader.zip` ; pour le Chrome Web Store, envoyer `dist/kappgen-uploader-chrome-web-store.zip`, le même sans `key`).
+- `key` dans `manifest.json` fixe l'identifiant de l'extension (`ohgfmmejmlbdpflenlkikbnebgfegkic`) quel que soit le dossier d'où elle est chargée : ses réglages, dossiers choisis et connexion sont gardés d'une mise à jour à l'autre et d'un dossier à l'autre. Ne pas la retirer ni la changer.
 - Fiche Chrome Web Store (textes, justifications, images) : `store/`.

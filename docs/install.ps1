@@ -105,30 +105,48 @@ if ($updated.Count -gt 0) {
 if ($profiles.Count -eq 0) { $missing = @([pscustomobject]@{ Dir = 'Default'; Name = 'ton profil Chrome'; Path = '' }) }
 if ($missing.Count -eq 0) { return }
 
-Write-Host "  KappGen Publish n'est pas encore dans $($missing.Count) profil(s) :"
-foreach ($p in $missing) { Write-Host "      - $($p.Name)" }
-Write-Host ''
-if ($updated.Count -gt 0) {
-  $answer = Read-Host '  L''ajouter aussi dans ces profils ? (o = oui, n = non) [o]'
-  if ($answer -match '^(n|non)$') { Write-Host '  D''accord. Relance la commande quand tu veux l''ajouter.'; return }
+# Profiles without the extension: the creator picks which ones (none by default).
+$chosen = @()
+if ($updated.Count -eq 0 -and $missing.Count -eq 1) {
+  $chosen = @($missing[0]) # first install, one profile: nothing to choose
+} else {
+  Write-Host '  Profils Chrome sans KappGen Publish :'
+  $n = 0
+  foreach ($p in $missing) { $n++; Write-Host "      $n. $($p.Name)" }
+  Write-Host ''
+  Write-Host '  Dans lesquels l''installer ? Tape leurs numeros (ex. 1 3), t pour tous,'
+  $answer = Read-Host '  ou appuie juste sur Entree pour n''en ajouter aucun'
+  if ($answer -match '^\s*(t|tous)\s*$') {
+    $chosen = @($missing)
+  } else {
+    foreach ($m in [regex]::Matches([string]$answer, '\d+')) {
+      $k = [int]$m.Value
+      if ($k -ge 1 -and $k -le $missing.Count -and -not ($chosen -contains $missing[$k - 1])) { $chosen += $missing[$k - 1] }
+    }
+  }
+  if ($chosen.Count -eq 0) {
+    Write-Host '  D''accord, aucun profil ajoute. C''est termine.'
+    Write-Host ''
+    return
+  }
 }
 
 $i = 0
-foreach ($p in $missing) {
+foreach ($p in $chosen) {
   $i++
   Set-Clipboard -Value $dir
   Write-Host ''
-  Write-Host ('  >  Profil "' + $p.Name + '" (' + $i + '/' + $missing.Count + ') : Chrome s''ouvre sur ses extensions.') -ForegroundColor Cyan
+  Write-Host ('  >  Profil "' + $p.Name + '" (' + $i + '/' + $chosen.Count + ') : Chrome s''ouvre sur ses extensions.') -ForegroundColor Cyan
   Start-Process -FilePath $chrome -ArgumentList @(('--profile-directory="' + $p.Dir + '"'), 'chrome://extensions/')
   Write-Host '    1. En haut a droite, allume "Mode developpeur" (il devient bleu).'
   Write-Host '    2. Clique "Charger l''extension non empaquetee".'
   Write-Host '    3. Clique dans la barre d''adresse tout en haut de la fenetre, appuie sur'
   Write-Host '       Ctrl + V  (le chemin est deja copie), puis  Entree , puis "Selectionner un dossier".'
-  if ($i -lt $missing.Count) { [void](Read-Host '  Appuie sur Entree quand c''est fait pour passer au profil suivant') }
+  if ($i -lt $chosen.Count) { [void](Read-Host '  Appuie sur Entree quand c''est fait pour passer au profil suivant') }
 }
 
 Write-Host ''
-Write-Host '  La carte "KappGen Publish" apparait dans chaque profil : c''est installe.'
+Write-Host '  La carte "KappGen Publish" apparait dans le profil : c''est installe.'
 Write-Host '  Ensuite, dans chaque profil : piece de puzzle en haut a droite de Chrome,'
 Write-Host '  epingle KappGen Publish, puis clique son logo pour te connecter.'
 Write-Host '  Prochaines mises a jour : relance juste cette commande, tous les profils'
