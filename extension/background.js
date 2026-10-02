@@ -531,7 +531,7 @@ async function openFacebookReel(pageUrl) {
 }
 
 // filePath: the file to post (the long video, or its vertical version).
-async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path) {
+async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path, { groups = [] } = {}) {
   if (!filePath) throw new Error('Aucun fichier vertical associé à cette vidéo.');
   const tabId = await openFacebookReel(pageUrl);
   // The long video is a normal video post ("Photo/vidéo"); only the vertical
@@ -550,6 +550,7 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
     });
     return true;
   }
+  let picked = [];
   try {
     await whileShown(tabId, async () => {
       await step(tabId, 'openReel');
@@ -561,9 +562,10 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
       // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
       const caption = (video.title || video.description || '').slice(0, 5000);
       await step(tabId, 'fillCaption', { caption });
-      await step(tabId, 'publish');
+      const sent = await step(tabId, 'publish', { groups });
+      picked = (sent && sent.groups) || [];
     });
-    return true;
+    return picked;
   } finally {
     // Keep Facebook visible after a successful post so the creator can see
     // the selected Page and the published Reel. On error, it stays open too
@@ -1149,8 +1151,19 @@ async function publishFacebookPost(post, { auto = false } = {}) {
   await folder('markPost', { path: post.path, patch: { statut: 'en_cours', started_at: new Date().toISOString() } });
   let tabId = null;
   try {
+    // Groups ticked in the composer itself, while publishing (9 at most).
+    const plan = await groupsFor(post);
+    const names = (await folderSettings()).facebookGroupNames || {};
+    const during = plan.filter((url) => names[url] && !(post.groups_shared && post.groups_shared[url] && post.groups_shared[url].statut === 'publie')).slice(0, SHARE_BATCH);
+    const markDuring = (picked) => {
+      const lower = (Array.isArray(picked) ? picked : []).map((n) => n.toLowerCase());
+      const shared = { ...(post.groups_shared || {}) };
+      for (const url of during) if (lower.includes(names[url].toLowerCase())) shared[url] = { statut: 'publie', published_at: new Date().toISOString(), mode: 'publication' };
+      post.groups_shared = shared;
+    };
     if (post.type === 'reel') {
-      await publishFacebookReel({ title: '', description: post.text }, post.channel_name, page, post.video_path);
+      markDuring(await publishFacebookReel({ title: '', description: post.text }, post.channel_name, page, post.video_path,
+        { groups: during.map((url) => names[url]) }));
     } else {
       tabId = await openFacebookReel(page);
       await whileShown(tabId, async () => {
@@ -1163,13 +1176,15 @@ async function publishFacebookPost(post, { auto = false } = {}) {
         }
         await setJob({ message: 'Texte…' });
         await step(tabId, 'fillCaption', { caption: post.text });
-        await setJob({ message: 'Publication…' });
-        await step(tabId, 'sendPost');
+        await setJob({ message: during.length ? `Publication sur la Page et dans ${during.length} groupe(s)…` : 'Publication…' });
+        const sent = await step(tabId, 'sendPost', { groups: during.map((url) => names[url]) });
+        markDuring(sent && sent.groups);
       });
       closeStudioTab(tabId); // only a tab opened for this post is closed
     }
-    await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null } });
-    // Then the same post in the creator's Facebook groups, right away.
+    await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null,
+      ...(Object.keys(post.groups_shared || {}).length ? { groupes_partages: post.groups_shared } : {}) } });
+    // The groups not ticked while publishing (more than 9, or no option): right after.
     const shared = await shareInGroups(post).catch(() => null);
     await setJob({ running: false, done: true, error: null, message: `Post publié sur Facebook${groupsText(shared)}.` });
   } catch (error) {
@@ -1186,6 +1201,7 @@ async function publishFacebookPost(post, { auto = false } = {}) {
 // One group after another, with a pause, so Facebook does not take it for spam.
 const GROUP_PAUSE_MS = 40000;
 const MAX_GROUPS = 25;
+const SHARE_BATCH = 9; // Facebook's share window takes 9 groups at most at once
 const FOUND_GROUPS = 10; // « Trouver mes groupes »: the first 10, the ones Facebook suggests first
 function groupUrl(url) {
   const m = facebookWww(String(url || '').trim()).match(/^https:\/\/www\.facebook\.com\/groups\/[^/?#\s]+/i);
@@ -1214,25 +1230,99 @@ async function findMyGroups() {
           const skip = /^(feed|joins|discover|create|notifications|search|category|you|explore|membership_requests)$/i;
           return [...document.querySelectorAll('a[href*="/groups/"]')].map((a) => {
             const m = a.href.match(/facebook\.com\/groups\/([^/?#]+)/i);
-            return m && !skip.test(m[1]) ? `https://www.facebook.com/groups/${m[1]}/` : null;
+            const name = (a.textContent || a.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+            return m && !skip.test(m[1]) ? { url: `https://www.facebook.com/groups/${m[1]}/`, name } : null;
           }).filter(Boolean);
         },
       });
-      found = [...new Set([...found, ...(result || [])])];
+      for (const g of result || []) {
+        const known = found.find((f) => f.url === g.url);
+        if (!known) found.push(g);
+        else if (!known.name && g.name) known.name = g.name;
+      }
     }
     if (!found.length) throw new Error('Aucun groupe trouvé : vérifie que tu es connecté à Facebook dans ce Chrome et membre de groupes.');
-    return found.slice(0, FOUND_GROUPS);
+    found = found.slice(0, FOUND_GROUPS);
+    await rememberGroupNames(Object.fromEntries(found.filter((g) => g.name).map((g) => [g.url, g.name])));
+    return found.map((g) => g.url);
   } finally {
     closeStudioTab(tabId); // a tab opened for this is closed, the creator's own stays
+  }
+}
+
+// Group names, learned from « Vos groupes » and from each group page visited:
+// Facebook's share window lists groups by name, not by link.
+async function rememberGroupNames(names) {
+  if (!Object.keys(names).length) return;
+  const current = await folderSettings();
+  current.facebookGroupNames = { ...(current.facebookGroupNames || {}), ...names };
+  await chrome.storage.local.set({ folder: current });
+}
+
+// All the groups at once, when Facebook allows it: on the Page, the post's
+// « Partager » → « Groupe » window with a box to tick per group, then one
+// « Publier », for SHARE_BATCH groups at most. Returns the groups shared that
+// way; the others go one by one.
+async function shareAllAtOnce(post, urls) {
+  const settings = await folderSettings();
+  if (settings.facebookGroupsAtOnce === false) return [];
+  const names = settings.facebookGroupNames || {};
+  const wanted = urls.filter((url) => names[url]).slice(0, SHARE_BATCH);
+  const page = await postPage(post);
+  if (!wanted.length || !page) return [];
+  const snippet = String(post.text || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (snippet.length < 8) return []; // the post could not be told apart on the Page
+  await setJob({ message: `Partage d’un coup dans ${wanted.length} groupe(s) Facebook…` });
+  const tabId = await openFacebookReel(page);
+  let confirmed = false;
+  try {
+    return await whileShown(tabId, async () => {
+      const share = await step(tabId, 'openShareToGroups', { snippet });
+      if (share.mode !== 'multi') { await step(tabId, 'closeDialogs').catch(() => {}); return []; }
+      const { picked } = await step(tabId, 'pickGroups', { names: wanted.map((url) => names[url]) });
+      if (!picked.length) { await step(tabId, 'closeDialogs').catch(() => {}); return []; }
+      confirmed = true; // from here, never shared again one by one (no double post)
+      await step(tabId, 'confirmShare', { caption: '' });
+      const lower = picked.map((n) => n.toLowerCase());
+      return wanted.filter((url) => lower.includes(names[url].toLowerCase()));
+    });
+  } catch (error) {
+    if (confirmed) throw error;
+    await step(tabId, 'closeDialogs').catch(() => {});
+    return [];
   }
 }
 
 async function shareInGroups(post) {
   const groups = await groupsFor(post);
   const done = { ...(post.groups_shared || {}) };
-  const todo = groups.filter((url) => !(done[url] && done[url].statut === 'publie'));
+  let todo = groups.filter((url) => !(done[url] && done[url].statut === 'publie'));
   let ok = groups.length - todo.length;
   let bad = 0;
+  // By packs of 9 (25 groups = 3 shares), as long as Facebook offers the boxes.
+  for (let pack = 0; todo.length > 1 && pack < Math.ceil(MAX_GROUPS / SHARE_BATCH); pack += 1) {
+    if (pack) await sleep(GROUP_PAUSE_MS);
+    let atOnce = [];
+    try {
+      atOnce = await shareAllAtOnce(post, todo);
+    } catch (error) {
+      // « Publier » was clicked but Facebook did not confirm: check by hand, never post twice.
+      const names = (await folderSettings()).facebookGroupNames || {};
+      const pending = todo.filter((url) => names[url]).slice(0, SHARE_BATCH);
+      for (const url of pending) done[url] = { statut: 'echec', erreur: `Partage groupé à vérifier sur Facebook : ${friendly(error)}` };
+      bad += pending.length;
+      todo = todo.filter((url) => !pending.includes(url));
+      await folder('markPost', { path: post.path, patch: { groupes_partages: done } }).catch(() => {});
+      break;
+    }
+    if (!atOnce.length) break;
+    for (const url of atOnce) done[url] = { statut: 'publie', published_at: new Date().toISOString(), mode: 'partage' };
+    ok += atOnce.length;
+    todo = todo.filter((url) => !atOnce.includes(url));
+    await folder('markPost', { path: post.path, patch: { groupes_partages: done } }).catch(() => {});
+    if (!todo.length) break;
+  }
+  if (todo.length && ok) await sleep(GROUP_PAUSE_MS);
   const media = post.video_path || post.image_path;
   for (const [i, url] of todo.entries()) {
     if (i) await sleep(GROUP_PAUSE_MS);
@@ -1241,6 +1331,8 @@ async function shareInGroups(post) {
       const tabId = await openFacebookReel(url);
       const tab = await chrome.tabs.get(tabId);
       if (!/\/groups\//.test(tab.url || '')) throw new Error('Groupe introuvable, ou tu n’en es pas membre avec ce compte.');
+      const name = String(tab.title || '').replace(/\s*[|·-]\s*Facebook\s*$/i, '').replace(/^\(\d+\)\s*/, '').trim();
+      if (name && !/^facebook$/i.test(name)) await rememberGroupNames({ [url]: name }).catch(() => {});
       await whileShown(tabId, async () => {
         await step(tabId, 'openPost', { photo: !!media });
         if (media) {
