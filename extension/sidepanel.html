@@ -118,7 +118,7 @@
     <p id="job-message"></p>
     <a id="job-link" class="btn ghost" target="_blank" hidden>Ouvrir sur YouTube</a>
     <div class="job-actions">
-      <button id="job-unblock" class="btn ghost" hidden>Débloquer</button>
+      <button id="job-unblock" class="btn ghost" hidden>Annuler</button>
     </div>
   </section>
 
@@ -149,9 +149,37 @@
   </nav>
 
   <div id="tab-youtube" class="tab">
-    <div class="list-head">
-      <h2>À publier</h2>
-      <button id="rescan" class="link" title="Relit le dossier tout de suite (sinon toutes les 5 minutes)">↻ Actualiser</button>
+    <details class="card tab-settings" id="yt-settings">
+      <summary>Réglages YouTube</summary>
+      <div class="field">
+        <label>Visibilité sur YouTube</label>
+        <div id="yt-visibility" class="segmented" role="radiogroup" aria-label="Visibilité sur YouTube">
+          <button type="button" data-value="PUBLIC" role="radio">Publique</button>
+          <button type="button" data-value="UNLISTED" role="radio">Non répertoriée</button>
+          <button type="button" data-value="PRIVATE" role="radio">Privée</button>
+        </div>
+        <p id="yt-visibility-hint" class="small muted"></p>
+      </div>
+      <div class="field">
+        <label>Quand publier</label>
+        <div class="choice">
+          <label class="check-line"><input type="radio" name="yt-when" value="now"> Dès que la vidéo est prête</label>
+          <label class="check-line"><input type="radio" name="yt-when" value="times"> À heures fixes (une vidéo par horaire, publique à l’heure dite)</label>
+        </div>
+        <div id="yt-times-row" class="input-group" hidden>
+          <input id="yt-times" type="text" placeholder="ex. 18:00 ou 09:00, 18:00">
+          <button id="yt-times-save" class="btn secondary">Enregistrer</button>
+        </div>
+      </div>
+    </details>
+    <div id="yt-filters" class="filters">
+      <div class="chips" role="group" aria-label="Type de vidéo">
+        <button data-type="" class="chip active">Tout</button>
+        <button data-type="video" class="chip">Vidéos</button>
+        <button data-type="short" class="chip">Shorts</button>
+        <button data-type="echec" class="chip">Échecs</button>
+      </div>
+      <button id="rescan" class="sort-btn" title="Relire le dossier maintenant" aria-label="Relire le dossier">↻</button>
     </div>
     <ul id="videos"></ul>
     <p id="no-videos" class="muted" hidden>Aucune vidéo en attente : tout ce qui est dans le dossier est déjà publié (plus bas).</p>
@@ -165,6 +193,25 @@
   </div>
 
   <div id="tab-facebook" class="tab" hidden>
+    <details class="card tab-settings" id="fb-settings">
+      <summary>Réglages Facebook <span id="fb-groups-state" class="pill neutral"></span></summary>
+      <label class="check-line small"><input type="checkbox" id="fb-from-yt"> Publier aussi mes vidéos YouTube sur ma Page (la vidéo, et son Short en Réel)</label>
+      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager aussi mes posts Facebook dans des groupes</label>
+      <div id="fb-groups-more" hidden>
+        <div class="groups-per">
+          <label class="small" for="fb-groups-per">Nombre de groupes par post (9 au plus par publication)</label>
+          <input id="fb-groups-per" type="number" min="1" max="25" value="9">
+        </div>
+        <p class="small muted">Cochés au hasard parmi tes groupes, à la publication.</p>
+        <details class="mini-details">
+          <summary>Groupes préférés (facultatif, <span id="fb-groups-count">0</span>)</summary>
+          <p class="small muted">Cochés en priorité. « Trouver mes groupes » les charge, ou colle leurs liens, un par ligne.</p>
+          <textarea id="fb-groups" rows="4" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
+          <div class="groups-actions"><button id="fb-groups-find" class="btn secondary">Trouver mes groupes</button><button id="fb-groups-save" class="btn secondary">Enregistrer</button></div>
+        </details>
+        <span id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</span>
+      </div>
+    </details>
 
 
     <div class="list-head"><h2>Posts programmés</h2><span id="fb-summary" class="muted small"></span></div>
@@ -174,7 +221,8 @@
         <button data-type="" class="chip active">Tous</button>
         <button data-type="photo" class="chip">Photos</button>
         <button data-type="texte" class="chip">Textes</button>
-        <button data-type="reel" class="chip">Vidéos</button>
+        <button data-type="video" class="chip">Vidéos</button>
+        <button data-type="reel" class="chip">Réels</button>
         <button data-type="echec" class="chip">Échecs</button>
       </div>
       <button type="button" id="fb-sort" class="sort-btn" title="Ordre : plus tôt d’abord (cliquer pour inverser)" aria-label="Inverser l’ordre">↑</button>
@@ -183,7 +231,7 @@
     <ul id="fb-posts" class="rows" hidden></ul>
     <details id="fb-done-box" class="done-box" hidden><summary id="fb-done-title"></summary><div id="fb-done-days"></div><ul id="fb-done" class="rows" hidden></ul></details>
     <p id="no-posts" class="muted small" hidden>Aucun post à venir.</p>
-    <details id="fb-videos-box" class="done-box"><summary id="fb-videos-title">Vidéos YouTube à partager sur Facebook</summary>
+    <details id="fb-videos-box" class="done-box"><summary id="fb-videos-title">Vidéos et Réels venus de YouTube</summary>
       <ul id="facebook" class="rows"></ul>
       <p id="no-facebook" class="muted small" hidden>Aucune vidéo publiée sur YouTube pour l’instant.</p>
       <details id="facebook-done-box" class="done-box" hidden><summary id="facebook-done-title"></summary><ul id="facebook-done" class="rows"></ul></details>
@@ -221,10 +269,10 @@
   </div>
 
   <div id="tab-x" class="tab" hidden>
-    <section class="card">
-      <div class="field-head"><h2>X</h2><span class="pill neutral">En développement</span></div>
-      <p class="small muted">Bientôt : tes vidéos et tes posts (texte, photo) sur ton compte X, avec le même dossier et les mêmes heures.</p>
-    </section>
+    <p class="small muted x-intro">Partent tout seuls sur X ce qui est publié depuis que tu as coché X : tes vidéos YouTube (titre + lien, avec le Short) et tes posts Facebook (texte + photo ou vidéo). Reste connecté à X dans ce Chrome.</p>
+    <ul id="x-list" class="rows"></ul>
+    <p id="no-x" class="muted small" hidden>Rien à publier sur X pour l’instant.</p>
+    <details id="x-done-box" class="done-box" hidden><summary id="x-done-title"></summary><ul id="x-done" class="rows"></ul></details>
   </div>
 
   <div id="tab-settings" class="tab" hidden>
@@ -268,48 +316,6 @@
 
       <div id="pages" class="pages"></div>
       <p id="pages-saved" class="small ok-text" hidden>Liens enregistrés.</p>
-    </section>
-    <h3 class="set-group">Publication</h3>
-    <section class="card">
-      <h2>Publication sur YouTube</h2>
-      <div class="field">
-        <label>Visibilité sur YouTube</label>
-        <div id="yt-visibility" class="segmented" role="radiogroup" aria-label="Visibilité sur YouTube">
-          <button type="button" data-value="PUBLIC" role="radio">Publique</button>
-          <button type="button" data-value="UNLISTED" role="radio">Non répertoriée</button>
-          <button type="button" data-value="PRIVATE" role="radio">Privée</button>
-        </div>
-        <p id="yt-visibility-hint" class="small muted"></p>
-      </div>
-      <div class="field">
-        <label>Quand publier</label>
-        <div class="choice">
-          <label class="check-line"><input type="radio" name="yt-when" value="now"> Dès que la vidéo est prête</label>
-          <label class="check-line"><input type="radio" name="yt-when" value="times"> À heures fixes (une vidéo par horaire, publique à l’heure dite)</label>
-        </div>
-        <div id="yt-times-row" class="input-group" hidden>
-          <input id="yt-times" type="text" placeholder="ex. 18:00 ou 09:00, 18:00">
-          <button id="yt-times-save" class="btn secondary">Enregistrer</button>
-        </div>
-      </div>
-    </section>
-    <section class="card" id="set-groups">
-      <div class="field-head"><h2>Groupes Facebook</h2><span id="fb-groups-state" class="pill neutral"></span></div>
-      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager aussi mes posts Facebook dans des groupes</label>
-      <div id="fb-groups-more" hidden>
-        <div class="groups-per">
-          <label class="small" for="fb-groups-per">Nombre de groupes par post (9 au plus par publication)</label>
-          <input id="fb-groups-per" type="number" min="1" max="25" value="9">
-        </div>
-        <p class="small muted">Cochés au hasard parmi tes groupes, à la publication.</p>
-        <details class="mini-details">
-          <summary>Groupes préférés (facultatif, <span id="fb-groups-count">0</span>)</summary>
-          <p class="small muted">Cochés en priorité. « Trouver mes groupes » les charge, ou colle leurs liens, un par ligne.</p>
-          <textarea id="fb-groups" rows="4" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
-          <div class="groups-actions"><button id="fb-groups-find" class="btn secondary">Trouver mes groupes</button><button id="fb-groups-save" class="btn secondary">Enregistrer</button></div>
-        </details>
-        <span id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</span>
-      </div>
     </section>
     <h3 class="set-group">Plus</h3>
     <section class="card">
