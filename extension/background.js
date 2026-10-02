@@ -144,6 +144,46 @@ async function requireAccess() {
   throw new Error('Ton abonnement KappGen Publish n’est pas actif : ouvre le panneau pour t’abonner.');
 }
 
+// ------------------------------------------------------- publishing recipe
+
+// Selectors and button names of YouTube Studio, Facebook, TikTok and
+// Instagram are not shipped with the extension: the server sends them, as
+// data, to accounts with an active trial or subscription (lib/recette.js
+// reads them inside the page). Kept in memory only, refreshed every 30 min.
+const RECIPE_TTL = 30 * 60 * 1000;
+let recipeCache = null;
+async function publishRecipe({ fresh = false } = {}) {
+  if (!fresh && recipeCache && Date.now() - recipeCache.at < RECIPE_TTL) return recipeCache.data;
+  await requireAccess();
+  let data;
+  try {
+    data = await api('/publish/recipe');
+  } catch (error) {
+    if (error.status === 401) throw new Error('Connecte-toi à ton compte KappGen.');
+    if (error.status === 402) throw new Error('Ton abonnement KappGen Publish n’est pas actif : ouvre le panneau pour t’abonner.');
+    if (error.status === 404) throw new Error('Le serveur KappGen n’est pas encore à jour pour cette version de KappGen Publish.');
+    // Network trouble: the last recipe of this session, if any.
+    if (recipeCache) return recipeCache.data;
+    throw new Error('Impossible de joindre KappGen pour préparer la publication (connexion Internet ?).');
+  }
+  recipeCache = { data, at: Date.now() };
+  return data;
+}
+
+// Puts the recipe in the page, then the network's scripts.
+async function injectScripts(tabId, files) {
+  const recipe = await publishRecipe();
+  await chrome.scripting.executeScript({ target: { tabId }, func: (data) => { window.__kappgenRecipe = data; }, args: [recipe] });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/recette.js', ...files] });
+}
+
+async function recipeSelector(network, key) {
+  const recipe = await publishRecipe();
+  const selector = recipe && recipe[network] && recipe[network].sel && recipe[network].sel[key];
+  if (!selector) throw new Error(`KappGen Publish : recette de publication incomplète (${network}.${key}).`);
+  return selector;
+}
+
 // ------------------------------------------------------------ folder source
 
 const AUTO_EVERY_MINUTES = 5;
@@ -382,7 +422,7 @@ async function openStudioUpload(channelId, active = true, { reuse = false } = {}
       if (channelId && !url.includes(channelId)) {
         throw new Error(`Ce profil Chrome n’a pas accès à la chaîne ${channelId} dans YouTube Studio.`);
       }
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['studio.js'] });
+      await injectScripts(tab.id, ['studio.js']);
       return tab.id;
     }
     await sleep(700);
@@ -390,8 +430,10 @@ async function openStudioUpload(channelId, active = true, { reuse = false } = {}
   throw new Error('YouTube Studio ne s’est pas ouvert.');
 }
 
-// Sets `path` on the first element matching `selector` without reading it.
-async function setLocalFile(tabId, selector, path) {
+// Sets `path` on the first element matching the recipe's Studio selector
+// `key`, without reading the file.
+async function setLocalFile(tabId, key, path) {
+  const selector = await recipeSelector('studio', key);
   if (!chrome.debugger || !await chrome.permissions.contains({ permissions: ['debugger'] })) {
     throw new Error('Cette vidéo de l’application ne peut pas être envoyée directement : télécharge-la et range-la dans ton dossier de vidéos, elle partira toute seule.');
   }
@@ -555,7 +597,7 @@ async function openFacebookReel(pageUrl) {
     const url = current.url || current.pendingUrl || '';
     if (/login|checkpoint|recover/i.test(url)) throw new Error('Connecte-toi d’abord à Facebook dans ce navigateur, puis relance.');
     if (/^https:\/\/(www\.|web\.)?facebook\.com/.test(url) && current.status === 'complete') {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['facebook.js'] });
+      await injectScripts(tab.id, ['facebook.js']);
       return tab.id;
     }
     await sleep(700);
@@ -614,12 +656,12 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
       channel_name: video.channel_name, channel_key: video.channel_key,
       relative_path: video.relative_path, hash: video.hash } };
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['studio.js'] });
+    await injectScripts(tabId, ['studio.js']);
     await chrome.storage.local.set({ pending: job });
     await whileShown(tabId, async () => {
       await step(tabId, 'waitForFilePicker');
       await step(tabId, 'receiveFile', {
-        selector: 'ytcp-uploads-dialog input[type="file"]',
+        selector: 'videoInput',
         src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.vertical_path)}`),
         path: video.vertical_path,
       });
@@ -717,7 +759,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
     await whileShown(tabId, async () => {
       await step(tabId, 'waitForFilePicker');
       await setJob({ message: 'Sélection du fichier vidéo…' });
-      const videoInput = 'ytcp-uploads-dialog input[type="file"]';
+      const videoInput = 'videoInput';
       if (source === 'folder') {
         const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.relative_path)}`);
         await step(tabId, 'receiveFile', { selector: videoInput, src, path: video.relative_path });
@@ -733,7 +775,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
         await step(tabId, 'fillTags', { tags: video.tags }).catch((error) => setJob({ warning: String(error.message || error) }));
       }
       if (video.thumbnail_path && await step(tabId, 'hasThumbnailPicker')) {
-        const thumbInput = 'ytcp-uploads-dialog input#file-loader';
+        const thumbInput = 'thumbInput';
         if (source === 'folder') {
           const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.thumbnail_path)}`);
           await step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path }).catch(() => {});
@@ -910,7 +952,7 @@ async function applyVisibilityFromEdit(tabId, youtubeId, visibility) {
     if ((tab.url || '').includes(`/video/${youtubeId}/edit`) && tab.status === 'complete') break;
     await sleep(700);
   }
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['studio.js'] });
+  await injectScripts(tabId, ['studio.js']);
   await whileShown(tabId, () => step(tabId, 'setVisibilityOnEdit', { visibility }));
 }
 
@@ -935,8 +977,8 @@ async function resume() {
     }
     await chrome.storage.session.set({ job: { running: true, source: pending.source, videoId: pending.videoId, title: pending.video.title,
       channel: pending.video.channel_name, message: 'Reprise du suivi de l’envoi en cours…', startedAt: Date.now() } });
-    await chrome.scripting.executeScript({ target: { tabId: pending.tabId }, files: ['studio.js'] }); // no-op if already there
     try {
+      await injectScripts(pending.tabId, ['studio.js']); // no-op if already there
       await finishUpload(pending);
     } catch (error) {
       const message = friendly(error);
@@ -974,9 +1016,9 @@ async function updateVideo(relativePath, auto = false) {
       if (Date.now() - start > 90000) throw new Error('YouTube Studio ne s’est pas ouvert.');
       await sleep(700);
     }
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['studio.js'] });
+    await injectScripts(tabId, ['studio.js']);
     await whileShown(tabId, async () => {
-      const thumbInput = 'ytcp-thumbnails-compact-editor-uploader input[type="file"], input#file-loader';
+      const thumbInput = 'editThumbInput';
       if (video.thumbnail_path) {
         await setJob({ message: 'Miniature…' });
         const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.thumbnail_path)}`);
@@ -1040,7 +1082,7 @@ async function openTikTok() {
     const url = current.url || current.pendingUrl || '';
     if (/\/login|\/signup/.test(url)) throw new Error('Connecte-toi d’abord à TikTok dans ce navigateur, puis relance.');
     if (url.startsWith('https://www.tiktok.com/') && /upload/.test(url) && current.status === 'complete') {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/page-kit.js', 'tiktok.js'] });
+      await injectScripts(tab.id, ['lib/page-kit.js', 'tiktok.js']);
       return tab.id;
     }
     await sleep(700);
@@ -1101,7 +1143,7 @@ async function openX() {
         await sleep(2500);
         continue;
       }
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/page-kit.js', 'x.js'] });
+      await injectScripts(tab.id, ['lib/page-kit.js', 'x.js']);
       return tab.id;
     }
     await sleep(700);
@@ -1180,7 +1222,7 @@ async function openInstagram() {
     if (/\/accounts\/(login|signup)|\/challenge\//.test(url)) throw new Error('Connecte-toi d’abord à Instagram dans ce navigateur, puis relance.');
     if (url.startsWith('https://www.instagram.com/') && current.status === 'complete') {
       await sleep(2000);
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/page-kit.js', 'instagram.js'] });
+      await injectScripts(tab.id, ['lib/page-kit.js', 'instagram.js']);
       return tab.id;
     }
     await sleep(700);

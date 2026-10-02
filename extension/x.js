@@ -7,7 +7,9 @@
   if (window.__kappgenX && window.__kappgenX.version === VERSION) return;
   const K = window.KappKit;
   const N = 'X';
-  const box = () => [...document.querySelectorAll('[data-testid="tweetTextarea_0"], [role="textbox"][contenteditable="true"]')].find(K.visible);
+  const S = (key) => window.KappRecipe.sel('x', key);
+  const X = (key) => window.KappRecipe.re('x', key);
+  const box = () => [...document.querySelectorAll(S('textBox'))].find(K.visible);
 
   // The post's text (X counts 280 characters for a normal account).
   async function writePost({ text }) {
@@ -21,8 +23,8 @@
   // A photo or a video of the chosen folder, into the post.
   async function addMedia({ src, path }) {
     K.keepQuiet(true);
-    const input = await K.waitFor(() => document.querySelector('input[data-testid="fileInput"]')
-      || [...document.querySelectorAll('input[type="file"]')].pop(), 30000, 'l’ajout de photo ou vidéo', N);
+    const input = await K.waitFor(() => document.querySelector(S('mediaInput'))
+      || [...document.querySelectorAll(K.S('fileInput'))].pop(), 30000, 'l’ajout de photo ou vidéo', N);
     return K.giveFile(input, { src, path });
   }
 
@@ -30,8 +32,8 @@
   async function send({ timeout = 15 * 60000 } = {}) {
     K.keepQuiet(true);
     const button = () => {
-      const b = document.querySelector('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]')
-        || K.findButton(/^(poster|post|publier|tweeter|tweet)$/i);
+      const b = document.querySelector(S('postButton'))
+        || K.findButton(X('post'));
       return b && K.visible(b) && b.getAttribute('aria-disabled') !== 'true' && !b.disabled && !K.uploading() ? b : null;
     };
     const go = await K.waitFor(button, timeout, 'le bouton « Poster » actif (envoi de la vidéo pas fini ?)', N);

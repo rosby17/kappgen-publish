@@ -1046,23 +1046,34 @@ async function renderPages() {
     input.type = 'url';
     input.placeholder = placeholder;
     input.value = pageUrlOf(config, name);
-    // A small « copy » icon next to each link.
+    // Next to each link, one small icon: « save » while the link is new or
+    // changed (nothing to copy yet), « copy » once it is saved.
+    const saved = input.value.trim();
+    const SAVE_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>';
+    const COPY_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
     const copy = document.createElement('button');
     copy.type = 'button';
     copy.className = 'page-copy';
-    copy.title = 'Copier le lien';
-    copy.setAttribute('aria-label', `Copier le lien ${label}`);
-    copy.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
+    const toSave = () => input.value.trim() !== saved;
     copy.addEventListener('click', async (event) => {
       event.preventDefault();
-      if (!input.value.trim()) return;
-      try { await navigator.clipboard.writeText(input.value.trim()); } catch { input.select(); document.execCommand('copy'); }
+      if (toSave()) { input.dispatchEvent(new Event('change')); return; }
+      if (!saved) return;
+      try { await navigator.clipboard.writeText(saved); } catch { input.select(); document.execCommand('copy'); }
       copy.classList.add('done');
       setTimeout(() => copy.classList.remove('done'), 1500);
     });
-    const syncCopy = () => { copy.disabled = !input.value.trim(); };
+    const syncCopy = () => {
+      const save = toSave() || !saved;
+      copy.classList.toggle('save', toSave());
+      copy.innerHTML = save ? SAVE_ICON : COPY_ICON;
+      copy.title = save ? 'Enregistrer le lien' : 'Copier le lien';
+      copy.setAttribute('aria-label', `${save ? 'Enregistrer' : 'Copier'} le lien ${label}`);
+      copy.disabled = !toSave() && !saved;
+    };
     syncCopy();
     input.addEventListener('input', () => { input.setCustomValidity(''); syncCopy(); });
+    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); input.dispatchEvent(new Event('change')); } });
     input.addEventListener('change', async () => {
       const url = input.value.trim();
       if (url && !pattern.test(url)) {
