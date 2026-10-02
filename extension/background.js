@@ -1154,9 +1154,20 @@ async function alreadyOnChannel(video, own) {
   return entry.titles.includes(sameTitle(video.title));
 }
 
+// A job with no news for this long is dead (Chrome closed the tab, the
+// service worker was stopped mid-post): it must not block the queue forever.
+const STALE_JOB_MS = 30 * 60 * 1000;
+
 async function autoTick() {
+  await chrome.storage.local.set({ lastAutoTick: Date.now() });
   const { job } = await chrome.storage.session.get('job');
-  if (job && job.running) return;
+  if (job && job.running) {
+    const { pending } = await chrome.storage.local.get('pending');
+    const quiet = Date.now() - (job.updatedAt || job.startedAt || 0);
+    if (pending || resuming || quiet < STALE_JOB_MS) return;
+    const message = 'Publication interrompue (sans nouvelles depuis 30 min) : vérifie sur le réseau si elle est partie.';
+    await chrome.storage.session.set({ job: { ...job, running: false, done: false, error: message, message, updatedAt: Date.now() } });
+  }
   if (!(await publishAccess()).active) {
     chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
     chrome.action.setBadgeText({ text: '!' });
@@ -1270,9 +1281,58 @@ async function autoTick() {
 }
 
 // "Chrome connecté" in the app: check in with KappGen every minute.
-function heartbeat() {
+async function heartbeat() {
   api('/studio-upload/status').catch(() => {});
   selfUpdate().catch(() => {});
+  checkNewRelease().catch(() => {});
+  // Safety net: the automatic pass must run even if its alarm went missing.
+  await ensureAlarms();
+  const { lastAutoTick } = await chrome.storage.local.get('lastAutoTick');
+  if (!lastAutoTick || Date.now() - lastAutoTick > (AUTO_EVERY_MINUTES + 1) * 60000) autoTick().catch(() => {});
+}
+
+// Installed from the zip, the extension cannot replace its own files: when a
+// newer version is out on GitHub, tell the creator once (notification + badge).
+const RELEASES_URL = 'https://api.github.com/repos/rosby17/kappgen-uploader/releases/latest';
+const UPDATE_GUIDE = 'https://rosby17.github.io/kappgen-uploader/#maj';
+const newer = (a, b) => {
+  const x = String(a).split('.').map(Number);
+  const y = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+async function checkNewRelease() {
+  const { releaseCheck } = await chrome.storage.local.get('releaseCheck');
+  const current = chrome.runtime.getManifest().version;
+  let latest = releaseCheck && releaseCheck.latest;
+  if (!releaseCheck || Date.now() - releaseCheck.at > 6 * 3600 * 1000) {
+    const response = await fetch(RELEASES_URL, { cache: 'no-store' });
+    if (!response.ok) return;
+    latest = String((await response.json()).tag_name || '').replace(/^v/, '');
+    await chrome.storage.local.set({ releaseCheck: { at: Date.now(), latest, notified: releaseCheck && releaseCheck.notified } });
+  }
+  if (!latest || !newer(latest, current)) return;
+  const { releaseCheck: saved } = await chrome.storage.local.get('releaseCheck');
+  if (saved.notified === latest) return;
+  await chrome.storage.local.set({ releaseCheck: { ...saved, notified: latest } });
+  chrome.notifications.create('kappgen-update', {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: `KappGen Publish ${latest} est disponible`,
+    message: `Tu as la version ${current}. Clique ici pour voir comment mettre à jour (2 minutes, tes réglages sont gardés).`,
+    priority: 1,
+  });
+}
+
+// chrome.alarms.create replaces an alarm of the same name and restarts its
+// countdown. The worker wakes every minute (heartbeat), so recreating 'auto'
+// (every 5 min) at each wake meant it never fired: only create what is missing.
+async function ensureAlarms() {
+  const wanted = { heartbeat: 1, auto: AUTO_EVERY_MINUTES };
+  for (const [name, period] of Object.entries(wanted)) {
+    const alarm = await chrome.alarms.get(name);
+    if (!alarm || alarm.periodInMinutes !== period) await chrome.alarms.create(name, { periodInMinutes: period });
+  }
 }
 
 // Unpacked install, several Chrome profiles: each profile keeps running the
@@ -1286,8 +1346,7 @@ async function selfUpdate() {
   const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
   if (disk.version && disk.version !== chrome.runtime.getManifest().version) chrome.runtime.reload();
 }
-chrome.alarms.create('heartbeat', { periodInMinutes: 1 });
-chrome.alarms.create('auto', { periodInMinutes: AUTO_EVERY_MINUTES });
+ensureAlarms().catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'heartbeat') heartbeat();
   if (alarm.name === 'auto') autoTick().catch(() => {});
@@ -1298,6 +1357,7 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 // on the panel instead of just dismissing a toast — same one-click re-grant
 // as clicking the extension icon itself.
 chrome.notifications.onClicked.addListener(async (id) => {
+  if (id === 'kappgen-update') { chrome.tabs.create({ url: UPDATE_GUIDE }); return; }
   if (id !== 'kappgen-folder-access') return;
   await askAccess({ force: true }).catch(() => {});
 });

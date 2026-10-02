@@ -20,7 +20,7 @@ Ce lien donne toujours la version la plus récente. Historique des versions : [R
 Garde le dossier décompressé à sa place : Chrome l'utilise en permanence.
 
 ### Mettre à jour
-Télécharge à nouveau le zip, remplace l'ancien dossier par le nouveau (même emplacement), puis sur `chrome://extensions` clique la flèche **↻** de KappGen Publish. Tes réglages sont conservés.
+À partir de la 1.16.1, l'extension prévient (notification) quand une nouvelle version sort. Télécharge à nouveau le zip, remplace l'ancien dossier par le nouveau (même emplacement), puis sur `chrome://extensions` clique la flèche **↻** de KappGen Publish. Tes réglages sont conservés.
 
 ## Ranger tes vidéos
 
