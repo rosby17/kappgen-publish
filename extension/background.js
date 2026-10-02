@@ -320,7 +320,7 @@ async function openStudioUpload(channelId, active = true, { reuse = false } = {}
 // Sets `path` on the first element matching `selector` without reading it.
 async function setLocalFile(tabId, selector, path) {
   if (!chrome.debugger || !await chrome.permissions.contains({ permissions: ['debugger'] })) {
-    throw new Error('Autorisation « contrôle de l’onglet » refusée : clique de nouveau « Envoyer » dans le panneau et accepte-la.');
+    throw new Error('Cette vidéo de l’application ne peut pas être envoyée directement : télécharge-la et range-la dans ton dossier de vidéos, elle partira toute seule.');
   }
   const target = { tabId };
   await chrome.debugger.attach(target, '1.3');
