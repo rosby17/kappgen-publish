@@ -1185,7 +1185,8 @@ async function publishFacebookPost(post, { auto = false } = {}) {
 // otherwise the panel's list when « Partager dans les groupes » is ticked.
 // One group after another, with a pause, so Facebook does not take it for spam.
 const GROUP_PAUSE_MS = 40000;
-const MAX_GROUPS = 9;
+const MAX_GROUPS = 25;
+const FOUND_GROUPS = 10; // « Trouver mes groupes »: the first 10, the ones Facebook suggests first
 function groupUrl(url) {
   const m = facebookWww(String(url || '').trim()).match(/^https:\/\/www\.facebook\.com\/groups\/[^/?#\s]+/i);
   return m ? `${m[0]}/` : null;
@@ -1199,12 +1200,12 @@ async function groupsFor(post) {
 const groupsText = (r) => (!r || !r.total ? '' : `, partagé dans ${r.ok} groupe(s) sur ${r.total}${r.bad ? ` (${r.bad} échec(s) : « Repartager » dans le panneau)` : ''}`);
 
 // The groups this Facebook account is a member of (its « Vos groupes » page),
-// the first MAX_GROUPS of them: the default list, editable in the panel.
+// the first FOUND_GROUPS of them: the default list, completed by hand up to MAX_GROUPS.
 async function findMyGroups() {
   const tabId = await openFacebookReel('https://www.facebook.com/groups/joins/?nav_source=tab');
   try {
     let found = [];
-    for (let i = 0; i < 12 && found.length < MAX_GROUPS; i += 1) {
+    for (let i = 0; i < 12 && found.length < FOUND_GROUPS; i += 1) {
       await sleep(1500);
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -1220,7 +1221,7 @@ async function findMyGroups() {
       found = [...new Set([...found, ...(result || [])])];
     }
     if (!found.length) throw new Error('Aucun groupe trouvé : vérifie que tu es connecté à Facebook dans ce Chrome et membre de groupes.');
-    return found.slice(0, MAX_GROUPS);
+    return found.slice(0, FOUND_GROUPS);
   } finally {
     closeStudioTab(tabId); // a tab opened for this is closed, the creator's own stays
   }

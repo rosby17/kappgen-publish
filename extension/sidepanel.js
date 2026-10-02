@@ -728,7 +728,7 @@ async function renderGroups() {
 }
 async function saveGroups() {
   const lines = $('fb-groups').value.split(/\s+/).filter(Boolean);
-  const valid = [...new Set(lines.map(groupLink).filter(Boolean))].slice(0, 9);
+  const valid = [...new Set(lines.map(groupLink).filter(Boolean))].slice(0, 25);
   const wrong = lines.filter((l) => !groupLink(l));
   const current = await settings();
   current.facebookGroups = valid;
@@ -742,7 +742,7 @@ async function saveGroups() {
   setTimeout(() => { saved.hidden = true; }, 5000);
   renderGroups();
 }
-// « Trouver mes groupes »: the first 9 groups of the connected Facebook account.
+// « Trouver mes groupes »: the first 10 groups of the connected Facebook account.
 async function findGroups() {
   const find = $('fb-groups-find');
   const saved = $('fb-groups-saved');
@@ -757,12 +757,14 @@ async function findGroups() {
     saved.hidden = false;
     return false;
   }
-  $('fb-groups').value = reply.data.groups.join('\n');
+  // Found groups first, the ones already typed kept after them (25 at most).
+  const typed = $('fb-groups').value.split(/\s+/).filter(Boolean);
+  $('fb-groups').value = [...new Set([...reply.data.groups, ...typed.map(groupLink).filter(Boolean)])].slice(0, 25).join('\n');
   return true;
 }
 $('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
 $('fb-groups-save').addEventListener('click', saveGroups);
-// Ticked with no group yet: the 9 first groups of the account, by default.
+// Ticked with no group yet: the 10 first groups of the account, by default.
 $('fb-groups-on').addEventListener('change', async () => {
   if ($('fb-groups-on').checked && !$('fb-groups').value.trim()) await findGroups();
   saveGroups();
