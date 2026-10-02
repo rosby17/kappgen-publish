@@ -228,7 +228,7 @@ async function step(tabId, name, args) {
 function friendly(error) {
   const message = String((error && error.message) || error);
   if (/error page|ERR_|Cannot access contents|No tab with id/i.test(message)) {
-    return 'YouTube Studio n’a pas pu se charger (connexion Internet ?) ou l’onglet a été fermé. Relance l’envoi.';
+    return 'La page (YouTube Studio, Facebook…) n’a pas pu se charger (connexion Internet ?) ou l’onglet a été fermé. Relance l’envoi.';
   }
   if (/Another debugger is already attached/i.test(message)) {
     return 'Ferme les outils de développement (DevTools) de l’onglet YouTube Studio, puis relance.';
@@ -276,10 +276,10 @@ const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)
 
 // Goes to url in an open tab of the site, or opens one. A tab that was
 // already open is "borrowed": it is never closed afterwards.
-async function reuseOrOpen(findTab, url, { sameIfStartsWith = null } = {}) {
+async function reuseOrOpen(findTab, url, { sameIfStartsWith = null, normalize = (u) => u } = {}) {
   let tab = await findTab();
   if (tab) {
-    const current = tab.url || '';
+    const current = normalize(tab.url || '');
     if (!(sameIfStartsWith && current.startsWith(sameIfStartsWith))) tab = await chrome.tabs.update(tab.id, { url });
     await setBorrowed(tab.id, true);
   } else {
@@ -453,16 +453,20 @@ async function channelVideos(youtubeChannelId) {
 // Chrome.  This deliberately opens facebook.com rather than Business Suite:
 // the page chooser in the normal Reel composer is the source of truth for
 // which Page receives the post.
+// In several countries (much of Africa among them) Facebook serves itself
+// from web.facebook.com: same site, same session, same page.
+const FACEBOOK_HOST = /^https?:\/\/(?:www\.|web\.|m\.|mobile\.)?facebook\.com(?=\/|$)/i;
+const facebookWww = (url) => String(url || '').replace(FACEBOOK_HOST, 'https://www.facebook.com');
 async function openFacebookReel(pageUrl) {
-  const safePage = /^https:\/\/(?:www\.)?facebook\.com\//i.test(String(pageUrl || '')) ? pageUrl : 'https://www.facebook.com/';
+  const safePage = FACEBOOK_HOST.test(String(pageUrl || '')) ? facebookWww(pageUrl) : 'https://www.facebook.com/';
   // The Facebook tab already open is used (left as is if it already shows the page).
-  const tab = await reuseOrOpen(facebookTabToReuse, safePage, { sameIfStartsWith: safePage.replace(/\/+$/, '') });
+  const tab = await reuseOrOpen(facebookTabToReuse, safePage, { sameIfStartsWith: safePage.replace(/\/+$/, ''), normalize: facebookWww });
   const start = Date.now();
   while (Date.now() - start < 90000) {
     const current = await chrome.tabs.get(tab.id);
     const url = current.url || current.pendingUrl || '';
     if (/login|checkpoint|recover/i.test(url)) throw new Error('Connecte-toi d’abord à Facebook dans ce navigateur, puis relance.');
-    if ((url.startsWith('https://www.facebook.com') || url.startsWith('https://facebook.com')) && current.status === 'complete') {
+    if (/^https:\/\/(www\.|web\.)?facebook\.com/.test(url) && current.status === 'complete') {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['facebook.js'] });
       return tab.id;
     }
