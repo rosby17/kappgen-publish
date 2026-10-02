@@ -1058,7 +1058,22 @@ async function updateVideo(relativePath, auto = false) {
       if (video.thumbnail_path) {
         await setJob({ message: 'Miniature…' });
         const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.thumbnail_path)}`);
-        await step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path });
+        // Studio sometimes reloads the edit page under the script (no answer:
+        // « Étape impossible »): wait, inject again, try once more. A thumbnail
+        // that still cannot be set must not block the title and description.
+        const sendThumb = () => step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path });
+        try {
+          try {
+            await sendThumb();
+          } catch (error) {
+            if (!/impossible\.$/.test(String(error.message))) throw error;
+            await sleep(5000);
+            await injectScripts(tabId, ['studio.js']);
+            await sendThumb();
+          }
+        } catch (error) {
+          await setJob({ warning: `Miniature non mise à jour : ${friendly(error)}` });
+        }
         await sleep(3000);
       }
       await setJob({ message: 'Titre, description, mots-clés…' });
