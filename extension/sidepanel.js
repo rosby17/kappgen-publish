@@ -186,8 +186,28 @@ for (const tab of document.querySelectorAll('nav [data-tab]')) {
   tab.addEventListener('click', () => {
     for (const other of document.querySelectorAll('nav [data-tab]')) other.classList.toggle('active', other === tab);
     for (const pane of document.querySelectorAll('.tab')) pane.hidden = pane.id !== `tab-${tab.dataset.tab}`;
+    $('setup-go').hidden = tab.dataset.tab === 'settings';
   });
 }
+
+// ------------------------------------------------------------ first run
+
+// Right after signing in, nothing can go out before the folder is chosen:
+// say so, show what is left, and open the settings once by ourselves.
+let setupOpened = false;
+async function renderSetup() {
+  const config = await settings();
+  const folderOk = (await KappDossier.access()).state === 'granted';
+  const pagesOk = PAGE_FIELDS.filter(([name]) => networkIsOn(config, name)).every(([name]) => pageUrlOf(config, name));
+  $('setup-folder').classList.toggle('done', folderOk);
+  $('setup-pages').classList.toggle('done', pagesOk);
+  $('setup').hidden = folderOk && pagesOk;
+  if (!folderOk && !setupOpened) {
+    setupOpened = true;
+    document.querySelector('.topbar [data-tab="settings"]').click();
+  }
+}
+$('setup-go').addEventListener('click', () => document.querySelector('.topbar [data-tab="settings"]').click());
 
 // ---------------------------------------------------------------- folder
 
@@ -770,9 +790,11 @@ async function renderPages() {
     row.append(el('span', 'page-label', label), input, open);
     return row;
   }));
+  renderSetup().catch(() => {});
 }
 
 async function renderFolder() {
+  renderSetup().catch(() => {});
   const lists = ['videos', 'sent', 'facebook'].map($);
   if (!(await renderAccess())) {
     lists.forEach((list) => { list.textContent = ''; });
@@ -1241,6 +1263,26 @@ $('login-recheck').addEventListener('click', async () => {
   }
 });
 
+// The side panel stays visible while the creator signs in on app.kappgen.com
+// in a tab next to it, so no visibility event comes: look every few seconds
+// while the login card is shown.
+let loginPoll = null;
+function watchLogin() {
+  if (loginPoll) return;
+  $('login-waiting').hidden = false;
+  loginPoll = setInterval(async () => {
+    if ($('login').hidden) { clearInterval(loginPoll); loginPoll = null; return; }
+    if (document.hidden || recheckingLogin) return;
+    recheckingLogin = true;
+    try {
+      if (await renderAccount()) { clearInterval(loginPoll); loginPoll = null; start(); }
+    } finally {
+      recheckingLogin = false;
+    }
+  }, 3000);
+}
+$('login-google').addEventListener('click', watchLogin);
+
 // Catches the common case on its own: the panel was already open on the
 // login screen, the user signs in on app.kappgen.com in another tab, then
 // just comes back here without remembering to click "vérifier".
@@ -1386,7 +1428,7 @@ send({ type: 'checkRelease' }).catch(() => {});
 async function start() {
   const { appUrl } = await chrome.storage.local.get('appUrl');
   $('app-url').value = appUrl || '';
-  if (!(await renderAccount())) return;
+  if (!(await renderAccount())) { watchLogin(); return; }
   if (!(await renderSubscription({ fresh: true }))) return;
   const { job } = await chrome.storage.session.get('job');
   renderJob(job);

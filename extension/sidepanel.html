@@ -35,8 +35,9 @@
     <form id="login" hidden>
       <h2>Connecte-toi à KappGen</h2>
       <button id="login-google" class="primary" type="button">Se connecter avec Google</button>
-      <p class="muted">Ouvre app.kappgen.com dans un onglet — une fois connecté là-bas (Google ou mot de passe), reviens ici et clique « J'ai fini, vérifier ». Déjà connecté à KappGen ailleurs dans Chrome ? Clique directement « J'ai fini, vérifier ».</p>
-      <button id="login-recheck" class="secondary" type="button">J'ai fini, vérifier</button>
+      <p class="muted">Connecte-toi sur app.kappgen.com (Google ou mot de passe) : ce panneau le voit tout seul et passe à la suite, rien d'autre à cliquer.</p>
+      <p id="login-waiting" class="small muted" hidden>En attente de ta connexion sur app.kappgen.com…</p>
+      <button id="login-recheck" class="link" type="button">Déjà connecté ? Vérifier maintenant</button>
       <details>
         <summary>Ou avec un mot de passe</summary>
         <input id="login-email" type="email" placeholder="E-mail" autocomplete="username" required>
@@ -104,6 +105,16 @@
     <div class="job-actions">
       <button id="job-unblock" class="btn ghost" hidden>Débloquer</button>
     </div>
+  </section>
+
+  <section id="setup" class="card setup-card" hidden>
+    <h2>Bienvenue ! Pour commencer</h2>
+    <p class="small muted">Deux réglages, une seule fois, et tes publications partent toutes seules.</p>
+    <ol class="setup-steps">
+      <li id="setup-folder"><span class="setup-dot"></span><span>Choisis le <strong>dossier de tes vidéos</strong> et clique « Autoriser à chaque visite »</span></li>
+      <li id="setup-pages"><span class="setup-dot"></span><span>Colle le <strong>lien de ta chaîne YouTube</strong> et de tes autres pages</span></li>
+    </ol>
+    <button id="setup-go" class="btn primary wide">Ouvrir les réglages</button>
   </section>
 
   <nav class="topbar" aria-label="Réglages et aide">
