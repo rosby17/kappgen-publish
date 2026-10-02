@@ -1199,7 +1199,23 @@ async function paywallAction(node, message, busy) {
   return reply.data;
 }
 
+// Partner code typed before paying (or starting the trial): ties this account
+// to the partner who brought it.
+async function applyPartnerCode() {
+  const code = $('pw-ref').value.trim();
+  if (!code) return true;
+  const msg = $('pw-ref-msg');
+  const reply = await send({ type: 'claimReferral', code });
+  msg.hidden = false;
+  msg.className = `small ${reply && reply.ok ? 'ok-text' : 'warn'}`;
+  msg.textContent = reply && reply.ok ? `Code accepté${reply.data.referrer ? ` : de la part de ${reply.data.referrer}` : ''}.` : (reply ? reply.error : 'Code non vérifié.');
+  if (reply && reply.ok) $('pw-ref').value = '';
+  return !!(reply && reply.ok);
+}
+$('pw-ref-apply').addEventListener('click', () => applyPartnerCode());
+
 $('pw-trial').addEventListener('click', async () => {
+  if (!await applyPartnerCode()) return;
   if (await paywallAction($('pw-trial'), { type: 'startTrial' }, 'Activation…')) { paywallBack = false; start(); }
 });
 
@@ -1215,7 +1231,8 @@ function renderOffers() {
 for (const b of document.querySelectorAll('#offers .offer')) {
   b.addEventListener('click', () => { chosenOffer = b.dataset.offer; renderOffers(); });
 }
-$('pw-subscribe').addEventListener('click', () => {
+$('pw-subscribe').addEventListener('click', async () => {
+  if (!await applyPartnerCode()) return;
   $('pay-summary').textContent = `Formule choisie : ${OFFER_TEXT[chosenOffer]}.`;
   $('pay-modal').hidden = false;
 });
@@ -1549,6 +1566,28 @@ $('daily-report').addEventListener('change', async () => {
   await chrome.storage.local.set(on ? { dailyReport: true, reportedDays: [yesterday] } : { dailyReport: false });
 });
 
+// Only the partners chosen by KappGen see this card: their link and earnings.
+const money = (n) => `${(n || 0).toLocaleString('fr-FR')} F`;
+async function renderPartner() {
+  const reply = await send({ type: 'referrals' });
+  const data = reply && reply.ok ? reply.data : null;
+  $('partner-card').hidden = !(data && data.partner);
+  if (!data || !data.partner) return;
+  $('partner-rate').textContent = `${Math.round(data.rate * 100)} % par vente`;
+  $('partner-link').value = data.links.guide;
+  $('partner-code').textContent = data.code;
+  $('partner-referred').textContent = data.referred;
+  $('partner-sales').textContent = data.sales;
+  $('partner-due').textContent = money(data.due_fcfa);
+  $('partner-paid').textContent = money(data.paid_fcfa);
+}
+$('partner-copy').addEventListener('click', async () => {
+  const link = $('partner-link').value;
+  try { await navigator.clipboard.writeText(link); } catch { $('partner-link').select(); document.execCommand('copy'); }
+  $('partner-copy').textContent = 'Copié';
+  setTimeout(() => { $('partner-copy').textContent = 'Copier'; }, 1800);
+});
+
 async function start() {
   const { appUrl } = await chrome.storage.local.get('appUrl');
   $('app-url').value = appUrl || '';
@@ -1564,6 +1603,7 @@ async function start() {
   renderPosts();
   renderAutoStatus();
   renderDailyReport();
+  renderPartner().catch(() => {});
 }
 start();
 

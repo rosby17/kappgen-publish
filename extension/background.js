@@ -1638,6 +1638,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     channelVideos: () => channelVideos(message.channelId),
     facebookPosts: () => postsList(),
     findGroups: async () => ({ groups: await findMyGroups() }),
+    referrals: () => api('/referrals/me'),
+    claimReferral: () => api('/referrals/claim', { method: 'POST', body: JSON.stringify({ code: message.code }) }),
     // The groups where an already published post failed (or new ones).
     shareGroups: async () => {
       await requireAccess();
