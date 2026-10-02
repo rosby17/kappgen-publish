@@ -555,7 +555,8 @@ async function renderNetworks() {
     const text = el('div');
     const title = el('strong', null, label);
     if (LOGOS[name]) title.prepend(logo(name, 13));
-    text.append(title, el('div', 'small muted', hint));
+    text.append(title);
+    text.title = hint;
     const wrap = el('label');
     wrap.append(box, text);
     box.addEventListener('change', async () => {
@@ -658,6 +659,12 @@ function postRow(post) {
   if (post.statut === 'publie' && post.published_at) {
     const d = new Date(post.published_at);
     when.append(el('strong', null, `${pad2(d.getHours())}:${pad2(d.getMinutes())}`), el('span', null, d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })));
+  } else if (post.statut === 'a_publier' && lateEta.has(post.path)) {
+    // Late (catching up): the estimated new time, the planned one under it.
+    const eta = new Date(lateEta.get(post.path));
+    const was = new Date(post.due_at);
+    when.append(el('strong', null, `≈${pad2(eta.getHours())}:${pad2(eta.getMinutes())}`), el('span', 'was', `prévu ${pad2(was.getHours())}:${pad2(was.getMinutes())}`));
+    when.title = 'En retard : nouvelle heure estimée (les posts en retard partent un par un).';
   } else if (post.due_at) {
     const d = new Date(post.due_at);
     const today = d.toDateString() === new Date().toDateString();
@@ -672,7 +679,7 @@ function postRow(post) {
   const live = el('div', 'live');
   const due = post.due_at && post.due_at > Date.now();
   const states = {
-    a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'En retard : part bientôt, un par un'),
+    a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'En retard'),
     en_cours: pill('busy', 'Publication en cours…'),
     publie: pill('ok', 'Publié'),
     echec: pill('warn', post.error || 'Échec de la publication.'),
@@ -681,7 +688,7 @@ function postRow(post) {
   what.append(live);
   const shared = Object.values(post.groups_shared || {});
   const failedGroups = shared.filter((g) => g.statut === 'echec');
-  if (shared.length) {
+  if (failedGroups.length) {
     const line = el('div', `groups-line${failedGroups.length ? ' warn' : ''}`,
       `Groupes : ${shared.length - failedGroups.length} partagé(s)${failedGroups.length ? `, ${failedGroups.length} en échec (${failedGroups[0].erreur || 'erreur'})` : ''}`);
     what.append(line);
@@ -691,16 +698,6 @@ function postRow(post) {
     const again = button('Repartager', 'btn ghost', () => act(item, again, { type: 'shareGroups', path: post.path }, 'Partage dans les groupes en cours…'));
     again.dataset.publish = '1';
     acts.append(again);
-  }
-  if ((post.statut === 'a_publier' || post.statut === 'echec') && groupsDefault !== null) {
-    // Groups for this post: the panel's choice, unless this post says otherwise.
-    const on = post.groups === false ? false : post.groups === true || Array.isArray(post.groups) ? true : groupsDefault;
-    const chip = button(on ? 'Groupes : oui' : 'Groupes : non', `chip-toggle${on ? ' on' : ''}`, async () => {
-      await KappDossier.markPost(post.path, { groupes: !on, groupes_tires: null });
-      renderPosts();
-    });
-    chip.title = on ? 'Ce post sera aussi partagé dans des groupes. Cliquer pour ne pas le partager.' : 'Ce post ne sera pas partagé dans les groupes. Cliquer pour le partager.';
-    acts.append(chip);
   }
   if (post.statut === 'a_publier' || post.statut === 'echec') {
     const change = timeButton(() => item, post.due_at, async (at) => {
@@ -792,6 +789,7 @@ async function renderGroups() {
   if (document.activeElement !== $('fb-groups-per')) $('fb-groups-per').value = config.facebookGroupsPerPost || 9;
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
   $('fb-groups-more').hidden = !config.facebookGroupsOn; // the number only once ticked
+  $('set-groups').hidden = !networkIsOn(config, 'facebook'); // Facebook groups: only with Facebook on
   const per = Math.min(config.facebookGroupsPerPost || 9, groups.length);
   const state = $('fb-groups-state');
   state.className = `pill ${config.facebookGroupsOn ? 'ok' : 'neutral'}`;
@@ -842,6 +840,34 @@ $('fb-groups-on').addEventListener('change', () => { $('fb-groups-more').hidden 
 
 // null when no group list is set (no per-post button then).
 let groupsDefault = null;
+// Late posts: estimated departure, one by one at the catch-up rhythm.
+let lateEta = new Map();
+function estimateLate(posts, catchUp) {
+  const now = Date.now();
+  const late = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at <= now).sort((a, b) => a.due_at - b.due_at);
+  const map = new Map();
+  if (!late.length) return map;
+  const times = posts.map((p) => p.due_at).filter(Boolean).sort((a, b) => a - b);
+  const gaps = [];
+  for (let i = 1; i < times.length; i += 1) { const g = times[i] - times[i - 1]; if (g > 0 && g <= 86400000) gaps.push(g); }
+  gaps.sort((a, b) => a - b);
+  const gap = (catchUp && catchUp.gap) || Math.min(1800000, Math.max(150000, (gaps.length ? gaps[Math.floor(gaps.length / 2)] : 1800000) / 2));
+  const start = Math.max(now, (catchUp && catchUp.next) || now);
+  late.forEach((p, i) => map.set(p.path, start + i * gap));
+  return map;
+}
+
+// Failed posts are never sent again on their own (no double post): one
+// button puts them all back in line, at the catch-up rhythm.
+$('fb-retry-all').addEventListener('click', async () => {
+  const failed = (lastPosts || []).filter((p) => p.statut === 'echec');
+  if (!failed.length) return;
+  if (!confirm(`Remettre ${failed.length} post(s) en échec dans la file ? Ils repartiront un par un.\n\nVérifie d’abord sur ta Page qu’ils ne sont pas déjà publiés.`)) return;
+  for (const p of failed) await KappDossier.markPost(p.path, { statut: 'a_publier', erreur: null, started_at: null }).catch(() => {});
+  send({ type: 'autoNow' });
+  renderPosts();
+});
+
 async function renderPosts() {
   const groupConfig = await settings();
   groupsDefault = !!groupConfig.facebookGroupsOn;
@@ -851,6 +877,11 @@ async function renderPosts() {
   const reply = await send({ type: 'facebookPosts' });
   const posts = reply && reply.ok ? reply.data : [];
   lastPosts = posts;
+  const { catchUp } = await chrome.storage.local.get('catchUp');
+  lateEta = estimateLate(posts, catchUp);
+  const failedCount = posts.filter((p) => p.statut === 'echec').length;
+  $('fb-retry-all').hidden = !failedCount;
+  $('fb-retry-all').textContent = `Réessayer les ${failedCount} post(s) en échec`;
   const config = await settings();
   const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl) || config.facebookPageUrl;
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
