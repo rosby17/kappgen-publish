@@ -86,7 +86,7 @@ while IFS=$'\t' read -r PDIR PNAME PPATH; do
       fi
       put_version "$PPATH"
     fi
-    UPDATED+=("$PNAME")
+    UPDATED+=("$PNAME  ($PPATH)")
   else
     MISSING_DIRS+=("$PDIR")
     MISSING_NAMES+=("$PNAME")

@@ -1535,7 +1535,7 @@ function renderVersion(releaseCheck) {
   pill.hidden = !(latest && newerVersion(latest, current));
   if (!pill.hidden) {
     pill.textContent = `Mise à jour ${latest}`;
-    pill.title = `Tu as la version ${current}, la ${latest} est sortie : clique pour voir comment mettre à jour (2 minutes, tes réglages sont gardés).`;
+    pill.title = `Ce profil Chrome a encore la version ${current}, la ${latest} est sortie. Relance la commande d’installation : elle met à jour tous tes profils. Si ce profil reste en retard, regarde d’où il charge l’extension (chrome://extensions → Détails → « Chargée depuis »).`;
   }
 }
 chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
