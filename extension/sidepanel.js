@@ -1569,7 +1569,7 @@ function timeZoneLabel() {
   return `${zone.replace(/_/g, ' ')}, UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
 }
 async function renderAutoStatus() {
-  const { autoStatus, lastAutoTick, nextDueAt, catchUp } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt', 'catchUp']);
+  const { autoStatus, lastAutoTick, nextDueAt, catchUp, autoPaused } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt', 'catchUp', 'autoPaused']);
   const box = $('auto-status');
   const now = Date.now();
   // Folder access closed by Chrome: a card with one button instead of a sentence.
@@ -1580,6 +1580,8 @@ async function renderAutoStatus() {
   if (paused) {
     box.hidden = true;
     return;
+  } else if (autoPaused) {
+    tone = 'warn'; text = 'Tout est en pause : rien ne part automatiquement. Clique « Reprendre » pour relancer.';
   } else if (autoStatus && autoStatus.state === 'nofolder') {
     tone = 'warn'; text = 'Publication automatique en attente : choisis d’abord le dossier de tes vidéos (Réglages).';
   } else if (!lastAutoTick) {
@@ -1626,7 +1628,7 @@ $('auto-resume').addEventListener('click', async () => {
   setTimeout(renderAutoStatus, 1500);
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt || changes.catchUp)) renderAutoStatus();
+  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt || changes.catchUp || changes.autoPaused)) { renderAutoStatus(); renderPauseButton(); }
 });
 setInterval(() => { if (!document.hidden) renderAutoStatus(); }, 30000);
 
@@ -1664,6 +1666,27 @@ $('partner-copy').addEventListener('click', async () => {
   $('partner-copy').textContent = 'Copié';
   setTimeout(() => { $('partner-copy').textContent = 'Copier'; }, 1800);
 });
+
+// Pause / Lecture: stops every automatic publication (YouTube, Facebook,
+// groups, TikTok, Instagram) until clicked again. « Publier » buttons still work.
+const PAUSE_ICON = '<svg class="ico" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+const PLAY_ICON = '<svg class="ico" viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5Z"/></svg>';
+async function renderPauseButton() {
+  const { autoPaused } = await chrome.storage.local.get('autoPaused');
+  const b = $('pause-all');
+  b.classList.toggle('paused', !!autoPaused);
+  b.innerHTML = `${autoPaused ? PLAY_ICON : PAUSE_ICON}<span>${autoPaused ? 'Reprendre' : 'Pause'}</span>`;
+  b.title = autoPaused ? 'Tout est en pause : cliquer pour reprendre les publications automatiques'
+    : 'Mettre en pause toutes les publications automatiques';
+}
+$('pause-all').addEventListener('click', async () => {
+  const { autoPaused } = await chrome.storage.local.get('autoPaused');
+  await chrome.storage.local.set({ autoPaused: !autoPaused });
+  if (autoPaused) send({ type: 'autoNow' }); // play: start again now
+  renderPauseButton();
+  renderAutoStatus();
+});
+renderPauseButton();
 
 async function start() {
   const { appUrl } = await chrome.storage.local.get('appUrl');

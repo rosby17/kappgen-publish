@@ -1356,6 +1356,7 @@ async function shareInGroups(post) {
   // By packs of 9 (25 groups = 3 shares), as long as Facebook offers the boxes.
   for (let pack = 0; todo.length > 1 && pack < Math.ceil(MAX_GROUPS / SHARE_BATCH); pack += 1) {
     if (pack) await sleep(GROUP_PAUSE_MS);
+    if (await isPaused()) { todo = []; break; }
     let atOnce = [];
     try {
       atOnce = await shareAllAtOnce(post, todo);
@@ -1380,6 +1381,7 @@ async function shareInGroups(post) {
   const media = post.video_path || post.image_path;
   for (const [i, url] of todo.entries()) {
     if (i) await sleep(GROUP_PAUSE_MS);
+    if (await isPaused()) break; // « Pause » stops the remaining groups
     await setJob({ message: `Partage dans les groupes Facebook (${i + 1}/${todo.length})…` });
     try {
       const tabId = await openFacebookReel(url);
@@ -1498,8 +1500,12 @@ async function autoTick() {
   }
 }
 
+const isPaused = async () => !!(await chrome.storage.local.get('autoPaused')).autoPaused;
+
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
+  // « Pause » in the panel: nothing goes out on its own until « Reprendre ».
+  if (await isPaused()) { await autoState('paused'); return; }
   const { job } = await chrome.storage.session.get('job');
   if (job && job.running) {
     const { pending } = await chrome.storage.local.get('pending');

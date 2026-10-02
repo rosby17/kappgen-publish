@@ -492,3 +492,5 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outlin
 #fb-filters { flex-wrap: nowrap; }
 #fb-filters .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; }
 .sort-btn { width: 26px; padding: 0; flex: none; font-size: 14px; }
+.topbar .pause-btn { margin-right: auto; }
+.topbar .pause-btn.paused { color: #07101a; background: #ffcf6e; border-color: #ffcf6e; }
