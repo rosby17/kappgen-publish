@@ -1584,6 +1584,7 @@ async function renderAccount() {
     return false;
   }
   $('account-email').textContent = user.email;
+  $('pw-account-email').textContent = user.email; // shown on the paywall: the right account?
   $('account-name').textContent = user.name || user.email.split('@')[0];
   // Profile photo (Google account), otherwise the first letter.
   const avatar = $('avatar');
@@ -1674,6 +1675,14 @@ function toggleProfile(open) {
 $('avatar').addEventListener('click', (event) => { event.stopPropagation(); toggleProfile($('profile-menu').hidden); });
 document.addEventListener('click', (event) => { if (!$('profile').contains(event.target)) toggleProfile(false); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') toggleProfile(false); });
+
+// Paywall: signed in with another address than the one that paid.
+$('pw-switch').addEventListener('click', async () => {
+  await send({ type: 'logout' });
+  paywallBack = false;
+  renderAccount();
+  chrome.tabs.create({ url: 'https://app.kappgen.com/login' });
+});
 
 $('logout').addEventListener('click', async () => {
   toggleProfile(false);
