@@ -1632,6 +1632,7 @@ function renderNetFolders(all) {
     name.append(logo(net, 14), el('strong', null, label), el('small', null, what));
     const where = el('div', 'net-folder-where');
     if (info.own) where.append(icon('folder'), el('span', null, info.name));
+    else if (info.shared === 'facebook') where.append(icon('folder'), el('span', null, `${info.name} (même dossier que Facebook)`));
     else where.append(el('span', 'muted', all.main && all.main.state !== 'none' ? 'Dossier principal' : '—'));
     const acts = el('div', 'net-folder-acts');
     if (info.own && info.state === 'prompt') {
@@ -1670,7 +1671,9 @@ async function renderNetSettings() {
     const dirName = { x: 'X', linkedin: 'LINKEDIN' }[net];
     box.querySelector('.net-folder-line').textContent = own
       ? `Dossier « ${all[net].name} » : seuls ses posts partent.`
-      : `Dans le dossier principal : ${dirName}/A-PUBLIER`;
+      : all[net] && all[net].shared === 'facebook'
+        ? `Mêmes posts que Facebook (dossier « ${all[net].name} »), chacun à son heure.`
+        : `Mêmes posts que Facebook, plus ${dirName}/A-PUBLIER du dossier principal.`;
     const on = config.networks && config.networks[net];
     const state = box.querySelector('.net-state');
     state.className = `pill net-state ${on ? 'ok' : 'neutral'}`;

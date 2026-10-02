@@ -122,6 +122,10 @@ const KappDossier = (() => {
       const handle = await loadNetRoot(net);
       out[net] = handle ? { ...(await stateOf(handle)), own: true } : { ...main, own: false };
     }
+    // Networks without their own folder post what Facebook posts.
+    for (const net of POST_NETS) {
+      if (!out[net].own && out.facebook && out.facebook.own) out[net] = { ...out.facebook, own: false, shared: 'facebook' };
+    }
     return out;
   }
 
@@ -767,6 +771,17 @@ const KappDossier = (() => {
     const own = await netRoot(net);
     const out = [];
     const join = (...parts) => parts.filter(Boolean).join('/');
+    // Posts, Reels and carousels are the same everywhere (Roosevelt, 02/10):
+    // a network without a folder of its own takes Facebook's posts too, as
+    // well as its own <NETWORK>/A-PUBLIER folders of the main folder if any.
+    // Each network keeps its own state in the same publication.json.
+    if (!own && net !== 'facebook' && !net.startsWith('__main:')) {
+      const mine = await postDirs(`__main:${net}`);
+      const seen = new Set(mine.map((d) => d.path));
+      for (const d of await postDirs('facebook')) if (!seen.has(d.path)) mine.push({ ...d, shared: true });
+      return mine;
+    }
+    if (net.startsWith('__main:')) net = net.slice('__main:'.length);
     if (!own) {
       const main = testRoot || await loadRoot();
       if (!main) return out;
@@ -853,6 +868,7 @@ const KappDossier = (() => {
       const image = info.image && files.includes(info.image) ? info.image : files.filter((f) => IMAGE_EXT.test(f)).sort()[0];
       const video = files.filter((f) => VIDEO_EXT.test(f)).sort()[0];
       let due = dueTime(info, name);
+      if (dirInfo.shared && due && due < new Date(now).setHours(0, 0, 0, 0)) continue;
       // A network's own post keeps its state under the network's name.
       const mine = net === 'facebook' ? info : (info[net] && typeof info[net] === 'object' ? info[net] : {});
       let statut = mine.statut || 'a_publier';
@@ -872,6 +888,7 @@ const KappDossier = (() => {
         image_path: image ? `${path}/${image}` : null,
         video_path: video ? `${path}/${video}` : null,
         network: net,
+        shared: !!dirInfo.shared,
         due_at: due,
         statut,
         error: mine.erreur || null,
