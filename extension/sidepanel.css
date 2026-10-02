@@ -494,3 +494,7 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outlin
 .sort-btn { width: 26px; padding: 0; flex: none; font-size: 14px; }
 .topbar .pause-btn { margin-right: auto; }
 .topbar .pause-btn.paused { color: #07101a; background: #ffcf6e; border-color: #ffcf6e; }
+/* ------------------------------------------------------------ network logos */
+.net-logo { display: inline-flex; align-items: center; line-height: 0; }
+.tabs button[data-tab] { display: inline-flex; align-items: center; gap: 6px; }
+.networks strong { display: inline-flex; align-items: center; gap: 6px; }
