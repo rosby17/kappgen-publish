@@ -822,8 +822,9 @@ const KappDossier = (() => {
         instagram_error: (info.instagram && info.instagram.erreur) || null,
         // Facebook groups: "groupes" in publication.json overrides the panel's
         // list for this post (false = none); what happened in each one.
-        groups: Array.isArray(info.groupes) || info.groupes === false ? info.groupes : null,
+        groups: Array.isArray(info.groupes) || typeof info.groupes === 'boolean' ? info.groupes : null,
         groups_shared: info.groupes_partages && typeof info.groupes_partages === 'object' ? info.groupes_partages : {},
+        groups_drawn: Array.isArray(info.groupes_tires) ? info.groupes_tires : null,
       };
       posts.push(post);
     }
