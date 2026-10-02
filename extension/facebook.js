@@ -355,9 +355,11 @@
       || [...(topDialog() || document).querySelectorAll('[role="switch"], [role="checkbox"], label, [tabindex="0"]')]
         .find((n) => visible(n) && labelsOf(n).some((l) => OPTION.test(l)));
     if (!option) return { groups: [], extra: [] };
-    const before = topDialog();
     click(option);
-    const list = await waitFor(() => { const d = topDialog(); return d && d !== before && d.querySelector('[role="checkbox"], input[type="checkbox"]') ? d : null; }, 15000, 'la liste des groupes');
+    // Facebook garde souvent la même boîte de dialogue (même nœud DOM) et ne
+    // change que son contenu : on ne peut pas attendre « une autre boîte »,
+    // seulement l'apparition des cases à cocher (absentes de l'écran précédent).
+    const list = await waitFor(() => { const d = topDialog(); return d && d.querySelector('[role="checkbox"], input[type="checkbox"]') ? d : null; }, 15000, 'la liste des groupes');
     // Long lists load while scrolling: a few turns to see more groups.
     for (let i = 0; i < 6; i += 1) {
       for (const el of list.querySelectorAll('div, ul')) if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = el.scrollHeight;
