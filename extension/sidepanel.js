@@ -1637,21 +1637,6 @@ $('partner-copy').addEventListener('click', async () => {
   setTimeout(() => { $('partner-copy').textContent = 'Copier'; }, 1800);
 });
 
-// Old copies of the extension (other id): one click to remove them.
-let oldCopyIds = [];
-async function renderOldCopies() {
-  const reply = await send({ type: 'oldCopies' });
-  oldCopyIds = reply && reply.ok ? reply.data.map((e) => e.id) : [];
-  $('old-copies').hidden = !oldCopyIds.length;
-}
-renderOldCopies().catch(() => {});
-$('old-copies-remove').addEventListener('click', async () => {
-  for (const id of oldCopyIds) {
-    await new Promise((resolve) => chrome.management.uninstall(id, { showConfirmDialog: true }, () => { void chrome.runtime.lastError; resolve(); }));
-  }
-  renderOldCopies();
-});
-
 async function start() {
   const { appUrl } = await chrome.storage.local.get('appUrl');
   $('app-url').value = appUrl || '';
@@ -1668,7 +1653,6 @@ async function start() {
   renderAutoStatus();
   renderDailyReport();
   renderPartner().catch(() => {});
-  renderOldCopies().catch(() => {});
 }
 start();
 

@@ -1660,8 +1660,9 @@ chrome.notifications.onClicked.addListener(async (id) => {
   await askAccess({ force: true }).catch(() => {});
 });
 // Copies of KappGen Publish with another id (the ones installed before 1.16.14
-// fixed the id): switched off at once, so a post never goes out twice; the
-// panel offers to remove them for good (Chrome asks to confirm).
+// fixed the id): switched off at once, so a post never goes out twice. Chrome
+// does not let an extension remove another one without its own confirmation
+// window, so they stay listed (switched off) in chrome://extensions.
 const isOldCopy = (e) => e.id !== chrome.runtime.id && e.type === 'extension'
   && /^KappGen (Publish|Uploader)/i.test(e.name || '') && !/libre/i.test(e.name || '');
 async function oldCopies() {
@@ -1689,7 +1690,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     channelVideos: () => channelVideos(message.channelId),
     facebookPosts: () => postsList(),
     findGroups: async () => ({ groups: await findMyGroups() }),
-    oldCopies: async () => (await oldCopies()).map((e) => ({ id: e.id, name: e.name, version: e.version })),
     referrals: () => api('/referrals/me'),
     claimReferral: () => api('/referrals/claim', { method: 'POST', body: JSON.stringify({ code: message.code }) }),
     // The groups where an already published post failed (or new ones).
