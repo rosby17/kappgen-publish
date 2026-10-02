@@ -39,6 +39,11 @@ kbd,.code{font:600 15px ui-monospace,Menlo,Consolas,monospace;background:var(--s
 .copier{display:inline-flex;align-items:center;gap:10px;margin:6px 0;padding:10px 12px 10px 16px;border:1px solid var(--bord);border-radius:10px;background:var(--surface2);font:600 16px ui-monospace,Menlo,Consolas,monospace}
 .copier button{font:600 14px -apple-system,system-ui,sans-serif;border:0;border-radius:8px;background:var(--texte);color:var(--fond);padding:7px 12px;cursor:pointer}
 .copier button.fait{background:var(--vert)}
+.ia{background:var(--surface);border:2px solid var(--accent);border-radius:var(--r);padding:22px 24px;margin-top:22px}
+.ia h2{font-size:22px;margin:0 0 8px;letter-spacing:-.3px}
+.ia pre{white-space:pre-wrap;word-break:break-word;background:var(--surface2);border:1px solid var(--bord);border-radius:10px;padding:14px 16px;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:260px;overflow:auto;margin:12px 0 10px}
+.ia .bouton-copier{font:700 16px -apple-system,system-ui,sans-serif;border:0;border-radius:10px;background:var(--accent);color:#fff;padding:12px 18px;cursor:pointer;width:100%}
+.ia .bouton-copier.fait{background:var(--vert)}
 .onglets{display:flex;gap:6px;margin:12px 0 4px}
 .onglets button{font:600 15px -apple-system,system-ui,sans-serif;padding:8px 16px;border-radius:9px;border:1px solid var(--bord);background:var(--surface2);color:var(--texte2);cursor:pointer}
 .onglets button.actif{background:var(--texte);color:var(--fond);border-color:var(--texte)}
@@ -111,7 +116,26 @@ h3.section{font-size:25px;margin:44px 0 6px;letter-spacing:-.3px}
   <li><a href="#e3">Ouvrir la page des extensions de Chrome</a></li><li><a href="#e4">Activer le « Mode développeur »</a></li>
   <li><a href="#e5">Installer KappGen Publish</a></li><li><a href="#e6">L'épingler et l'ouvrir</a></li>
   <li><a href="#e7">Se connecter et faire les réglages</a></li></ol>
-  <p style="margin:10px 0 0;font-size:15px">Ensuite : <a href="#maj">mettre à jour</a> · <a href="#faq">ça ne marche pas ?</a></p></nav>
+  <p style="margin:10px 0 0;font-size:15px">Avec une IA : <a href="#ia">un seul texte à copier</a> · Ensuite : <a href="#maj">mettre à jour</a> · <a href="#faq">ça ne marche pas ?</a></p></nav>
+
+<section class="ia" id="ia">
+  <h2>🤖 Le plus simple : laisse une IA l'installer pour toi</h2>
+  <p>Tu utilises <b>Claude Code</b>, Claude Desktop, Codex ou une autre IA qui peut agir sur ton ordinateur ? Copie ce texte et colle-le-lui : elle télécharge, décompresse, range le dossier au bon endroit et t'ouvre la bonne page de Chrome. Le même texte sert aussi pour <b>mettre à jour</b>.</p>
+  <pre id="prompt-ia">Installe (ou mets à jour) l'extension Chrome « KappGen Publish » sur cet ordinateur, en faisant toi-même tout ce que tu peux faire, sans me poser de questions techniques :
+
+1. Regarde si l'ordinateur est un Mac ou un Windows.
+2. Télécharge https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip
+3. Décompresse-le dans mon dossier Documents, dans un dossier nommé exactement « kappgen-uploader » (Mac : ~/Documents/kappgen-uploader ; Windows : %USERPROFILE%\Documents\kappgen-uploader). S'il existe déjà, remplace son contenu par le nouveau (c'est une mise à jour : ne touche à rien d'autre). Vérifie que le fichier manifest.json est directement dans ce dossier (pas dans un sous-dossier) ; sinon remonte les fichiers d'un niveau. Supprime ensuite le .zip téléchargé.
+4. Copie le chemin complet de ce dossier dans mon presse-papiers (Mac : pbcopy ; Windows : Set-Clipboard).
+5. Ouvre Google Chrome sur la page chrome://extensions (Mac : open -a "Google Chrome" "chrome://extensions" ; Windows : start chrome "chrome://extensions"). Si Chrome n'est pas installé, dis-le-moi et donne-moi le lien https://www.google.com/chrome/.
+6. Pour finir, explique-moi simplement, en français, les clics que Chrome m'oblige à faire moi-même (par sécurité, aucun programme n'a le droit de les faire à ma place) :
+   - Première installation : activer « Mode développeur » en haut à droite, cliquer « Charger l'extension non empaquetée », puis coller le chemin déjà copié (Mac : Cmd+Maj+G puis Cmd+V ; Windows : clic dans la barre d'adresse de la fenêtre puis Ctrl+V), Entrée, et « Sélectionner ».
+   - Mise à jour : cliquer seulement la flèche ↻ sur la carte KappGen Publish.
+   - Puis épingler l'extension (icône puzzle → punaise), cliquer son icône et suivre le panneau.
+Ne modifie aucun autre fichier de l'ordinateur.</pre>
+  <button class="bouton-copier" type="button" onclick="copier(this,'prompt-ia','Copier le texte pour l\'IA')">Copier le texte pour l'IA</button>
+  <div class="attention">⚠️ Chrome garde <b>3 clics pour toi</b> (Mode développeur, « Charger l'extension non empaquetée », choisir le dossier) : par sécurité, aucun programme ni aucune IA n'a le droit d'installer une extension à ta place. L'IA prépare tout et t'explique ces 3 clics ; le chemin du dossier est déjà copié, tu n'as qu'à le coller.</div>
+</section>
 
 <!-- 1 -->
 <section class="etape" id="e1">
@@ -218,6 +242,7 @@ h3.section{font-size:25px;margin:44px 0 6px;letter-spacing:-.3px}
     <li>Remplace l'ancien dossier <b>kappgen-uploader</b> de tes Documents par le nouveau (même nom, même endroit).</li>
     <li>Ouvre <span class="code">chrome://extensions</span> et clique sur la flèche <b>↻</b> de la carte KappGen Publish.</li>
   </ol>
+  <div class="astuce">💡 KappGen Publish te prévient par une notification quand une nouvelle version sort. Tu peux aussi donner le <a href="#ia">texte pour l'IA</a> : elle fait les étapes 1 et 2 pour toi.</div>
   <div class="ok">Tes réglages, ton abonnement et la liste de ce qui a déjà été publié sont conservés.</div>
 </section>
 
@@ -238,9 +263,9 @@ document.querySelectorAll('.onglets button').forEach(b => b.addEventListener('cl
   document.querySelectorAll('.os').forEach(x => x.classList.toggle('actif', x.dataset.os === b.dataset.os));
 }));
 if (/Windows/i.test(navigator.userAgent)) document.querySelector('.onglets button[data-os="win"]').click();
-function copier(b) {
-  const t = document.getElementById('adresse').textContent;
-  const ok = () => { b.textContent = 'Copié ✓'; b.classList.add('fait'); setTimeout(() => { b.textContent = 'Copier'; b.classList.remove('fait'); }, 1800); };
+function copier(b, id = 'adresse', label = 'Copier') {
+  const t = document.getElementById(id).textContent;
+  const ok = () => { b.textContent = 'Copié ✓'; b.classList.add('fait'); setTimeout(() => { b.textContent = label; b.classList.remove('fait'); }, 1800); };
   (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(ok, () => {
     const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); ok();
   });
