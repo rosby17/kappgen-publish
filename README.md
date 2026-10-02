@@ -67,3 +67,10 @@ L'extension lit uniquement le dossier que tu choisis et n'envoie tes vidéos qu'
 ## Recette de publication (protection, 1.17.0)
 Les sélecteurs et noms des boutons de YouTube Studio, Facebook, TikTok et Instagram ne sont PAS dans l'extension : le serveur KappGen les envoie (`GET /api/publish/recipe`, fichier `src/publish/recipe.json` du backend) aux seuls comptes en essai ou abonnés, marqués par compte. Les scripts de page les lisent avec `S('clé')` / `X('clé')` (lib/recette.js). RÈGLE : tout nouveau sélecteur ou texte de bouton va dans recipe.json (serveur), jamais en dur dans un script. Quand un site change : corriger recipe.json et redéployer le serveur, sans nouvelle version de l'extension.
 
+## Règle : une mise à jour ne perd JAMAIS les réglages d'un utilisateur (Roosevelt, 02/10)
+Dossiers choisis, liens des pages, réseaux cochés, groupes, horaires, abonnement : tout ce que l'utilisateur a réglé doit survivre à n'importe quelle mise à jour.
+- Ne jamais changer ni retirer la clé `"key"` du manifest (elle fixe l'identifiant de l'extension : un autre identifiant = une extension neuve, réglages perdus).
+- Ne jamais vider `chrome.storage.local` ni la base IndexedDB des dossiers. Une nouvelle version qui change la forme d'un réglage le CONVERTIT (lit l'ancien format, écrit le nouveau), elle ne l'efface pas.
+- Un nouveau réglage a une valeur par défaut raisonnable : l'utilisateur n'a rien à refaire.
+- La mise à jour se fait en remplaçant les fichiers dans le même dossier (commande d'installation), jamais en supprimant puis réinstallant l'extension.
+
