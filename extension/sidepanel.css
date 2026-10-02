@@ -536,6 +536,8 @@ li.row .when span.was { text-decoration: line-through; color: #ff6b6b; opacity: 
 .page-copy:hover:not(:disabled) { color: var(--text); border-color: var(--accent, #00c2ff); }
 .page-copy:disabled { opacity: 0.35; cursor: default; }
 .page-copy.done { color: var(--ok); border-color: var(--ok); }
+.page-copy.save { color: #fff; background: var(--accent, #00c2ff); border-color: var(--accent, #00c2ff); }
+.page-copy.save:hover { filter: brightness(1.1); }
 /* -------------------------------------------- YouTube: video + Short thumbnails */
 .mini-link { display: block; flex: none; position: relative; line-height: 0; border-radius: 8px; overflow: hidden; }
 .mini-link:hover { outline: 2px solid var(--accent, #00c2ff); }
