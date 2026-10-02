@@ -50,7 +50,62 @@ async function api(path, options = {}) {
 
 async function setJob(patch) {
   const { job } = await chrome.storage.session.get('job');
-  await chrome.storage.session.set({ job: { ...(job || {}), ...patch, updatedAt: Date.now() } });
+  const next = { ...(job || {}), ...patch, updatedAt: Date.now() };
+  await chrome.storage.session.set({ job: next });
+  // Every publication that ends (sent or failed) goes into the day's log,
+  // told in one e-mail in the evening (no message for each one).
+  if (job && job.running && patch.running === false && REPORTED_KINDS.has(job.kind)) await logDay(next).catch(() => {});
+}
+
+// ------------------------------------------------------- evening summary
+
+// The day's publications, on this computer's clock; sent once in the evening
+// (21:00) to creators who ticked « Bilan du soir par mail » (off by default).
+const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram']);
+const REPORT_HOUR = 21;
+const pad2 = (n) => String(n).padStart(2, '0');
+const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const hourMinute = (t) => { const d = new Date(t); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+
+async function logDay(job) {
+  const now = Date.now();
+  const { dayLog } = await chrome.storage.local.get('dayLog');
+  const oldest = dayKey(now - 8 * 86400000);
+  const entry = { day: dayKey(now), time: hourMinute(now), kind: job.kind, title: String(job.title || '').slice(0, 300),
+    ok: !job.error, error: job.error ? String(job.error).slice(0, 300) : null, url: job.youtubeUrl || null };
+  await chrome.storage.local.set({ dayLog: [...(dayLog || []).filter((e) => e.day >= oldest), entry].slice(-500) });
+}
+
+function timeZoneName() {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  const offset = -new Date().getTimezoneOffset();
+  const h = Math.floor(Math.abs(offset) / 60);
+  const m = Math.abs(offset) % 60;
+  return `${zone}${zone ? ', ' : ''}UTC${offset >= 0 ? '+' : '-'}${h}${m ? `:${pad2(m)}` : ''}`;
+}
+
+// Today's summary from 21:00, or yesterday's if Chrome was closed at 21:00.
+async function dailyReport() {
+  const { dailyReport: on, dayLog, reportedDays } = await chrome.storage.local.get(['dailyReport', 'dayLog', 'reportedDays']);
+  if (!on) return;
+  const now = Date.now();
+  const today = dayKey(now);
+  const yesterday = dayKey(now - 86400000);
+  const done = new Set(reportedDays || []);
+  const days = [yesterday, ...(new Date(now).getHours() >= REPORT_HOUR ? [today] : [])].filter((d) => !done.has(d));
+  for (const day of days) {
+    const items = (dayLog || []).filter((e) => e.day === day).map(({ day: _day, ...item }) => item);
+    if (items.length) {
+      await api('/publish/daily-report', { method: 'POST', body: JSON.stringify({ day, timezone: timeZoneName(), items }) });
+    }
+    done.add(day);
+    await chrome.storage.local.set({ reportedDays: [...done].filter((d) => d >= yesterday) });
+  }
+}
+
+// What the automatic publishing is doing, shown in the panel.
+async function autoState(state, extra = {}) {
+  await chrome.storage.local.set({ autoStatus: { state, at: Date.now(), ...extra } });
 }
 
 // ------------------------------------------------------- subscription
@@ -1162,19 +1217,39 @@ async function alreadyOnChannel(video, own) {
 // service worker was stopped mid-post): it must not block the queue forever.
 const STALE_JOB_MS = 30 * 60 * 1000;
 
+// Wakes up exactly at the time of the next Facebook post (the regular pass
+// is only every 5 minutes, and Chrome may have put the extension to sleep).
+async function planNextDue() {
+  const posts = await postsList().catch(() => []);
+  const next = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at > Date.now())
+    .reduce((min, p) => Math.min(min, p.due_at), Infinity);
+  await chrome.storage.local.set({ nextDueAt: Number.isFinite(next) ? next : null });
+  if (Number.isFinite(next)) await chrome.alarms.create('due', { when: next + 5000 });
+  else await chrome.alarms.clear('due');
+}
+
 async function autoTick() {
+  try {
+    await autoPass();
+  } finally {
+    await planNextDue().catch(() => {});
+  }
+}
+
+async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
   const { job } = await chrome.storage.session.get('job');
   if (job && job.running) {
     const { pending } = await chrome.storage.local.get('pending');
     const quiet = Date.now() - (job.updatedAt || job.startedAt || 0);
-    if (pending || resuming || quiet < STALE_JOB_MS) return;
+    if (pending || resuming || quiet < STALE_JOB_MS) { await autoState('busy', { title: job.title || null }); return; }
     const message = 'Publication interrompue (sans nouvelles depuis 30 min) : vérifie sur le réseau si elle est partie.';
     await chrome.storage.session.set({ job: { ...job, running: false, done: false, error: message, message, updatedAt: Date.now() } });
   }
   if (!(await publishAccess()).active) {
     chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
     chrome.action.setBadgeText({ text: '!' });
+    await autoState('subscription');
     return;
   }
   const settings = await folderSettings();
@@ -1200,11 +1275,20 @@ async function autoTick() {
         priority: 2,
       });
     }
+    await autoState('folder');
     return;
   }
   chrome.action.setBadgeText({ text: '' });
+  await autoState('ok');
   await chrome.storage.session.remove('permissionNotified');
   if ((await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
+  // A post whose time has come goes first: it has a time, a new video has not.
+  const duePost = networkOn(settings, 'facebook') ? await nextDuePost() : null;
+  if (duePost) {
+    await publishFacebookPost(duePost, { auto: true });
+    autoPass(); // another may be due
+    return;
+  }
   const { videos, sent } = await folderQueue();
   let next = null;
   for (const candidate of networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
@@ -1221,12 +1305,6 @@ async function autoTick() {
     const visibility = channelVisibility(ownOf(settings, next));
     await publish('folder', next.id, visibility, { auto: true });
     autoTick(); // more may be waiting
-    return;
-  }
-  // No video to send: a Facebook post whose time has come.
-  const post = networkOn(settings, 'facebook') ? await nextDuePost() : null;
-  if (post) {
-    await publishFacebookPost(post, { auto: true });
     return;
   }
   // TikTok, when switched on: videos published on YouTube since then
@@ -1289,6 +1367,7 @@ async function heartbeat() {
   api('/studio-upload/status').catch(() => {});
   selfUpdate().catch(() => {});
   checkNewRelease().catch(() => {});
+  dailyReport().catch(() => {}); // tried again next minute if the server did not answer
   // Safety net: the automatic pass must run even if its alarm went missing.
   await ensureAlarms();
   const { lastAutoTick } = await chrome.storage.local.get('lastAutoTick');
@@ -1353,7 +1432,7 @@ async function selfUpdate() {
 ensureAlarms().catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'heartbeat') heartbeat();
-  if (alarm.name === 'auto') autoTick().catch(() => {});
+  if (alarm.name === 'auto' || alarm.name === 'due') autoTick().catch(() => {});
 });
 // Clicking the icon opens the side panel: everything happens there.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

@@ -97,6 +97,7 @@
 
   <div id="main" hidden>
   <div id="plan-banner" class="plan-banner" hidden></div>
+  <p id="auto-status" class="auto-status" hidden><span class="auto-dot"></span><span id="auto-status-text"></span></p>
   <section id="job" class="job" hidden>
     <button id="job-clear" class="icon-close" title="Fermer" aria-label="Fermer" hidden>✕</button>
     <strong id="job-title"></strong>
@@ -282,6 +283,12 @@
       <div class="field-head"><h2>Réseaux utilisés</h2></div>
       <p class="small muted">Coche seulement les réseaux sur lesquels tu publies. Un réseau décoché disparaît du panneau et KappGen n'y envoie plus rien, même automatiquement.</p>
       <ul id="networks" class="networks"></ul>
+    </section>
+
+    <section class="card">
+      <div class="field-head"><h2>Bilan du soir par mail</h2></div>
+      <p class="small muted">Un seul mail par jour, vers 21 h (heure de cet ordinateur), avec tout ce qui a été publié dans la journée : vidéos et Shorts YouTube, posts et vidéos Facebook, TikTok, Instagram, et ce qui a échoué. Aucun mail les jours sans publication.</p>
+      <label class="check-line small"><input type="checkbox" id="daily-report"> Recevoir le bilan du soir par mail</label>
     </section>
   </div>
 

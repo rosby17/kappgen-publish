@@ -1422,6 +1422,60 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 send({ type: 'checkRelease' }).catch(() => {});
 
+// One line under the title: is the automatic publishing running, when did it
+// last look, what is next, and on which clock (this computer's).
+const clock = (t) => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+function timeZoneLabel() {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'heure locale';
+  const offset = -new Date().getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const h = Math.floor(Math.abs(offset) / 60);
+  const m = Math.abs(offset) % 60;
+  return `${zone.replace(/_/g, ' ')}, UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
+}
+async function renderAutoStatus() {
+  const { autoStatus, lastAutoTick, nextDueAt } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt']);
+  const box = $('auto-status');
+  const now = Date.now();
+  const here = `Heure de cet ordinateur : ${clock(now)} (${timeZoneLabel()}). Les heures de publication suivent cette horloge.`;
+  let tone = '';
+  let text;
+  if (!lastAutoTick) {
+    text = 'Publication automatique : démarrage…';
+  } else if (autoStatus && autoStatus.state === 'subscription') {
+    tone = 'warn'; text = 'Publication automatique arrêtée : abonnement inactif.';
+  } else if (autoStatus && autoStatus.state === 'folder') {
+    tone = 'warn'; text = 'Publication automatique arrêtée : clique l’icône KappGen puis « Autoriser » pour rouvrir l’accès au dossier.';
+  } else if (now - lastAutoTick > 12 * 60000) {
+    tone = 'warn'; text = `Dernière vérification à ${clock(lastAutoTick)} : Chrome était fermé ou l’ordinateur en veille. Ce qui était prévu entre-temps part maintenant.`;
+  } else {
+    tone = autoStatus && autoStatus.state === 'busy' ? 'busy' : '';
+    text = `Publication automatique active · vérifiée à ${clock(lastAutoTick)}`
+      + (nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${new Date(nextDueAt).toDateString() !== new Date().toDateString() ? ` le ${new Date(nextDueAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : ''}` : '')
+      + '.';
+  }
+  box.className = `auto-status ${tone}`.trim();
+  $('auto-status-text').textContent = `${text} ${here}`;
+  box.hidden = false;
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt)) renderAutoStatus();
+});
+setInterval(() => { if (!document.hidden) renderAutoStatus(); }, 30000);
+
+// Evening summary e-mail: off unless the creator ticks it. Ticking it never
+// sends the past days, only from today on.
+async function renderDailyReport() {
+  const { dailyReport } = await chrome.storage.local.get('dailyReport');
+  $('daily-report').checked = !!dailyReport;
+}
+$('daily-report').addEventListener('change', async () => {
+  const on = $('daily-report').checked;
+  const d = new Date(Date.now() - 86400000);
+  const yesterday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  await chrome.storage.local.set(on ? { dailyReport: true, reportedDays: [yesterday] } : { dailyReport: false });
+});
+
 async function start() {
   const { appUrl } = await chrome.storage.local.get('appUrl');
   $('app-url').value = appUrl || '';
@@ -1435,6 +1489,8 @@ async function start() {
   renderFolder();
   renderApp();
   renderPosts();
+  renderAutoStatus();
+  renderDailyReport();
 }
 start();
 
