@@ -129,11 +129,23 @@
 
   async function fillCaption({ caption }) {
     if (!caption) return true;
-    const field = await waitFor(() => {
-      const root = scope();
-      const fields = [...root.querySelectorAll(S('captionFields'))].filter(visible);
-      return fields[0];
-    }, 30000, 'le champ de texte de la publication');
+    // The Reel composer only shows the description field after one or two
+    // « Suivant » screens (edit, then details): when the field is not there
+    // yet, wait for the upload to reach 100 %, click « Suivant » and look again.
+    const findField = () => [...scope().querySelectorAll(S('captionFields'))].filter(visible)[0];
+    let field = null;
+    for (let screen = 0; screen < 4 && !field; screen += 1) {
+      try {
+        field = await waitFor(findField, screen === 0 ? 12000 : 20000, 'le champ de texte de la publication');
+      } catch (error) {
+        if (screen === 3) throw error;
+        await waitFor(() => !uploading(), 15 * 60000, 'la fin de l’envoi (100 %)');
+        const next = findButton(X('next'), { needEnabled: true });
+        if (!next) throw error;
+        click(next);
+        await sleep(2500);
+      }
+    }
     const start = caption.replace(/\s+/g, ' ').trim().slice(0, 12);
     const written = () => (field.isContentEditable ? textOf(field) : field.value).includes(start);
     field.scrollIntoView({ block: 'center' });
