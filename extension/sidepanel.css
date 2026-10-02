@@ -498,3 +498,6 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outlin
 .net-logo { display: inline-flex; align-items: center; line-height: 0; }
 .tabs button[data-tab] { display: inline-flex; align-items: center; gap: 6px; }
 .networks strong { display: inline-flex; align-items: center; gap: 6px; }
+.retry-all { width: 100%; margin: 0 0 10px; }
+li.row .when span.was { text-decoration: line-through; opacity: 0.7; }
+.networks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }

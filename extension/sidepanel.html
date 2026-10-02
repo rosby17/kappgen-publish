@@ -168,6 +168,7 @@
 
 
     <div class="list-head"><h2>Posts programmés</h2><span id="fb-summary" class="muted small"></span></div>
+    <button id="fb-retry-all" class="btn secondary retry-all" hidden></button>
     <div id="fb-filters" class="filters">
       <div class="chips" role="group" aria-label="Type de post">
         <button data-type="" class="chip active">Tous</button>
@@ -230,7 +231,7 @@
     <h3 class="set-group">Dossiers</h3>
     <section class="card" id="set-folder">
       <h2>Dossier des vidéos YouTube</h2>
-      <p class="small muted folder-what">Tes vidéos longues finies, une par dossier (vidéo + miniature + texte). Elles partent sur YouTube, puis, si tu veux, sur Facebook et TikTok.</p>
+      <p class="small muted folder-what">Une vidéo par dossier : vidéo + miniature + texte.</p>
       <div id="folder-chosen" class="chosen" hidden>
         <span class="check">✓</span>
         <button id="pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="folder-name"></strong><span class="chosen-edit">changer</span></button>
@@ -240,11 +241,11 @@
         <button id="pick" class="btn primary wide">Choisir le dossier des vidéos YouTube</button>
         <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
       </div>
-      <p id="folder-hint" class="muted small">Choisis le dossier <code>YOUTUBE</code> (toutes tes chaînes) ou le dossier d’une chaîne.</p>
+      <p id="folder-hint" class="muted small">Le dossier <code>YOUTUBE</code> ou celui d’une chaîne.</p>
     </section>
     <section class="card" id="set-fb-folder">
       <h2>Dossier des posts (Facebook, TikTok, Instagram)</h2>
-      <p class="small muted folder-what">Tes publications courtes : <strong>textes</strong>, <strong>photos</strong> et <strong>vidéos courtes / Reels</strong>. Un sous-dossier par post, avec un fichier texte et, si besoin, une image ou une vidéo. Les textes et photos partent sur Facebook ; les vidéos sur Facebook, TikTok et Instagram.</p>
+      <p class="small muted folder-what">Un post par dossier : texte, et une photo ou une vidéo si besoin.</p>
       <div id="fb-folder-chosen" class="chosen" hidden>
         <span class="check">✓</span>
         <button id="fb-pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="fb-folder-name"></strong><span class="chosen-edit">changer</span></button>
@@ -255,17 +256,16 @@
         <button id="fb-pick" class="btn primary wide">Choisir le dossier des posts</button>
         <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
       </div>
-      <p id="fb-folder-hint" class="muted small">L’heure de chaque post est celle écrite dans son dossier ; un post sans heure part tout de suite.</p>
+      <p id="fb-folder-hint" class="muted small">Chaque post part à l’heure écrite dans son dossier.</p>
     </section>
     <h3 class="set-group">Réseaux et pages</h3>
     <section class="card">
       <div class="field-head"><h2>Réseaux utilisés</h2></div>
-      <p class="small muted">Coche seulement les réseaux sur lesquels tu publies. Un réseau décoché disparaît du panneau et KappGen n'y envoie plus rien, même automatiquement.</p>
       <ul id="networks" class="networks"></ul>
     </section>
     <section class="card" id="set-pages">
       <div class="field-head"><h2>Tes pages et comptes</h2><span id="pages-state" class="pill warn"></span></div>
-      <p class="small muted">Colle le lien de chaque page ou compte où publier. Ouvre-le une fois dans ce Chrome pour vérifier que tu y es bien connecté.</p>
+
       <div id="pages" class="pages"></div>
       <p id="pages-saved" class="small ok-text" hidden>Liens enregistrés.</p>
     </section>
@@ -301,7 +301,7 @@
           <label class="small" for="fb-groups-per">Nombre de groupes par post (9 au plus par publication)</label>
           <input id="fb-groups-per" type="number" min="1" max="25" value="9">
         </div>
-        <p class="small muted">Après « Suivant », KappGen clique « Partager dans les groupes » et coche ce nombre de groupes au hasard parmi ceux que Facebook te propose. Bouton « Groupes : oui / non » sur chaque post pour faire une exception.</p>
+        <p class="small muted">Cochés au hasard parmi tes groupes, à la publication.</p>
         <details class="mini-details">
           <summary>Groupes préférés (facultatif, <span id="fb-groups-count">0</span>)</summary>
           <p class="small muted">Cochés en priorité. « Trouver mes groupes » les charge, ou colle leurs liens, un par ligne.</p>
@@ -314,7 +314,7 @@
     <h3 class="set-group">Plus</h3>
     <section class="card">
       <div class="field-head"><h2>Bilan du soir par mail</h2></div>
-      <p class="small muted">Un seul mail par jour, vers 21 h (heure de cet ordinateur), avec tout ce qui a été publié dans la journée : vidéos et Shorts YouTube, posts et vidéos Facebook, TikTok, Instagram, et ce qui a échoué. Aucun mail les jours sans publication.</p>
+      <p class="small muted">Un mail vers 21 h avec tout ce qui est parti dans la journée.</p>
       <label class="check-line small"><input type="checkbox" id="daily-report"> Recevoir le bilan du soir par mail</label>
     </section>
     <section id="partner-card" class="card partner-card" hidden>
