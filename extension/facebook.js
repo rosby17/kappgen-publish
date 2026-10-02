@@ -161,7 +161,7 @@
     return true;
   }
 
-  async function publish() {
+  async function publish({ groups = [] } = {}) {
     // The Reel composer has one or two "Next" screens before "Publish",
     // and the file must be fully sent (100 %) before each of them.
     keepQuiet(true);
@@ -173,12 +173,18 @@
       click(next);
       await sleep(2500);
     }
-    const button = await waitFor(() => !uploading() && findButton(/^(publish|publier|share now|share|partager maintenant|partager|publier maintenant|post)$/i, { needEnabled: true }), 15 * 60000, 'le bouton Publier');
+    const finalButton = /^(publish|publier|share now|share|partager maintenant|partager|publier maintenant|post)$/i;
+    let button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 15 * 60000, 'le bouton Publier');
+    let picked = [];
+    if (groups.length) {
+      picked = await tickGroupsInComposer(groups).catch(() => []);
+      button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 60000, 'le bouton Publier');
+    }
     silence();
     click(button);
     await sleep(3000);
     keepQuiet(false);
-    return true;
+    return { groups: picked };
   }
 
   // Opens the "Create post" composer of the Page (text, with or without photo).
@@ -201,8 +207,12 @@
 
   // Posts the composer: "Next" first when Facebook shows it, then "Post".
   // timeout: how long Facebook may keep the button grey (a video uploads first).
-  async function sendPost({ timeout = 90000 } = {}) {
+  // groups: names of groups to tick in the composer's own « share to groups »
+  // option before « Publier » (Facebook takes 9 at most); returns the ticked ones.
+  async function sendPost({ timeout = 90000, groups = [] } = {}) {
     const dialog = composer();
+    let groupsTried = false;
+    let picked = [];
     const final = /^(post|publier|publish|share now|share|partager maintenant|partager|publier maintenant)$/i;
     const isFinal = (node) => labelsOf(node).some((label) => final.test(label));
     // « Suivant » first when Facebook shows it (it stays grey while the text
@@ -217,9 +227,15 @@
         return !uploading() && (findButton(final, { needEnabled: true }) || findButton(/^(next|suivant)$/i, { needEnabled: true }));
       }, timeout, 'le bouton Suivant / Publier actif (texte ou vidéo pas encore pris en compte)');
       silence();
-      click(button);
+      let target = button;
+      if (isFinal(button) && groups.length && !groupsTried) {
+        groupsTried = true;
+        picked = await tickGroupsInComposer(groups).catch(() => []);
+        target = await waitFor(() => findButton(final, { needEnabled: true }), timeout, 'le bouton Publier');
+      }
+      click(target);
       await sleep(2500);
-      if (isFinal(button)) break;
+      if (isFinal(target)) break;
     }
     // After « Publier », Facebook may show an offer (« Vous organisez un
     // évènement ? », boost…): the post itself is kept with « Publier la
@@ -245,9 +261,105 @@
     const late = inWindow();
     if (late) { click(late); await sleep(1500); }
     keepQuiet(false);
-    return true;
+    return { groups: picked };
   }
 
 
-  window.__kappgen = { version: VERSION, openReel, openPost, receiveFile, fillCaption, publish, sendPost };
+  // ---------------------------------------------- sharing to several groups
+  // Menus and lists of the share window are not always buttons.
+  const CHOICES = 'button, [role="button"], [role="menuitem"], [role="option"], [role="listitem"], [role="radio"], a';
+  const choice = (pattern, root = document) => [...root.querySelectorAll(CHOICES)]
+    .find((node) => visible(node) && labelsOf(node).some((label) => pattern.test(label)));
+
+  // On the Page: the post (found by the start of its text) → « Partager » →
+  // « Groupe ». mode "multi" when the window has a box to tick per group.
+  async function openShareToGroups({ snippet }) {
+    const wanted = snippet.toLowerCase();
+    const article = await waitFor(() => [...document.querySelectorAll('[role="article"], [aria-posinset]')]
+      .filter(visible).find((a) => textOf(a).toLowerCase().includes(wanted)), 60000, 'la publication sur la Page');
+    const share = choice(/^(partager|share)$/i, article)
+      || [...article.querySelectorAll('[aria-label]')].find((n) => visible(n) && /^(partager|share|envoyer ceci|send this)/i.test(n.getAttribute('aria-label')));
+    if (!share) throw new Error('Facebook : bouton « Partager » de la publication introuvable.');
+    click(share);
+    await sleep(1500);
+    const toGroup = await waitFor(() => choice(/^(groupe|group|partager dans un groupe|share to a group|dans un groupe|in a group)$/i)
+      || choice(/partager dans (un|des) groupes?|share (to|in) (a )?groups?/i), 15000, 'l’option « Groupe » du partage');
+    click(toGroup);
+    await sleep(2500);
+    const dialog = topDialog();
+    const boxes = dialog ? dialog.querySelectorAll('[role="checkbox"], input[type="checkbox"]').length : 0;
+    return { mode: boxes > 0 ? 'multi' : 'single' };
+  }
+
+  // Ticks each group by its name (typed in the search field when there is one).
+  async function pickGroups({ names }) {
+    const dialog = topDialog();
+    if (!dialog) throw new Error('Facebook : fenêtre de partage introuvable.');
+    const search = [...dialog.querySelectorAll('input[type="search"], input[type="text"], input:not([type])')].find(visible);
+    const setSearch = async (text) => {
+      if (!search) return;
+      search.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, text);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(1500);
+    };
+    const picked = [];
+    const missing = [];
+    for (const name of names) {
+      await setSearch(name);
+      const lower = name.toLowerCase();
+      const box = [...dialog.querySelectorAll('[role="checkbox"], input[type="checkbox"]')].find((node) => {
+        const row = node.closest('[role="listitem"], [role="option"], label, li') || node.parentElement;
+        return row && (textOf(row).toLowerCase().includes(lower) || (node.getAttribute('aria-label') || '').toLowerCase().includes(lower));
+      });
+      if (!box) { missing.push(name); continue; }
+      const ticked = box.getAttribute('aria-checked') === 'true' || box.checked;
+      if (!ticked) { click(box); await sleep(400); }
+      picked.push(name);
+    }
+    await setSearch('');
+    return { picked, missing };
+  }
+
+  // The window's « Publier » / « Partager » (an optional text first).
+  async function confirmShare({ caption }) {
+    const dialog = topDialog();
+    if (caption) {
+      const field = dialog && [...dialog.querySelectorAll('[contenteditable="true"], textarea')].find(visible);
+      if (field) { field.focus(); document.execCommand('insertText', false, caption); await sleep(500); }
+    }
+    const button = await waitFor(() => findButton(/^(publier|partager|post|share|publish|partager maintenant|share now|envoyer|send)$/i, { needEnabled: true }),
+      30000, 'le bouton « Publier » du partage');
+    click(button);
+    const start = Date.now();
+    while (Date.now() - start < 60000 && dialog && document.contains(dialog) && visible(dialog)) await sleep(1000);
+    return true;
+  }
+
+  // In the Page's composer (last screen, before « Publier »): the option to
+  // publish in groups too, its list ticked by name, then back to the composer.
+  async function tickGroupsInComposer(names) {
+    const option = choice(/partager dans (des|un|les) groupes?|publier (aussi )?dans (des|les) groupes|share (to|in) (a )?groups?|post (to|in) groups?|^groupes?$|^groups?$/i, topDialog() || document);
+    if (!option) return [];
+    const before = topDialog();
+    click(option);
+    await waitFor(() => { const d = topDialog(); return d && d !== before && d.querySelector('[role="checkbox"], input[type="checkbox"]'); }, 15000, 'la liste des groupes');
+    const { picked } = await pickGroups({ names: names.slice(0, 9) });
+    const save = await waitFor(() => findButton(/^(enregistrer|termin[ée]|ok|valider|confirmer|appliquer|save|done|apply|confirm)$/i, { needEnabled: true }), 10000, 'le bouton pour valider les groupes');
+    click(save);
+    await sleep(1500);
+    return picked;
+  }
+
+  async function closeDialogs() {
+    for (let i = 0; i < 3 && topDialog(); i += 1) {
+      const target = document.activeElement || document.body;
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+      await sleep(600);
+    }
+    return true;
+  }
+
+  window.__kappgen = { version: VERSION, openReel, openPost, receiveFile, fillCaption, publish, sendPost,
+    openShareToGroups, pickGroups, confirmShare, closeDialogs, tickGroupsInComposer };
 })();
