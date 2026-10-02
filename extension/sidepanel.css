@@ -426,3 +426,8 @@ li.row .acts .btn { height: 26px; }
 .partner-stats div { background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border); border-radius: 10px; padding: 8px 6px; text-align: center; min-width: 0; }
 .partner-stats strong { display: block; font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .partner-stats span { font-size: 10.5px; color: var(--muted); }
+/* ------------------------------------------------ paused (folder access) */
+.paused-card { border-color: rgba(255, 207, 110, 0.55); background: rgba(255, 207, 110, 0.08); }
+.paused-card h2 { margin: 0 0 6px; color: #ffcf6e; }
+.paused-card .small { margin: 0 0 10px; }
+.paused-card .small.muted { margin: 10px 0 0; }
