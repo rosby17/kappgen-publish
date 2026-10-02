@@ -513,7 +513,7 @@ function ownOf(settings, video) {
   // on by default, for videos published from the moment it was switched on),
   // unless the channel's own folder settings say otherwise.
   if (own.facebook === undefined) own.facebook = settings.facebookFromYoutube !== false;
-  if (!own.facebookSince) own.facebookSince = settings.facebookFromYoutubeSince || Date.now();
+  if (!own.facebookSince) own.facebookSince = settings.facebookFromYoutubeSince || 1;
   if (!networkOn(settings, 'facebook')) own.facebook = false;
   return own;
 }
@@ -1779,6 +1779,13 @@ async function chainIfDone(since) {
 // on its own after a failure (the panel shows « Réessayer »).
 async function spreadNext(settings, sent, own) {
   const on = (net) => networkOn(settings, net);
+  // « Mes vidéos YouTube sur ma Page » is on by default: without a start
+  // date kept, « since now » moved at every pass and nothing ever went
+  // (before 1.18.1). From now on, plus the videos of the last 7 days.
+  if (!settings.facebookFromYoutubeSince) {
+    settings.facebookFromYoutubeSince = Date.now() - 7 * 24 * 3600000;
+    await chrome.storage.local.set({ folder: settings });
+  }
   // X / LinkedIn ticked before their start date was kept: from now on.
   for (const net of ['x', 'linkedin']) {
     if (on(net) && !settings[`${net}Since`]) {
@@ -1798,7 +1805,8 @@ async function spreadNext(settings, sent, own) {
         () => publishShortOnly(v.relative_path, { auto: true })],
       // On the Facebook Page: the long video, then its Short as a Reel.
       [fb && !v.facebook_published_at && !v.facebook_error, () => publishFacebookOnly(v.relative_path, { auto: true, as: 'video' })],
-      [fb && v.vertical_path && v.short_youtube_id && !v.facebook_reel_at && !v.facebook_reel_error,
+      // The Reel once the Short is on YouTube (or when YouTube's Short failed / is not used).
+      [fb && v.vertical_path && (v.short_youtube_id || v.short_error || !on('youtube')) && !v.facebook_reel_at && !v.facebook_reel_error,
         () => publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' })],
       [on('tiktok') && settings.tiktokAuto && !own('tiktok') && !v.tiktok_published_at && !v.tiktok_error && after(v, settings.tiktokSince),
         () => publishTikTokVideo(v.relative_path, { auto: true })],
