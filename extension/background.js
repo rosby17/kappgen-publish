@@ -269,6 +269,7 @@ async function tabToReuse(pattern, patterns) {
   return anywhere[0] || null;
 }
 const tiktokTabToReuse = () => tabToReuse(/^https:\/\/www\.tiktok\.com\//, ['https://www.tiktok.com/*']);
+const instagramTabToReuse = () => tabToReuse(/^https:\/\/www\.instagram\.com\//, ['https://www.instagram.com/*']);
 const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
 const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
   ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
@@ -542,6 +543,32 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
   }
 }
 
+// The Short (vertical short.mp4) of a video ALREADY on YouTube: the long
+// upload only sends it right after the long video, so videos published
+// before their vertical version existed get it from here (button, or
+// automatically for channels in automatic mode).
+async function publishShortOnly(relativePath, { auto = false } = {}) {
+  await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'short', path: relativePath, auto, message: 'Préparation du Short YouTube…', startedAt: Date.now() } });
+  try {
+    const { sent } = await folderQueue();
+    const video = sent.find((item) => item.relative_path === relativePath);
+    if (!video || !video.youtube_id) throw new Error('La vidéo longue doit d’abord être publiée sur YouTube.');
+    if (!video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier de la vidéo.');
+    if (video.short_youtube_id) throw new Error('Le Short de cette vidéo est déjà publié.');
+    const own = ownOf(await folderSettings(), video);
+    const channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
+    await setJob({ title: video.title, message: 'Envoi du Short sur YouTube…' });
+    const shortId = await publishShortYouTube(video, channelId, channelVisibility(own), { reuse: !auto });
+    if (shortId) await folder('mark', { path: relativePath, status: 'published', data: { shortYoutubeId: shortId } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Short publié sur YouTube.' });
+  } catch (error) {
+    const message = friendly(error);
+    // Not retried on its own (never a double Short): the panel offers « Réessayer ».
+    await folder('mark', { path: relativePath, status: 'published', data: { shortError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
 // Same steps for both sources; only where the video comes from differs.
 async function publish(source, videoId, visibility, { auto = false } = {}) {
   await chrome.storage.session.set({ job: { running: true, source, kind: 'youtube', path: videoId, videoId, auto, message: 'Préparation…', startedAt: Date.now() } });
@@ -687,7 +714,11 @@ async function finishUpload(job) {
     // "Mettre à jour" can finish it even if the save step fails.
     linkedYoutubeId = youtubeId;
     if (source === 'folder') {
-      await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeId, visibility, channel: video.channel_key, hash: video.hash } });
+      // A Short (job.social) belongs to the long video's folder: it must not
+      // replace the long video's link, only be recorded next to it.
+      await folder('mark', { path: video.relative_path, status: 'published', data: job.social
+        ? { shortYoutubeId: youtubeId }
+        : { youtubeId, visibility, channel: video.channel_key, hash: video.hash } });
     } else {
       await api(`/studio-upload/${videoId}/published`, { method: 'POST', body: JSON.stringify({ youtube_video_id: youtubeId }) });
     }
@@ -936,12 +967,13 @@ const hashtags = (tags) => (tags || []).slice(0, 5).map((t) => `#${String(t).rep
 
 // A video already on YouTube: its vertical version if there is one, otherwise
 // the video itself (TikTok takes horizontal videos too).
-async function publishTikTokVideo(relativePath, { auto = false } = {}) {
+async function publishTikTokVideo(relativePath, { auto = false, long = false } = {}) {
   try {
     const { sent } = await folderQueue();
     const video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
-    const filePath = video.vertical_path || video.relative_path;
+    // The vertical version first (TikTok's own format); the long one on request.
+    const filePath = long ? video.relative_path : (video.vertical_path || video.relative_path);
     const caption = [video.title, hashtags(video.tags)].filter(Boolean).join(' ').slice(0, 2200);
     await sendToTikTok({ filePath, caption, title: video.title, channel: video.channel_name, path: relativePath });
     await folder('mark', { path: relativePath, status: 'published', data: { tiktokPublishedAt: new Date().toISOString() } });
@@ -949,6 +981,77 @@ async function publishTikTokVideo(relativePath, { auto = false } = {}) {
   } catch (error) {
     const message = friendly(error);
     await folder('mark', { path: relativePath, status: 'published', data: { tiktokError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// ---------------------------------------------------------------- Instagram
+
+// Instagram home, in the Instagram tab already open if there is one.
+async function openInstagram() {
+  const tab = await reuseOrOpen(instagramTabToReuse, 'https://www.instagram.com/');
+  const start = Date.now();
+  while (Date.now() - start < 90000) {
+    const current = await chrome.tabs.get(tab.id);
+    const url = current.url || current.pendingUrl || '';
+    if (/\/accounts\/(login|signup)|\/challenge\//.test(url)) throw new Error('Connecte-toi d’abord à Instagram dans ce navigateur, puis relance.');
+    if (url.startsWith('https://www.instagram.com/') && current.status === 'complete') {
+      await sleep(2000);
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/page-kit.js', 'instagram.js'] });
+      return tab.id;
+    }
+    await sleep(700);
+  }
+  throw new Error('Instagram ne s’est pas ouvert.');
+}
+
+// One vertical video to Instagram (it becomes a Reel) with its caption.
+async function sendToInstagram({ filePath, caption, title, channel, path }) {
+  await chrome.storage.session.set({ job: { running: true, source: 'instagram', kind: 'instagram', path, title, channel, message: 'Ouverture d’Instagram…', startedAt: Date.now() } });
+  const tabId = await openInstagram();
+  await whileShown(tabId, async () => {
+    await stepIn(tabId, '__kappgenInstagram', 'openComposer');
+    await setJob({ message: 'Envoi de la vidéo à Instagram…' });
+    await stepIn(tabId, '__kappgenInstagram', 'sendVideo', { path: filePath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`) });
+    await stepIn(tabId, '__kappgenInstagram', 'next', { times: 2 });
+    await setJob({ message: 'Légende…' });
+    await stepIn(tabId, '__kappgenInstagram', 'writeCaption', { caption });
+    await setJob({ message: 'Partage sur Instagram (envoi jusqu’au bout)…' });
+    await stepIn(tabId, '__kappgenInstagram', 'share');
+  });
+  closeStudioTab(tabId); // only a tab opened for this post is closed
+}
+
+// A video already on YouTube, as a Reel: needs its vertical version
+// (Instagram crops a horizontal video to a square).
+async function publishInstagramVideo(relativePath, { auto = false } = {}) {
+  try {
+    const { sent } = await folderQueue();
+    const video = sent.find((item) => item.relative_path === relativePath);
+    if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
+    if (!video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier : Instagram recadrerait la vidéo.');
+    const caption = [video.title, hashtags(video.tags)].filter(Boolean).join('\n\n').slice(0, 2200);
+    await sendToInstagram({ filePath: video.vertical_path, caption, title: video.title, channel: video.channel_name, path: relativePath });
+    await folder('mark', { path: relativePath, status: 'published', data: { instagramPublishedAt: new Date().toISOString() } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur Instagram.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('mark', { path: relativePath, status: 'published', data: { instagramError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// A video of the posts folder, as a Reel.
+async function publishInstagramPost(postPath) {
+  const post = (await postsList()).find((p) => p.path === postPath);
+  try {
+    if (!post || !post.video_path) throw new Error('Ce post n’a pas de vidéo pour Instagram.');
+    await sendToInstagram({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath });
+    await folder('markPost', { path: postPath, patch: { instagram: { statut: 'publie', published_at: new Date().toISOString() } } });
+    await setJob({ running: false, done: true, error: null, message: 'Publié sur Instagram.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('markPost', { path: postPath, patch: { instagram: { statut: 'echec', erreur: message } } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1121,6 +1224,26 @@ async function autoTick() {
       return;
     }
   }
+  // The Short of a video already on YouTube whose vertical version came later
+  // (never retried after a failure: the panel shows it with « Réessayer »).
+  if (networkOn(settings, 'youtube')) {
+    const shortNext = sent.find((v) => v.youtube_id && v.vertical_path && !v.short_youtube_id && !v.short_error
+      && ownOf(settings, v).auto !== false);
+    if (shortNext) {
+      await publishShortOnly(shortNext.relative_path, { auto: true });
+      return;
+    }
+  }
+  // Instagram, when its automatic mode is on: videos with a vertical version
+  // published on YouTube since then.
+  if (settings.instagramAuto && networkOn(settings, 'instagram')) {
+    const igNext = sent.find((v) => v.youtube_id && v.vertical_path && !v.instagram_published_at && !v.instagram_error
+      && v.published_at && v.published_at >= (settings.instagramSince || Infinity));
+    if (igNext) {
+      await publishInstagramVideo(igNext.relative_path, { auto: true });
+      return;
+    }
+  }
   // Then a video already on YouTube, for a channel whose Facebook publishing
   // is automatic (videos published on YouTube since it was switched on).
   for (const v of sent) {
@@ -1214,7 +1337,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     },
     // Opens the payment page; the order is checked when the creator comes back.
     subscribe: async () => {
-      const data = await api('/publish/checkout', { method: 'POST', body: JSON.stringify({ provider: message.provider }) });
+      const data = await api('/publish/checkout', { method: 'POST', body: JSON.stringify({ provider: message.provider, offer: message.offer || 'monthly' }) });
       await chrome.storage.local.set({ pendingOrder: data.order_id });
       await chrome.tabs.create({ url: data.redirect_url, active: true });
       return data;
@@ -1260,8 +1383,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
-      publishTikTokVideo(message.path).catch(() => {});
+      publishTikTokVideo(message.path, { long: !!message.long }).catch(() => {});
       return { started: true };
+    },
+    shortYoutube: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Un envoi est déjà en cours.');
+      publishShortOnly(message.path).catch(() => {});
+      return { started: true };
+    },
+    instagram: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishInstagramVideo(message.path).catch(() => {});
+      return { started: true };
+    },
+    instagramPost: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishInstagramPost(message.path).catch(() => {});
+      return { started: true };
+    },
+    instagramAuto: async () => {
+      const settings = await folderSettings();
+      settings.instagramAuto = !!message.on;
+      if (message.on && !settings.instagramSince) settings.instagramSince = new Date().toISOString();
+      await chrome.storage.local.set({ folder: settings });
+      return { on: settings.instagramAuto };
     },
     tiktokPost: async () => {
       await requireAccess();

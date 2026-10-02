@@ -478,6 +478,7 @@ const KappDossier = (() => {
     const videos = [];
     const channels = new Map();
     const sent = [];
+    const excluded = []; // « Ne pas publier » : never sent, listed apart
     for (const unit of units) {
       const { node, video, channel } = unit;
       const relativePath = pathIn(node, video.name);
@@ -491,6 +492,11 @@ const KappDossier = (() => {
       const channelName = channel.path ? channel.name : tree.name;
       // "Déjà publiée" (published by hand) counts as sent: it is listed in the
       // YouTube tab, never sent again, never "updated" (no YouTube link).
+      if (record.status === 'excluded') {
+        excluded.push({ relative_path: relativePath, channel_key: channelKey, channel_name: channelName, name: video.name,
+          size_bytes: video.size, date: record.date || null });
+        continue;
+      }
       const isSent = record.status === 'published' || record.status === 'ignored';
       if (!isSent && sentCopies.has(`${video.name}|${video.size}`)) continue;
       if (!isSent && unit.kind === 'vrac' && now - video.modified > LOOSE_MAX_AGE) continue;
@@ -526,6 +532,8 @@ const KappDossier = (() => {
           short_youtube_id: record.shortYoutubeId || null, facebook_published_at: record.facebookPublishedAt || null,
           facebook_error: record.facebookError || null, published_at: record.publishedAt || null,
           tiktok_published_at: record.tiktokPublishedAt || null, tiktok_error: record.tiktokError || null,
+          instagram_published_at: record.instagramPublishedAt || null, instagram_error: record.instagramError || null,
+          short_error: record.shortError || null,
           channel_config: fileConfig });
         continue;
       }
@@ -600,12 +608,12 @@ const KappDossier = (() => {
       }
     }
     videos.sort((a, b) => a.channel_key.localeCompare(b.channel_key) || a.relative_path.localeCompare(b.relative_path));
-    return { folder: tree.name, videos, sent, channels: [...channels.values()].sort((a, b) => a.key.localeCompare(b.key)) };
+    return { folder: tree.name, videos, sent, excluded, channels: [...channels.values()].sort((a, b) => a.key.localeCompare(b.key)) };
   }
 
   // --------------------------------------------------------------- state
 
-  // status: started | published | failed | ignored | reset
+  // status: started | published | failed | ignored | excluded | reset
   async function mark(relativePath, status, data = {}) {
     const rootHandle = await root();
     const state = await readState(rootHandle);
@@ -645,13 +653,16 @@ const KappDossier = (() => {
         if (data.youtubeId) {
           Object.assign(record, { youtubeId: data.youtubeId, visibility: data.visibility || null, channel: data.channel || null, appliedHash: data.hash || null });
         }
-        if (data.shortYoutubeId) record.shortYoutubeId = data.shortYoutubeId;
+        if (data.shortYoutubeId) { record.shortYoutubeId = data.shortYoutubeId; delete record.shortError; }
+        if (data.shortError) record.shortError = data.shortError;
         // Link given by hand: the sheet and thumbnail of the folder must be applied.
         if (data.forceUpdate) { record.forceUpdate = true; delete record.appliedHash; delete record.updateTriedHash; delete record.updateError; }
         if (data.facebookPublishedAt) { record.facebookPublishedAt = data.facebookPublishedAt; delete record.facebookError; }
         if (data.facebookError) record.facebookError = data.facebookError;
         if (data.tiktokPublishedAt) { record.tiktokPublishedAt = data.tiktokPublishedAt; delete record.tiktokError; }
         if (data.tiktokError) record.tiktokError = data.tiktokError;
+        if (data.instagramPublishedAt) { record.instagramPublishedAt = data.instagramPublishedAt; delete record.instagramError; }
+        if (data.instagramError) record.instagramError = data.instagramError;
       }
       if (status === 'failed') record.error = data.error || 'Erreur inconnue';
       state[relativePath] = record;
@@ -807,6 +818,8 @@ const KappDossier = (() => {
         published_at: info.published_at || null,
         tiktok_statut: (info.tiktok && info.tiktok.statut) || null,
         tiktok_error: (info.tiktok && info.tiktok.erreur) || null,
+        instagram_statut: (info.instagram && info.instagram.statut) || null,
+        instagram_error: (info.instagram && info.instagram.erreur) || null,
       };
       posts.push(post);
     }

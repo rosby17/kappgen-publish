@@ -45,6 +45,56 @@ function pill(kind, text) {
   return el('div', `pill ${kind}`, text);
 }
 
+// Small line icons (no emoji): clock, link, play, refresh.
+const ICON_PATHS = {
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  link: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
+  short: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="m10.5 9.5 4 2.5-4 2.5z"/>',
+};
+function icon(name) {
+  const span = el('span', 'ico-wrap');
+  span.innerHTML = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
+  return span.firstChild;
+}
+// A status line with an icon in place of the dot.
+function pillIcon(kind, text, name) {
+  const node = pill(kind, '');
+  node.classList.add('with-icon');
+  node.append(icon(name), el('span', null, text));
+  return node;
+}
+
+// One compact line for a video (YouTube, Facebook, TikTok, Instagram):
+// picture, title, details, state and small buttons, like the posts.
+function mediaRow({ path, preview, youtubeId, emptyLabel = 'Vidéo', title, detail, status, actions = [], extra = [] }) {
+  const item = el('li', 'row media');
+  if (path) item.dataset.path = path;
+  const mini = el('div', 'mini wide', emptyLabel);
+  const show = (src) => { const img = document.createElement('img'); img.src = src; img.alt = ''; mini.replaceChildren(img); };
+  if (youtubeId) show(`https://i.ytimg.com/vi/${youtubeId}/mqdefault.jpg`);
+  else if (preview) KappDossier.fileAt(preview).then((file) => show(URL.createObjectURL(file))).catch(() => {});
+  const what = el('div', 'what');
+  what.append(el('div', 't', title));
+  if (detail) what.append(el('div', 'd', detail));
+  const live = el('div', 'live');
+  if (status) live.append(status);
+  what.append(live);
+  for (const node of extra) what.append(node);
+  const acts = el('div', 'acts');
+  acts.append(...actions);
+  item.append(mini, what, acts);
+  item.say = (kind, text) => live.replaceChildren(pill(kind, text));
+  return item;
+}
+function iconLink(name, label, href) {
+  const a = el('a', 'btn ghost icon-btn');
+  a.href = href;
+  a.target = '_blank';
+  a.title = label;
+  a.append(icon(name), el('span', null, label));
+  return a;
+}
+
 // One card: thumbnail, title, details, status and a row of actions.
 function card({ path, preview, emptyLabel, title, details = [], status, actions = [], extra = [] }) {
   const item = el('li', 'item');
@@ -132,9 +182,9 @@ let jobRunning = false;
 
 // ------------------------------------------------------------------ tabs
 
-for (const tab of document.querySelectorAll('.tabs button')) {
+for (const tab of document.querySelectorAll('nav [data-tab]')) {
   tab.addEventListener('click', () => {
-    for (const other of document.querySelectorAll('.tabs button')) other.classList.toggle('active', other === tab);
+    for (const other of document.querySelectorAll('nav [data-tab]')) other.classList.toggle('active', other === tab);
     for (const pane of document.querySelectorAll('.tab')) pane.hidden = pane.id !== `tab-${tab.dataset.tab}`;
   });
 }
@@ -204,11 +254,18 @@ function videoItem(video) {
     renderFolder();
   });
   already.title = 'Elle est déjà sur YouTube : la retirer de la liste sans l’envoyer.';
+  // Not meant to be published at all (a test, a preview…): set aside for good.
+  const drop = button('Ne pas publier', 'btn ghost', async () => {
+    if (!confirm('Cette vidéo ne sera jamais publiée (même automatiquement).\nTu pourras la remettre depuis « Retirées ».')) return;
+    await KappDossier.mark(video.relative_path, 'excluded');
+    renderFolder();
+  });
+  drop.title = 'Ne jamais publier cette vidéo';
   const item = card({
     path: video.relative_path, preview: video.preview_path, title: video.title,
     details: [chan(video.channel_name), [size(video.size_bytes), video.thumbnail_path ? 'miniature' : 'sans miniature',
       video.tags.length ? `${video.tags.length} mots-clés` : null].filter(Boolean).join(' · ')],
-    status, actions: [already, plan, go],
+    status, actions: [drop, already, plan, go],
   });
   if (video.thumbnail_warning && !video.last_error) item.querySelector('.info').append(pill('warn', video.thumbnail_warning));
   return item;
@@ -357,10 +414,17 @@ function sentItem(video) {
     else status = pill('neutral', 'Modifications à envoyer : mise à jour toute seule dans 5 à 10 min.');
     // A published video needs no buttons: it is listed small, and updated by
     // itself. "Mettre à jour" only shows when an update failed.
-    const link = el('a', 'btn ghost', 'Voir sur YouTube');
-    link.href = `https://youtu.be/${video.youtube_id}`;
-    link.target = '_blank';
-    actions.push(link);
+    actions.push(iconLink('link', 'Voir', `https://youtu.be/${video.youtube_id}`));
+    // Its vertical version (short.mp4) as a YouTube Short.
+    if (video.short_youtube_id) {
+      actions.push(iconLink('short', 'Short', `https://youtube.com/shorts/${video.short_youtube_id}`));
+    } else if (video.vertical_path) {
+      if (video.short_error) extra.push(el('div', 'small muted', `Short : ${video.short_error}`));
+      const short = button(video.short_error ? 'Réessayer le Short' : 'Publier le Short', 'btn secondary', () => act(item, short,
+        { type: 'shortYoutube', path: video.relative_path }, 'Envoi du Short sur YouTube en cours… (Studio s’ouvre)'));
+      short.dataset.publish = '1';
+      actions.push(short);
+    }
     if (video.update_error && video.update_tried_hash === video.hash) {
       const update = button('Réessayer la mise à jour', 'btn primary', () => act(item, update,
         { type: 'update', path: video.relative_path }, 'Mise à jour sur YouTube en cours…'));
@@ -368,9 +432,11 @@ function sentItem(video) {
       actions.push(update);
     }
   }
-  item = card({
-    path: video.relative_path, preview: video.preview_path, title: video.title || video.relative_path.split('/').pop(),
-    details: [chan(video.channel_name), [size(video.size_bytes), video.date ? new Date(video.date).toLocaleDateString('fr-FR') : null].filter(Boolean).join(' · ')],
+  item = mediaRow({
+    path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
+    title: video.title || video.relative_path.split('/').pop(),
+    detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null,
+      video.short_youtube_id ? 'Short publié' : video.vertical_path ? 'Short prêt' : null].filter(Boolean).join(' · '),
     status, actions, extra,
   });
   return item;
@@ -380,11 +446,12 @@ function sentItem(video) {
 // ------------------------------------------------------ networks used
 
 const NETWORKS = [
-  ['youtube', 'YouTube', 'Envoi des vidéos depuis le dossier.', 'sent'],
+  ['youtube', 'YouTube', 'Vidéos et Shorts depuis le dossier.', 'youtube'],
   ['facebook', 'Facebook', 'Reels, vidéos et posts programmés sur ta page.', 'facebook'],
   ['tiktok', 'TikTok', 'Vidéos verticales (et horizontales) sur ton compte.', 'tiktok'],
-  ['instagram', 'Instagram', 'En développement.', 'instagram'],
+  ['instagram', 'Instagram', 'Reels (versions verticales) sur ton compte.', 'instagram'],
   ['linkedin', 'LinkedIn', 'En développement.', 'linkedin'],
+  ['snapchat', 'Snapchat', 'En développement.', 'snapchat'],
   ['x', 'X', 'En développement.', 'x'],
 ];
 const networkIsOn = (config, name) => ((config.networks || {})[name] !== false);
@@ -398,7 +465,10 @@ async function applyNetworks() {
     if (button) button.hidden = !on;
     document.body.classList.toggle(`off-${name}`, !on);
     const pane = $(`tab-${tab}`);
-    if (!on && pane && !pane.hidden) document.querySelector('.tabs button[data-tab="videos"]').click();
+    if (!on && pane && !pane.hidden) {
+      const first = [...document.querySelectorAll('.tabs button')].find((b) => !b.hidden);
+      if (first) first.click();
+    }
   }
 }
 
@@ -418,6 +488,7 @@ async function renderNetworks() {
       current.networks = { ...(current.networks || {}), [name]: box.checked };
       await chrome.storage.local.set({ folder: current });
       await applyNetworks();
+      renderPages();
       send({ type: 'autoNow' });
     });
     row.append(wrap);
@@ -431,7 +502,16 @@ const TIMES = /^\s*\d{1,2}[:hH]\d{2}(\s*[,;\s]\s*\d{1,2}[:hH]\d{2})*\s*$/;
 
 async function renderPublishSettings() {
   const config = await settings();
-  $('yt-visibility').value = ['UNLISTED', 'PUBLIC', 'PRIVATE'].includes(config.visibility) ? config.visibility : 'UNLISTED';
+  const visibility = ['UNLISTED', 'PUBLIC', 'PRIVATE'].includes(config.visibility) ? config.visibility : 'UNLISTED';
+  for (const b of $('yt-visibility').querySelectorAll('button')) {
+    b.classList.toggle('active', b.dataset.value === visibility);
+    b.setAttribute('aria-checked', String(b.dataset.value === visibility));
+  }
+  $('yt-visibility-hint').textContent = {
+    PUBLIC: 'Chaque vidéo est visible par tout le monde dès sa publication.',
+    UNLISTED: 'Seules les personnes qui ont le lien la voient : tu la passes en publique toi-même dans YouTube Studio.',
+    PRIVATE: 'Toi seul la vois.',
+  }[visibility];
   const when = config.schedule === 'times' ? 'times' : 'now';
   for (const radio of document.querySelectorAll('input[name="yt-when"]')) radio.checked = radio.value === when;
   $('yt-times-row').hidden = when !== 'times';
@@ -446,14 +526,13 @@ async function saveSetting(patch) {
   renderPublishSettings();
 }
 
-$('yt-visibility').addEventListener('change', async () => {
-  const value = $('yt-visibility').value;
-  if (value === 'PUBLIC' && !confirm('Chaque vidéo prête sera PUBLIÉE directement sur YouTube, sans que tu la valides.')) {
-    renderPublishSettings();
-    return;
-  }
-  await saveSetting({ visibility: value });
-});
+for (const b of $('yt-visibility').querySelectorAll('button')) {
+  b.addEventListener('click', async () => {
+    const value = b.dataset.value;
+    if (value === 'PUBLIC' && !confirm('Chaque vidéo prête sera PUBLIÉE directement sur YouTube, sans que tu la valides.')) return;
+    await saveSetting({ visibility: value });
+  });
+}
 for (const radio of document.querySelectorAll('input[name="yt-when"]')) {
   radio.addEventListener('change', async () => {
     $('yt-times-row').hidden = radio.value !== 'times';
@@ -518,7 +597,7 @@ function postRow(post) {
   const live = el('div', 'live');
   const due = post.due_at && post.due_at > Date.now();
   const states = {
-    a_publier: due ? pill('neutral', 'Programmé') : pill('neutral', 'Part dans les 5 min'),
+    a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'Part dans les 5 min'),
     en_cours: pill('busy', 'Publication en cours…'),
     publie: pill('ok', 'Publié'),
     echec: pill('warn', post.error || 'Échec de la publication.'),
@@ -532,7 +611,9 @@ function postRow(post) {
       await KappDossier.markPost(post.path, { date_locale: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
         heure_prevue: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`, statut: 'a_publier', erreur: null, horaire: 'manuel' });
       renderPosts();
-    }, { label: '🕒' });
+    }, { label: '' });
+    change.classList.add('icon-btn');
+    change.append(icon('clock'));
     change.title = 'Changer l’heure de publication';
     const go = button(post.statut === 'echec' ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
       { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
@@ -543,6 +624,59 @@ function postRow(post) {
   item.say = (kind, text) => live.replaceChildren(pill(kind, text));
   return item;
 }
+
+// Posts grouped by day, each day folded (today open): a long list (hundreds
+// of posts a day) stays readable. Rows of a day are built when it is opened.
+let postFilter = '';
+let postSort = 'asc';
+const openDays = new Set();
+const dayKey = (ts) => { if (!ts) return 'sans-heure'; const d = new Date(ts); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+function dayLabel(key) {
+  if (key === 'sans-heure') return 'Sans heure';
+  const d = new Date(`${key}T12:00:00`);
+  const diff = Math.round((new Date(d.toDateString()) - new Date(new Date().toDateString())) / 864e5);
+  const date = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+  const name = diff === 0 ? 'Aujourd’hui' : diff === 1 ? 'Demain' : diff === -1 ? 'Hier' : d.toLocaleDateString('fr-FR', { weekday: 'long' });
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${date}`;
+}
+function dayGroups(list, timeOf, scope, { openToday = false } = {}) {
+  const groups = new Map();
+  for (const post of list) {
+    const key = dayKey(timeOf(post));
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(post);
+  }
+  const today = dayKey(Date.now());
+  return [...groups].map(([key, posts]) => {
+    const box = el('details', 'day');
+    const id = `${scope}:${key}`;
+    box.open = openDays.has(id) || (openToday && key === today && !openDays.has(`${id}:closed`));
+    const summary = el('summary');
+    const failed = posts.filter((p) => p.statut === 'echec').length;
+    summary.append(el('span', 'day-name', dayLabel(key)), el('span', 'day-count', `${posts.length} post${posts.length > 1 ? 's' : ''}${failed ? ` · ${failed} en échec` : ''}`));
+    const list = el('ul', 'rows');
+    const fill = () => { if (!list.childElementCount) list.replaceChildren(...posts.map(postRow)); };
+    if (box.open) fill();
+    box.addEventListener('toggle', () => {
+      if (box.open) { openDays.add(id); openDays.delete(`${id}:closed`); fill(); applyJob(); }
+      else { openDays.delete(id); openDays.add(`${id}:closed`); }
+    });
+    box.append(summary, list);
+    return box;
+  });
+}
+for (const chip of document.querySelectorAll('#fb-filters .chip')) {
+  chip.addEventListener('click', () => {
+    postFilter = chip.dataset.type;
+    for (const other of document.querySelectorAll('#fb-filters .chip')) other.classList.toggle('active', other === chip);
+    renderPosts();
+  });
+}
+for (const b of $('fb-sort').querySelectorAll('button')) b.addEventListener('click', () => {
+  postSort = b.dataset.value;
+  for (const x of $('fb-sort').querySelectorAll('button')) { x.classList.toggle('active', x === b); x.setAttribute('aria-checked', String(x === b)); }
+  renderPosts();
+});
 
 async function renderPosts() {
   const access = await renderFbAccess();
@@ -564,46 +698,79 @@ async function renderPosts() {
     summary.textContent = !posts.length ? (access.state === 'granted' ? 'Aucun post dans ce dossier.' : '')
       : `${toCome.length} à venir · ${done.length} publié(s)` + (missingPage ? ' · lien de la page manquant (en haut)' : '');
   }
+  const shown = (p) => !postFilter || (postFilter === 'echec' ? p.statut === 'echec' : p.type === postFilter);
+  const upcoming = toCome.filter(shown);
+  if (postSort === 'desc') upcoming.sort((a, b) => (b.due_at || 0) - (a.due_at || 0));
+  $('fb-days').replaceChildren(...dayGroups(upcoming, (p) => p.due_at, 'come', { openToday: true }));
   $('fb-done-box').hidden = !done.length;
   $('fb-done-title').textContent = `Déjà publiés (${done.length})`;
-  $('fb-done').replaceChildren(...done.slice(0, 200).map(postRow));
-  $('fb-posts').replaceChildren(...toCome.map(postRow));
-  $('no-posts').hidden = !(posts.length && !toCome.length);
+  $('fb-done-days').replaceChildren(...dayGroups(done.filter(shown), (p) => Date.parse(p.published_at || 0) || p.due_at, 'done'));
+  $('no-posts').hidden = !(posts.length && !upcoming.length);
   applyJob();
   renderTikTok();
+  renderInstagram();
   renderPages();
 }
 
-// Step 1 of the Facebook tab: the link of the Facebook Page, one for all.
+// Settings › « Tes pages et comptes »: one link per network in use. Facebook's
+// stays in settings.facebookPageUrl (read by the background worker); the
+// others in settings.pageUrls, for now as a reminder of where to be signed in.
+const PAGE_FIELDS = [
+  ['youtube', 'YouTube', 'https://www.youtube.com/@ta-chaine', /^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//i],
+  ['facebook', 'Facebook', 'https://www.facebook.com/ta-page', /^https?:\/\/(www\.|m\.|web\.|business\.)?(facebook|fb)\.com\//i],
+  ['tiktok', 'TikTok', 'https://www.tiktok.com/@ton-compte', /^https?:\/\/(www\.)?tiktok\.com\//i],
+  ['instagram', 'Instagram', 'https://www.instagram.com/ton-compte', /^https?:\/\/(www\.)?instagram\.com\//i],
+  ['snapchat', 'Snapchat', 'https://www.snapchat.com/add/ton-compte', /^https?:\/\/(www\.)?snapchat\.com\//i],
+  ['linkedin', 'LinkedIn', 'https://www.linkedin.com/company/ta-page', /^https?:\/\/(www\.)?linkedin\.com\//i],
+  ['x', 'X', 'https://x.com/ton-compte', /^https?:\/\/(www\.)?(x|twitter)\.com\//i],
+];
+const pageUrlOf = (config, name) => (name === 'facebook' ? config.facebookPageUrl : (config.pageUrls || {})[name]) || '';
+
 async function renderPages() {
   const config = await settings();
-  const current = config.facebookPageUrl || '';
-  $('fb-page').value = current;
-  const state = $('fb-page-state');
-  state.className = `pill ${current ? 'ok' : 'warn'}`;
-  state.textContent = current ? 'Page enregistrée' : 'Lien à coller';
+  const used = PAGE_FIELDS.filter(([name]) => networkIsOn(config, name));
+  const missing = used.filter(([name]) => !pageUrlOf(config, name)).length;
+  const state = $('pages-state');
+  state.className = `pill ${missing ? 'warn' : 'ok'}`;
+  state.textContent = missing ? `${missing} lien(s) à coller` : 'Tout est renseigné';
+  $('pages').replaceChildren(...used.map(([name, label, placeholder, pattern]) => {
+    const row = el('label', 'page-row');
+    const input = document.createElement('input');
+    input.type = 'url';
+    input.placeholder = placeholder;
+    input.value = pageUrlOf(config, name);
+    const open = el('a', 'page-open', 'Ouvrir');
+    open.target = '_blank';
+    open.title = 'Ouvre la page dans ce Chrome pour vérifier que tu y es connecté';
+    const syncOpen = () => { open.href = input.value.trim() || '#'; open.hidden = !input.value.trim(); };
+    syncOpen();
+    input.addEventListener('input', () => { input.setCustomValidity(''); syncOpen(); });
+    input.addEventListener('change', async () => {
+      const url = input.value.trim();
+      if (url && !pattern.test(url)) {
+        input.setCustomValidity(`Colle un lien ${label}, ex. ${placeholder}`);
+        input.reportValidity();
+        return;
+      }
+      const current = await settings();
+      if (name === 'facebook') {
+        current.facebookPageUrl = url || null;
+        // One page for everything: links saved per channel by older versions go.
+        for (const own of Object.values(current.channels || {})) { delete own.facebookPageUrl; delete own.facebook; delete own.facebookSince; }
+      } else {
+        current.pageUrls = { ...(current.pageUrls || {}), [name]: url || null };
+      }
+      await chrome.storage.local.set({ folder: current });
+      send({ type: 'autoNow' });
+      $('pages-saved').hidden = false;
+      setTimeout(() => { $('pages-saved').hidden = true; }, 2500);
+      renderPages();
+      if (name === 'facebook') { renderPosts(); if (lastScan) renderFacebook(lastScan); }
+    });
+    row.append(el('span', 'page-label', label), input, open);
+    return row;
+  }));
 }
-
-$('fb-page-save').addEventListener('click', async () => {
-  const input = $('fb-page');
-  const url = input.value.trim();
-  if (url && !/^https?:\/\/(www\.|m\.|web\.|business\.)?(facebook|fb)\.com\//i.test(url)) {
-    input.setCustomValidity('Colle un lien du type https://www.facebook.com/ta-page');
-    input.reportValidity();
-    return;
-  }
-  const current = await settings();
-  current.facebookPageUrl = url || null;
-  // One page for everything: links saved per channel by older versions go.
-  for (const own of Object.values(current.channels)) { delete own.facebookPageUrl; delete own.facebook; delete own.facebookSince; }
-  await chrome.storage.local.set({ folder: current });
-  send({ type: 'autoNow' });
-  renderPages();
-  renderPosts();
-  if (lastScan) renderFacebook(lastScan);
-});
-$('fb-page').addEventListener('input', () => $('fb-page').setCustomValidity(''));
-$('fb-page').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('fb-page-save').click(); });
 
 async function renderFolder() {
   const lists = ['videos', 'sent', 'facebook'].map($);
@@ -630,11 +797,25 @@ async function renderFolder() {
   $('videos').replaceChildren(...[...data.videos].sort((a, b) => order(a) - order(b)).map(videoItem));
   queueMicrotask(applyJob);
   $('no-videos').hidden = data.videos.length > 0;
+  const excluded = data.excluded || [];
+  $('excluded-box').hidden = !excluded.length;
+  $('excluded-title').textContent = `Retirées, jamais publiées (${excluded.length})`;
+  $('excluded').replaceChildren(...excluded.map((v) => {
+    let item;
+    const back = button('Remettre', 'btn ghost', async () => {
+      await KappDossier.mark(v.relative_path, 'reset');
+      renderFolder();
+    });
+    item = mediaRow({ path: v.relative_path, title: v.name, detail: [chan(v.channel_name), size(v.size_bytes)].filter(Boolean).join(' · '),
+      status: pill('neutral', 'Ne sera pas publiée.'), actions: [back] });
+    return item;
+  }));
   const total = data.sent.reduce((sum, v) => sum + v.size_bytes, 0);
   $('sent-summary').textContent = '';
   renderOnYoutube(data, config);
   renderFacebook(data);
   renderTikTok();
+  renderInstagram();
   renderPages();
 }
 
@@ -652,9 +833,10 @@ function facebookItem(video, page) {
     publish.dataset.publish = '1';
     actions.push(publish);
   }
-  item = card({
-    path: video.relative_path, preview: video.preview_path, title: video.title || video.relative_path.split('/').pop(),
-    details: [[chan(video.channel_name), video.vertical_path ? 'version verticale (Reel)' : 'vidéo longue'].filter(Boolean).join(' · ')],
+  item = mediaRow({
+    path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
+    title: video.title || video.relative_path.split('/').pop(),
+    detail: [chan(video.channel_name), video.vertical_path ? 'version verticale (Reel)' : 'vidéo longue'].filter(Boolean).join(' · '),
     status, actions,
   });
   return item;
@@ -668,7 +850,8 @@ function renderTikTok() {
   for (const v of (lastScan && lastScan.sent) || []) {
     if (!v.youtube_id && !v.published_at) continue;
     items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), preview: v.preview_path,
-      detail: [chan(v.channel_name), v.vertical_path ? 'version verticale' : 'vidéo publiée sur YouTube'].filter(Boolean).join(' · '),
+      youtubeId: v.youtube_id, vertical: !!v.vertical_path,
+      detail: [chan(v.channel_name), v.vertical_path ? 'version verticale' : 'pas de version verticale : format long'].filter(Boolean).join(' · '),
       done: v.tiktok_published_at, error: v.tiktok_error, date: v.date });
   }
   for (const p of lastPosts) {
@@ -684,22 +867,72 @@ function renderTikTok() {
     if (it.done) status = pill('ok', 'Publiée sur TikTok.');
     else {
       status = it.error ? pill('warn', `Échec sur TikTok : ${it.error}`) : pill('neutral', 'Prête à partir sur TikTok.');
-      const go = button(it.error ? 'Réessayer' : 'Publier sur TikTok', 'btn primary', () => act(item, go,
+      const go = button(it.error ? 'Réessayer' : it.kind === 'video' && !it.vertical ? 'Publier (format long)' : 'Publier', 'btn primary', () => act(item, go,
         { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
       go.dataset.publish = '1';
       actions.push(go);
+      // The long version stays possible, as an option.
+      if (it.kind === 'video' && it.vertical) {
+        const long = button('Version longue', 'btn ghost', () => act(item, long,
+          { type: 'tiktok', path: it.path, long: true }, 'Version longue vers TikTok en cours…'));
+        long.dataset.publish = '1';
+        actions.unshift(long);
+      }
     }
-    item = card({ path: it.path, preview: it.preview, emptyLabel: 'Vidéo', title: it.title, details: [it.detail], status, actions });
+    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
     return item;
   };
   const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
-  const waiting = items.filter((it) => !it.done).sort(recent);
+  const waiting = items.filter((it) => !it.done).sort((a, b) => (b.vertical ? 1 : 0) - (a.vertical ? 1 : 0) || recent(a, b));
   const done = items.filter((it) => it.done).sort(recent);
   $('tiktok-list').replaceChildren(...waiting.map(tiktokCard));
   $('no-tiktok').hidden = items.length > 0;
   $('tiktok-done-box').hidden = !done.length;
   $('tiktok-done-title').textContent = `Déjà sur TikTok (${done.length})`;
   $('tiktok-done').replaceChildren(...done.map(tiktokCard));
+  applyJob();
+}
+
+// Instagram: videos already on YouTube that have a vertical version (a
+// horizontal one would be cropped to a square), and the videos of the posts folder.
+function renderInstagram() {
+  const items = [];
+  for (const v of (lastScan && lastScan.sent) || []) {
+    if ((!v.youtube_id && !v.published_at) || !v.vertical_path) continue;
+    items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), preview: v.preview_path,
+      youtubeId: v.youtube_id, detail: [chan(v.channel_name), 'version verticale'].filter(Boolean).join(' · '),
+      done: v.instagram_published_at, error: v.instagram_error, date: v.date });
+  }
+  for (const p of lastPosts) {
+    if (!p.video_path) continue;
+    items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
+      detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
+      done: p.instagram_statut === 'publie', error: p.instagram_error, date: p.due_at });
+  }
+  const igCard = (it) => {
+    let item;
+    const actions = [];
+    let status;
+    if (it.done) status = pill('ok', 'Publiée sur Instagram.');
+    else {
+      status = it.error ? pill('warn', `Échec sur Instagram : ${it.error}`) : pill('neutral', 'Prête à partir sur Instagram.');
+      const go = button(it.error ? 'Réessayer' : 'Publier sur Instagram', 'btn primary', () => act(item, go,
+        { type: it.kind === 'video' ? 'instagram' : 'instagramPost', path: it.path }, 'Publication sur Instagram en cours… (Instagram s’ouvre)'));
+      go.dataset.publish = '1';
+      actions.push(go);
+    }
+    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
+    return item;
+  };
+  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
+  const waiting = items.filter((it) => !it.done).sort(recent);
+  const done = items.filter((it) => it.done).sort(recent);
+  $('instagram-list').replaceChildren(...waiting.map(igCard));
+  $('no-instagram').hidden = items.length > 0;
+  $('instagram-done-box').hidden = !done.length;
+  $('instagram-done-title').textContent = `Déjà sur Instagram (${done.length})`;
+  $('instagram-done').replaceChildren(...done.map(igCard));
+  settings().then((config) => { $('instagram-auto').checked = !!config.instagramAuto; });
   applyJob();
 }
 
@@ -824,19 +1057,27 @@ async function renderSubscription({ fresh = false } = {}) {
   $('main').hidden = !active || paywallBack;
   $('paywall').hidden = active && !paywallBack;
   $('pw-trial').hidden = !state.trial_available;
-  $('pw-maketou').className = `btn ${state.trial_available ? 'secondary' : 'primary'} wide`;
   $('pw-back').hidden = !(active && paywallBack);
+  const forever = state.kind === 'lifetime' || state.kind === 'unlimited';
+  $('pw-current').hidden = !active;
+  $('pw-current').textContent = !active ? '' : forever ? 'Tu as l’accès à vie : rien à payer.' : state.kind === 'trial'
+    ? `Essai gratuit en cours : ${state.days_left} jour(s) restant(s).` : `Premium actif encore ${state.days_left} jour(s). Un nouvel achat s’ajoute à la suite.`;
+  $('offers').hidden = active && forever;
+  $('pw-subscribe').hidden = active && forever;
+  renderOffers();
   const message = $('pw-message');
   message.className = 'small muted';
   message.textContent = state.unavailable ? 'Le serveur KappGen n’est pas encore à jour : réessaie un peu plus tard.'
     : state.offline ? 'Impossible de vérifier ton abonnement : vérifie ta connexion Internet.'
       : state.trial_available ? 'Commence par l’essai gratuit : rien à payer pendant 3 jours.'
-        : 'Paiement sécurisé. Ton abonnement s’active dès que le paiement est confirmé.';
+        : waitingPayment ? 'En attente de ton paiement… KappGen Publish se débloque tout seul dès qu’il est confirmé.'
+          : 'Choisis ta formule. Paiement sécurisé par carte, PayPal ou Mobile Money.';
   const until = state.expires_at ? new Date(state.expires_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '';
-  $('account-plan').textContent = !active ? 'Pas d’abonnement actif'
-    : state.kind === 'lifetime' ? 'Accès à vie (offert)'
-    : state.kind === 'unlimited' ? 'Accès illimité (offert)'
-      : state.kind === 'trial' ? `Essai gratuit : ${state.days_left} jour(s) restant(s)` : `Abonnement actif jusqu’au ${until}`;
+  $('account-plan').textContent = !active ? 'Gratuit · aucun abonnement actif'
+    : forever ? 'Premium · accès à vie'
+      : state.kind === 'trial' ? `Essai gratuit : ${state.days_left} jour(s) restant(s)` : `Premium · jusqu’au ${until}`;
+  $('account-plan').classList.toggle('free', !active);
+  if (active && waitingPayment) { waitingPayment = false; stopPaymentWatch(); }
   // Small badge on the title line: the trial, or a subscription ending soon.
   const pill = $('plan-pill');
   pill.hidden = !(active && state.kind !== 'lifetime' && state.kind !== 'unlimited' && (state.kind === 'trial' || state.days_left <= 3));
@@ -864,27 +1105,66 @@ async function paywallAction(node, message, busy) {
 $('pw-trial').addEventListener('click', async () => {
   if (await paywallAction($('pw-trial'), { type: 'startTrial' }, 'Activation…')) { paywallBack = false; start(); }
 });
-for (const [id, provider] of [['pw-maketou', 'maketou'], ['pw-tara', 'tarapay']]) {
-  $(id).addEventListener('click', async () => {
-    if (await paywallAction($(id), { type: 'subscribe', provider }, 'Ouverture du paiement…')) {
-      $('pw-message').className = 'small muted';
-      $('pw-message').textContent = 'Termine le paiement dans l’onglet ouvert, puis reviens ici : l’abonnement s’active tout seul (ou clique « J’ai payé, vérifier »).';
+
+// Offer chosen on the paywall (monthly by default; lifetime highlighted).
+let chosenOffer = 'lifetime';
+const OFFER_TEXT = { monthly: '2 $ par mois', yearly: '20 $ par an', lifetime: '50 $ une seule fois (accès à vie)' };
+function renderOffers() {
+  for (const b of document.querySelectorAll('#offers .offer')) {
+    b.classList.toggle('active', b.dataset.offer === chosenOffer);
+    b.setAttribute('aria-checked', String(b.dataset.offer === chosenOffer));
+  }
+}
+for (const b of document.querySelectorAll('#offers .offer')) {
+  b.addEventListener('click', () => { chosenOffer = b.dataset.offer; renderOffers(); });
+}
+$('pw-subscribe').addEventListener('click', () => {
+  $('pay-summary').textContent = `Formule choisie : ${OFFER_TEXT[chosenOffer]}.`;
+  $('pay-modal').hidden = false;
+});
+$('pay-close').addEventListener('click', () => { $('pay-modal').hidden = true; });
+$('pay-modal').addEventListener('click', (event) => { if (event.target === $('pay-modal')) $('pay-modal').hidden = true; });
+
+// After the payment tab opens, the panel asks the server every 10 s (and when it
+// comes back to the front): as soon as the order is paid, it unlocks by itself.
+let waitingPayment = false;
+let paymentTimer = null;
+function stopPaymentWatch() { clearInterval(paymentTimer); paymentTimer = null; }
+async function checkPaymentNow() {
+  const reply = await send({ type: 'checkPayment' });
+  if (reply && reply.ok && reply.data.active) {
+    waitingPayment = false;
+    stopPaymentWatch();
+    paywallBack = false;
+    start();
+  }
+}
+for (const method of document.querySelectorAll('.pay-method')) {
+  method.addEventListener('click', async () => {
+    for (const m of document.querySelectorAll('.pay-method')) m.disabled = true;
+    const reply = await send({ type: 'subscribe', provider: method.dataset.provider, offer: chosenOffer });
+    for (const m of document.querySelectorAll('.pay-method')) m.disabled = false;
+    $('pay-modal').hidden = true;
+    if (!reply || !reply.ok) {
+      $('pw-message').className = 'small warn';
+      $('pw-message').textContent = reply ? reply.error : 'Paiement impossible à ouvrir.';
+      return;
     }
+    waitingPayment = true;
+    $('pw-message').className = 'small muted waiting';
+    $('pw-message').textContent = 'En attente de ton paiement… Termine-le dans l’onglet ouvert : KappGen Publish se débloque tout seul ici.';
+    stopPaymentWatch();
+    paymentTimer = setInterval(checkPaymentNow, 10000);
+    setTimeout(stopPaymentWatch, 30 * 60 * 1000);
   });
 }
-$('pw-check').addEventListener('click', async () => {
-  const state = await paywallAction($('pw-check'), { type: 'checkPayment' }, 'Vérification…');
-  if (state && state.active) { paywallBack = false; start(); return; }
-  if (state) { $('pw-message').className = 'small warn'; $('pw-message').textContent = 'Paiement pas encore confirmé. Réessaie dans une minute.'; }
-});
 $('pw-back').addEventListener('click', () => { paywallBack = false; renderSubscription(); });
 $('plan-pill').addEventListener('click', () => { paywallBack = true; renderSubscription(); });
 $('renew').addEventListener('click', () => { toggleProfile(false); paywallBack = true; renderSubscription(); });
 // Back from the payment tab: check on its own.
 document.addEventListener('visibilitychange', async () => {
   if (document.hidden || $('paywall').hidden) return;
-  const reply = await send({ type: 'checkPayment' });
-  if (reply && reply.ok && reply.data.active && !paywallBack) start();
+  checkPaymentNow();
 });
 
 // --------------------------------------------------------------- account
@@ -1022,7 +1302,7 @@ function applyJob() {
   const job = currentJob;
   for (const node of document.querySelectorAll('[data-publish]')) node.disabled = !!(job && job.running);
   if (!job || !job.path) return;
-  for (const item of document.querySelectorAll('li.item')) {
+  for (const item of document.querySelectorAll('li.item, li.row')) {
     if (item.dataset.path !== job.path || !item.say) continue;
     if (job.running) item.say('busy', job.message || 'En cours…');
     else if (job.error) item.say('warn', job.error);
@@ -1094,3 +1374,10 @@ start();
 
 // The background worker applies updates by itself: keep the lists current.
 setInterval(() => { if (!document.hidden && !jobRunning) renderFolder(); }, 60000);
+
+function bindInstagramAuto() {
+  const box = document.getElementById('instagram-auto');
+  if (box) box.addEventListener('change', () => send({ type: 'instagramAuto', on: box.checked }));
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindInstagramAuto);
+else bindInstagramAuto();

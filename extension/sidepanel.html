@@ -19,7 +19,7 @@
           <span id="account-email"></span>
         </div>
         <div id="account-plan" class="profile-plan"></div>
-        <button id="renew" class="btn ghost" role="menuitem">Prolonger mon abonnement</button>
+        <button id="renew" class="btn ghost" role="menuitem">Abonnement</button>
         <button id="logout" class="btn ghost" role="menuitem">Se déconnecter</button>
       </div>
     </div>
@@ -52,149 +52,132 @@
       <li>Programmation à l’heure que tu veux, jamais de doublon</li>
       <li>TikTok : toutes tes vidéos. Instagram, LinkedIn et X arrivent</li>
     </ul>
-    <div class="price"><strong>1 200 FCFA</strong><span> / mois</span></div>
+    <div id="pw-current" class="pw-current" hidden></div>
+    <div id="offers" class="offers" role="radiogroup" aria-label="Formule">
+      <button type="button" class="offer" data-offer="monthly" role="radio">
+        <span class="offer-name">Mensuel</span><span class="offer-price"><strong>2 $</strong> / mois</span>
+      </button>
+      <button type="button" class="offer" data-offer="yearly" role="radio">
+        <span class="offer-name">Annuel</span><span class="offer-price"><strong>20 $</strong> / an</span><span class="offer-note">4 $ d’économie</span>
+      </button>
+      <button type="button" class="offer best" data-offer="lifetime" role="radio">
+        <span class="offer-tag">Le plus avantageux</span>
+        <span class="offer-name">À vie</span><span class="offer-price"><strong>50 $</strong> une seule fois</span><span class="offer-note">Payé une fois, à toi pour toujours</span>
+      </button>
+    </div>
     <div class="paywall-actions">
-      <button id="pw-trial" class="btn primary wide" hidden>Essayer gratuitement 3 jours</button>
-      <button id="pw-maketou" class="btn primary wide">S’abonner (Mobile Money ou carte)</button>
-      <button id="pw-tara" class="btn secondary wide">S’abonner avec Tara Money</button>
-      <button id="pw-check" class="btn ghost wide">J’ai payé, vérifier</button>
+      <button id="pw-trial" class="btn secondary wide" hidden>Essayer gratuitement 3 jours</button>
+      <button id="pw-subscribe" class="btn primary wide">S’abonner</button>
       <button id="pw-back" class="btn ghost wide" hidden>Retour</button>
     </div>
     <p id="pw-message" class="small muted"></p>
   </section>
 
+  <div id="pay-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="pay-title">
+    <div class="modal-box">
+      <button id="pay-close" class="icon-close" title="Fermer" aria-label="Fermer">✕</button>
+      <h2 id="pay-title">Comment veux-tu payer ?</h2>
+      <p id="pay-summary" class="small muted"></p>
+      <button class="pay-method" data-provider="tarapay">
+        <span class="pm-ico">💳</span><span><strong>Carte bancaire ou PayPal</strong><span class="small muted">Visa, Mastercard, PayPal</span></span>
+      </button>
+      <button class="pay-method" data-provider="maketou">
+        <span class="pm-ico">📱</span><span><strong>Mobile Money</strong><span class="small muted">Orange Money, MTN MoMo, Wave…</span></span>
+      </button>
+      <p class="small muted">La page de paiement sécurisé s’ouvre dans un nouvel onglet. Dès que le paiement est confirmé, KappGen Publish se débloque tout seul ici : rien à vérifier.</p>
+    </div>
+  </div>
+
   <div id="main" hidden>
   <div id="plan-banner" class="plan-banner" hidden></div>
   <section id="job" class="job" hidden>
+    <button id="job-clear" class="icon-close" title="Fermer" aria-label="Fermer" hidden>✕</button>
     <strong id="job-title"></strong>
     <p id="job-message"></p>
     <a id="job-link" class="btn ghost" target="_blank" hidden>Ouvrir sur YouTube</a>
     <div class="job-actions">
       <button id="job-unblock" class="btn ghost" hidden>Débloquer</button>
-      <button id="job-clear" class="btn ghost" hidden>Masquer</button>
     </div>
   </section>
 
+  <nav class="topbar" aria-label="Réglages et aide">
+    <button data-tab="settings" class="tool"><svg class="ico" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>Réglages</button>
+    <button data-tab="help" class="tool"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>Aide</button>
+  </nav>
+
   <nav class="tabs">
-    <button data-tab="videos" class="active">Vidéos</button>
-    <button data-tab="sent">YouTube</button>
+    <button data-tab="youtube" class="active">YouTube</button>
     <button data-tab="facebook">Facebook</button>
     <button data-tab="tiktok">TikTok</button>
     <button data-tab="instagram">Instagram</button>
     <button data-tab="linkedin">LinkedIn</button>
     <button data-tab="x">X</button>
-    <button data-tab="networks">Réseaux</button>
-    <button data-tab="help">Aide</button>
   </nav>
 
-  <div id="tab-videos" class="tab">
-    <section class="card">
-      <h2>Dossier des vidéos</h2>
-      <div id="folder-chosen" class="chosen" hidden>
-        <span class="check">✓</span>
-        <div><div class="small muted">Dossier sélectionné</div><strong id="folder-name"></strong></div>
-        <button id="pick-change" class="link" title="Choisir un autre dossier">changer</button>
-      </div>
-      <p id="folder-status" class="status" hidden></p>
-      <div id="folder-actions" class="actions">
-        <button id="pick" class="btn primary wide">Choisir le dossier des vidéos</button>
-        <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
-      </div>
-      <p id="folder-hint" class="muted small">Choisis le dossier <code>YOUTUBE</code> (toutes tes chaînes) ou le dossier d’une chaîne.</p>
-    </section>
-    <section class="card">
-      <h2>Réglages de publication</h2>
-      <div class="field">
-        <label for="yt-visibility">Visibilité sur YouTube</label>
-        <select id="yt-visibility" class="select">
-          <option value="UNLISTED">Non répertoriée (tu la passes en public toi-même)</option>
-          <option value="PUBLIC">Publique tout de suite</option>
-          <option value="PRIVATE">Privée</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Quand publier</label>
-        <div class="choice">
-          <label class="check-line"><input type="radio" name="yt-when" value="now"> Dès que la vidéo est prête</label>
-          <label class="check-line"><input type="radio" name="yt-when" value="times"> À heures fixes (une vidéo par horaire, publique à l’heure dite)</label>
-        </div>
-        <div id="yt-times-row" class="input-group" hidden>
-          <input id="yt-times" type="text" placeholder="ex. 18:00 ou 09:00, 18:00">
-          <button id="yt-times-save" class="btn secondary">Enregistrer</button>
-        </div>
-      </div>
-    </section>
-
+  <div id="tab-youtube" class="tab">
     <div class="list-head">
-      <h2>Prêtes à partir sur YouTube</h2>
+      <h2>À publier</h2>
       <button id="rescan" class="link" title="Relit le dossier tout de suite (sinon toutes les 5 minutes)">↻ Actualiser</button>
     </div>
     <ul id="videos"></ul>
-    <p id="no-videos" class="muted" hidden>Aucune vidéo en attente : tout ce qui est dans le dossier est déjà publié (voir l’onglet YouTube).</p>
+    <p id="no-videos" class="muted" hidden>Aucune vidéo en attente : tout ce qui est dans le dossier est déjà publié (plus bas).</p>
+    <details id="excluded-box" class="done-box" hidden><summary id="excluded-title"></summary><ul id="excluded" class="rows"></ul></details>
     <div id="app-block" hidden>
       <h2>Vidéos KappGen</h2>
       <ul id="app-videos"></ul>
     </div>
-  </div>
-
-  <div id="tab-sent" class="tab" hidden>
-    <p class="muted small">Ce qui est déjà en ligne reste replié : ce qui compte, ce sont les vidéos encore à publier (onglet Vidéos). Une vidéo que tu publies à la main : clique « Déjà publiée » sur elle, elle passe ici.</p>
     <p id="sent-summary" class="muted small"></p>
-    <details id="sent-box" class="done-box" hidden><summary id="sent-title">Déjà publiées</summary><ul id="sent"></ul></details>
+    <details id="sent-box" class="done-box" open hidden><summary id="sent-title">Déjà publiées</summary><ul id="sent" class="rows"></ul></details>
   </div>
 
   <div id="tab-facebook" class="tab" hidden>
-    <section class="card">
-      <div class="field-head"><h2>Page Facebook</h2><span id="fb-page-state" class="pill warn">Lien à coller</span></div>
-      <div class="input-group">
-        <input id="fb-page" type="url" placeholder="https://www.facebook.com/ta-page">
-        <button id="fb-page-save" class="btn secondary">Enregistrer</button>
-      </div>
-    </section>
 
-    <h2>Vidéos YouTube à partager sur Facebook</h2>
-    <ul id="facebook"></ul>
-    <p id="no-facebook" class="muted" hidden>Aucune vidéo publiée sur YouTube pour l’instant.</p>
-    <details id="facebook-done-box" class="done-box" hidden><summary id="facebook-done-title"></summary><ul id="facebook-done"></ul></details>
-
-    <section class="card">
-      <h2>Dossier des Reels et posts</h2>
-      <div id="fb-folder-chosen" class="chosen" hidden>
-        <span class="check">✓</span>
-        <div><div class="small muted">Dossier Facebook sélectionné</div><strong id="fb-folder-name"></strong></div>
-        <button id="fb-pick-change" class="link" title="Choisir un autre dossier Facebook">changer</button>
-        <button id="fb-forget" class="link" title="Ne plus utiliser de dossier Facebook à part">retirer</button>
+    <div class="list-head"><h2>Posts programmés</h2><span id="fb-summary" class="muted small"></span></div>
+    <div id="fb-filters" class="filters">
+      <div class="chips" role="group" aria-label="Type de post">
+        <button data-type="" class="chip active">Tous</button>
+        <button data-type="photo" class="chip">Photos</button>
+        <button data-type="texte" class="chip">Textes</button>
+        <button data-type="reel" class="chip">Vidéos</button>
+        <button data-type="echec" class="chip">Échecs</button>
       </div>
-      <p id="fb-folder-status" class="status" hidden></p>
-      <div id="fb-folder-actions" class="actions">
-        <button id="fb-pick" class="btn primary wide">Choisir le dossier Facebook</button>
-        <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
+      <div id="fb-sort" class="segmented small-seg" role="radiogroup" aria-label="Ordre">
+        <button type="button" data-value="asc" role="radio" class="active" aria-checked="true">Plus tôt d’abord</button>
+        <button type="button" data-value="desc" role="radio" aria-checked="false">Plus tard d’abord</button>
       </div>
-      <p id="fb-folder-hint" class="muted small">Importe le dossier où tu ranges tes Reels et posts : un sous-dossier par post, avec <code>texte.txt</code> et une image ou une vidéo. L’heure de chaque post est celle écrite dans son dossier ; un post sans heure part tout de suite.</p>
-    </section>
-
-    <div class="list-head"><h2>Posts</h2><span id="fb-summary" class="muted small"></span></div>
-    <details id="fb-done-box" class="done-box" hidden><summary id="fb-done-title"></summary><ul id="fb-done" class="rows"></ul></details>
-    <ul id="fb-posts" class="rows"></ul>
+    </div>
+    <div id="fb-days"></div>
+    <ul id="fb-posts" class="rows" hidden></ul>
+    <details id="fb-done-box" class="done-box" hidden><summary id="fb-done-title"></summary><div id="fb-done-days"></div><ul id="fb-done" class="rows" hidden></ul></details>
     <p id="no-posts" class="muted small" hidden>Aucun post à venir.</p>
+    <details id="fb-videos-box" class="done-box"><summary id="fb-videos-title">Vidéos YouTube à partager sur Facebook</summary>
+      <ul id="facebook" class="rows"></ul>
+      <p id="no-facebook" class="muted small" hidden>Aucune vidéo publiée sur YouTube pour l’instant.</p>
+      <details id="facebook-done-box" class="done-box" hidden><summary id="facebook-done-title"></summary><ul id="facebook-done" class="rows"></ul></details>
+    </details>
   </div>
 
   <div id="tab-tiktok" class="tab" hidden>
     <section class="card">
       <div class="field-head"><h2>TikTok</h2><span class="pill ok">Disponible</span></div>
-      <p class="small muted">Toutes tes vidéos peuvent partir sur TikTok, horizontales comme verticales : la vidéo publiée sur YouTube (ou sa version verticale <code>short.mp4</code> si elle existe) et les vidéos de ton dossier de posts. Reste connecté à TikTok dans ce Chrome.</p>
+      <p class="small muted">Le format vertical passe en premier : la version verticale <code>short.mp4</code> de chaque vidéo publiée sur YouTube, et les vidéos de ton dossier de posts. La version longue reste possible, en option. Reste connecté à TikTok dans ce Chrome.</p>
     </section>
     <h2>À publier sur TikTok</h2>
-    <details id="tiktok-done-box" class="done-box" hidden><summary id="tiktok-done-title"></summary><ul id="tiktok-done"></ul></details>
-    <ul id="tiktok-list"></ul>
+    <details id="tiktok-done-box" class="done-box" hidden><summary id="tiktok-done-title"></summary><ul id="tiktok-done" class="rows"></ul></details>
+    <ul id="tiktok-list" class="rows"></ul>
     <p id="no-tiktok" class="muted" hidden>Aucune vidéo pour l’instant : publie d’abord une vidéo sur YouTube, ou ajoute une vidéo dans ton dossier de posts.</p>
   </div>
 
   <div id="tab-instagram" class="tab" hidden>
     <section class="card">
-      <div class="field-head"><h2>Instagram</h2><span class="pill neutral">En développement</span></div>
-      <p class="small muted">Bientôt : les vidéos en Reels (horizontales ou verticales) et les posts photo de ton dossier de posts, publiés depuis ton compte Instagram ouvert dans ce Chrome, à l’heure écrite dans chaque post.</p>
+      <div class="field-head"><h2>Instagram</h2><span class="pill ok">Nouveau</span></div>
+      <p class="small muted">Tes vidéos partent en Reels depuis ton compte Instagram ouvert dans ce Chrome : la version verticale <code>short.mp4</code> de chaque vidéo publiée sur YouTube, et les vidéos de ton dossier de posts. Reste connecté à Instagram dans ce Chrome.</p>
+      <label class="small"><input type="checkbox" id="instagram-auto"> Publier automatiquement les nouvelles vidéos (celles publiées sur YouTube à partir de maintenant)</label>
     </section>
+    <h2>À publier sur Instagram</h2>
+    <details id="instagram-done-box" class="done-box" hidden><summary id="instagram-done-title"></summary><ul id="instagram-done" class="rows"></ul></details>
+    <ul id="instagram-list" class="rows"></ul>
+    <p id="no-instagram" class="muted" hidden>Aucune vidéo verticale pour l’instant : il faut une vidéo publiée sur YouTube avec sa version verticale (short.mp4), ou une vidéo dans ton dossier de posts.</p>
   </div>
 
   <div id="tab-linkedin" class="tab" hidden>
@@ -211,7 +194,73 @@
     </section>
   </div>
 
-  <div id="tab-networks" class="tab" hidden>
+  <div id="tab-settings" class="tab" hidden>
+    <section class="card how-card">
+      <h2>Comment KappGen publie</h2>
+      <p class="small">KappGen publie <strong>comme toi, dans ce Chrome</strong> : il ouvre YouTube Studio, Facebook, TikTok… et remplit les champs à ta place. Il ne passe pas par une API ni par un mot de passe. <strong>Chaque compte doit donc être ouvert et connecté dans ce même Chrome</strong> (ce profil) : une page non connectée ici ne peut pas recevoir de publication.</p>
+    </section>
+
+    <section class="card">
+      <h2>Dossier des vidéos YouTube</h2>
+      <p class="small muted folder-what">Tes vidéos longues finies, une par dossier (vidéo + miniature + texte). Elles partent sur YouTube, puis, si tu veux, sur Facebook et TikTok.</p>
+      <div id="folder-chosen" class="chosen" hidden>
+        <span class="check">✓</span>
+        <button id="pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="folder-name"></strong><span class="chosen-edit">changer</span></button>
+      </div>
+      <p id="folder-status" class="status" hidden></p>
+      <div id="folder-actions" class="actions">
+        <button id="pick" class="btn primary wide">Choisir le dossier des vidéos YouTube</button>
+        <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
+      </div>
+      <p id="folder-hint" class="muted small">Choisis le dossier <code>YOUTUBE</code> (toutes tes chaînes) ou le dossier d’une chaîne.</p>
+    </section>
+    <section class="card">
+      <h2>Dossier des posts (Facebook, TikTok, Instagram)</h2>
+      <p class="small muted folder-what">Tes publications courtes : <strong>textes</strong>, <strong>photos</strong> et <strong>vidéos courtes / Reels</strong>. Un sous-dossier par post, avec un fichier texte et, si besoin, une image ou une vidéo. Les textes et photos partent sur Facebook ; les vidéos sur Facebook, TikTok et Instagram.</p>
+      <div id="fb-folder-chosen" class="chosen" hidden>
+        <span class="check">✓</span>
+        <button id="fb-pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="fb-folder-name"></strong><span class="chosen-edit">changer</span></button>
+        <button id="fb-forget" class="icon-close" title="Ne plus utiliser ce dossier" aria-label="Retirer le dossier">✕</button>
+      </div>
+      <p id="fb-folder-status" class="status" hidden></p>
+      <div id="fb-folder-actions" class="actions">
+        <button id="fb-pick" class="btn primary wide">Choisir le dossier des posts</button>
+        <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
+      </div>
+      <p id="fb-folder-hint" class="muted small">L’heure de chaque post est celle écrite dans son dossier ; un post sans heure part tout de suite.</p>
+    </section>
+
+    <section class="card">
+      <div class="field-head"><h2>Tes pages et comptes</h2><span id="pages-state" class="pill warn"></span></div>
+      <p class="small muted">Colle le lien de chaque page ou compte où publier. Ouvre-le une fois dans ce Chrome pour vérifier que tu y es bien connecté.</p>
+      <div id="pages" class="pages"></div>
+      <p id="pages-saved" class="small ok-text" hidden>Liens enregistrés.</p>
+    </section>
+
+    <section class="card">
+      <h2>Publication sur YouTube</h2>
+      <div class="field">
+        <label>Visibilité sur YouTube</label>
+        <div id="yt-visibility" class="segmented" role="radiogroup" aria-label="Visibilité sur YouTube">
+          <button type="button" data-value="PUBLIC" role="radio">Publique</button>
+          <button type="button" data-value="UNLISTED" role="radio">Non répertoriée</button>
+          <button type="button" data-value="PRIVATE" role="radio">Privée</button>
+        </div>
+        <p id="yt-visibility-hint" class="small muted"></p>
+      </div>
+      <div class="field">
+        <label>Quand publier</label>
+        <div class="choice">
+          <label class="check-line"><input type="radio" name="yt-when" value="now"> Dès que la vidéo est prête</label>
+          <label class="check-line"><input type="radio" name="yt-when" value="times"> À heures fixes (une vidéo par horaire, publique à l’heure dite)</label>
+        </div>
+        <div id="yt-times-row" class="input-group" hidden>
+          <input id="yt-times" type="text" placeholder="ex. 18:00 ou 09:00, 18:00">
+          <button id="yt-times-save" class="btn secondary">Enregistrer</button>
+        </div>
+      </div>
+    </section>
+
     <section class="card">
       <div class="field-head"><h2>Réseaux utilisés</h2></div>
       <p class="small muted">Coche seulement les réseaux sur lesquels tu publies. Un réseau décoché disparaît du panneau et KappGen n'y envoie plus rien, même automatiquement.</p>
@@ -227,18 +276,42 @@
       </section>
 
       <section class="help-card">
-        <h3>Abonnement</h3>
-        <p>KappGen Publish coûte <strong>1 200 FCFA par mois</strong>, avec <strong>3 jours d’essai gratuit</strong> pour commencer. Il faut un compte KappGen (adresse e-mail confirmée). Paiement par Mobile Money ou carte (Maketou) ou par Tara Money ; l’abonnement s’active dès que le paiement est confirmé. Payer avant la fin ne fait perdre aucun jour : le nouveau mois s’ajoute à la suite. Ton état d’abonnement est dans le menu de ton avatar, en haut à droite.</p>
+        <h3>Comment KappGen publie (important)</h3>
+        <p>KappGen Publish <strong>ne passe pas par une API</strong> et ne te demande <strong>aucun mot de passe</strong>. Il publie exactement comme tu le ferais à la main : il ouvre YouTube Studio, Facebook, TikTok ou Instagram <strong>dans ce Chrome</strong>, envoie le fichier, écrit le titre et le texte, puis clique sur « Publier ».</p>
+        <p>Conséquence : <strong>chaque page ou compte doit être ouvert et connecté dans ce même Chrome</strong> (le même profil Chrome que celui où se trouve l’extension). Si tu colles le lien d’une page à laquelle tu n’es pas connecté ici, KappGen ne pourra rien y publier, même si le lien est juste.</p>
+        <p class="muted">Pour vérifier : Réglages → « Tes pages et comptes » → « Ouvrir » à côté de chaque lien. La page doit s’ouvrir en étant connecté (ta photo en haut, le bouton pour publier visible).</p>
       </section>
 
       <section class="help-card">
-        <h3>Démarrer en 4 étapes</h3>
+        <h3>Abonnement</h3>
+        <p>Trois formules, avec <strong>3 jours d’essai gratuit</strong> pour commencer :</p>
+        <ul class="guide">
+          <li><strong>Mensuel : 2 $ par mois.</strong></li>
+          <li><strong>Annuel : 20 $ par an</strong> (4 $ d’économie).</li>
+          <li><strong>À vie : 50 $, payés une seule fois.</strong> Tu utilises KappGen Publish sans limite, pour toujours.</li>
+        </ul>
+        <p>Clique « S’abonner », puis choisis comment payer : <strong>carte bancaire ou PayPal</strong>, ou <strong>Mobile Money</strong>. La page de paiement sécurisé s’ouvre dans un onglet. <strong>Dès que le paiement est confirmé, l’extension se débloque toute seule</strong> et ton profil passe en Premium : rien à vérifier. Payer avant la fin ne fait perdre aucun jour : la nouvelle période s’ajoute à la suite.</p>
+        <p class="muted">Ton état (Gratuit ou Premium) est dans le menu de ton avatar, en haut à droite, avec le bouton « Abonnement ». Il faut un compte KappGen avec une adresse e-mail confirmée.</p>
+      </section>
+
+      <section class="help-card">
+        <h3>Démarrer en 5 étapes</h3>
         <ol class="steps">
-          <li><strong>Connecte-toi</strong> dans ce Chrome à ton compte YouTube (et à Facebook si tu publies là-bas).</li>
-          <li>Onglet <strong>Vidéos</strong> : clique « Choisir le dossier des vidéos » et choisis le dossier où tu ranges tes vidéos finies.</li>
-          <li>Règle la <strong>visibilité</strong> (publique, non répertoriée…) et <strong>quand publier</strong> (dès que c’est prêt, ou à heures fixes).</li>
-          <li><strong>Laisse Chrome ouvert.</strong> Toutes les 5 minutes, KappGen regarde s’il y a une nouvelle vidéo prête et la publie.</li>
+          <li><strong>Connecte-toi dans ce Chrome</strong> à chaque compte où tu publies : YouTube, Facebook, TikTok, Instagram…</li>
+          <li><strong>Réglages → Dossier des vidéos YouTube</strong> : choisis le dossier où tu ranges tes vidéos longues finies.</li>
+          <li><strong>Réglages → Dossier des posts</strong> (facultatif) : choisis le dossier de tes publications courtes (textes, photos, vidéos courtes).</li>
+          <li><strong>Réglages → Tes pages et comptes</strong> : colle le lien de chaque page, puis règle la visibilité YouTube et quand publier.</li>
+          <li><strong>Laisse Chrome ouvert.</strong> Toutes les 5 minutes, KappGen regarde ce qui est prêt et le publie.</li>
         </ol>
+      </section>
+
+      <section class="help-card">
+        <h3>Deux dossiers, deux usages</h3>
+        <ul class="guide">
+          <li><strong>Dossier des vidéos YouTube</strong> : les vidéos longues finies. Chacune part sur YouTube avec son titre, sa description et sa miniature ; ensuite tu peux la partager sur Facebook et TikTok d’un clic.</li>
+          <li><strong>Dossier des posts</strong> : tes publications courtes pour Facebook, TikTok et Instagram. Un post peut être un <strong>texte seul</strong>, une <strong>photo avec un texte</strong> ou une <strong>vidéo courte (Reel)</strong> avec un texte. Les textes et photos partent sur Facebook, les vidéos sur Facebook, TikTok et Instagram.</li>
+        </ul>
+        <p class="muted">Dans les Réglages, clique sur le nom d’un dossier pour en choisir un autre ; la croix ✕ retire le dossier des posts.</p>
       </section>
 
       <section class="help-card">
@@ -290,7 +363,7 @@ Ingrédients : …</pre>
       <section class="help-card">
         <h3>Facebook</h3>
         <ol class="steps">
-          <li>Onglet <strong>Facebook</strong> : colle le lien de ta page (ex. <code>https://www.facebook.com/ta-page</code>) puis « Enregistrer ».</li>
+          <li><strong>Réglages → Tes pages et comptes</strong> : colle le lien de ta page Facebook (ex. <code>https://www.facebook.com/ta-page</code>). Tu dois être connecté à cette page dans ce Chrome, avec le droit d’y publier.</li>
           <li><strong>Vidéos YouTube à partager</strong> : chaque vidéo déjà sur YouTube a un bouton « Publier sur Facebook ». Elle part avec son titre.</li>
           <li><strong>Reels et posts</strong> : choisis un dossier à part (même règle : un dossier par post, avec une image ou une vidéo et un texte). Le texte est publié tel quel.</li>
           <li><strong>Heure de publication</strong> : celle écrite dans le post (<code>publication.json</code> ou le nom du dossier, ex. <code>2026-10-02-1830-sujet</code>). Un post sans heure part tout de suite.</li>

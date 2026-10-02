@@ -239,3 +239,149 @@ li.row .acts .btn.ghost { padding: 0 7px; }
 .network-row input{margin-top:3px}
 body.off-facebook .net-facebook{display:none}
 .tabs button[hidden]{display:none}
+
+/* ------------------------------------------ 1.15 : réglages à part, listes compactes */
+.topbar { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.topbar .tool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px;
+  background: none; border: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.topbar .tool:hover { color: var(--text); }
+.topbar .tool.active { background: rgba(255, 255, 255, 0.08); color: var(--text); border-color: var(--accent); }
+.tabs { margin-top: 8px; }
+.ico { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pill.with-icon { align-items: center; gap: 5px; }
+.pill.with-icon::before { display: none; }
+.pill.with-icon .ico { width: 12px; height: 12px; }
+.btn.icon-btn { display: inline-flex; align-items: center; gap: 5px; }
+li.row .acts .btn.icon-btn { padding: 0 7px; }
+li.row .acts .btn.icon-btn .ico { width: 13px; height: 13px; }
+.settings-intro { margin: 14px 2px 0; line-height: 1.5; }
+
+/* vidéos : même ligne compacte que les posts */
+li.row.media { grid-template-columns: 78px minmax(0, 1fr) auto; }
+li.row .mini.wide { width: 78px; height: 44px; }
+li.row .what .d { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+li.row .what > .field, li.row .what > .small { margin-top: 6px; white-space: normal; }
+li.row.media .acts { flex-wrap: wrap; justify-content: flex-end; max-width: 190px; }
+#fb-videos-box > summary { font-size: 13px; color: var(--text); font-weight: 600; }
+
+/* posts : filtres, tri, jours dépliables */
+.filters { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; flex-wrap: wrap; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip { height: 26px; padding: 0 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  background: rgba(255, 255, 255, 0.05); color: var(--muted); border: 1px solid var(--border); }
+.chip.active { background: var(--accent); color: #06121f; border-color: var(--accent); }
+.small-select { width: auto; height: 28px; font-size: 12px; padding: 0 8px; }
+details.day { margin-bottom: 8px; border-radius: 12px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.12); }
+details.day > summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 12px;
+  cursor: pointer; list-style: none; font-size: 12.5px; position: sticky; top: 44px; z-index: 1; border-radius: 12px; background: var(--card); }
+details.day > summary::-webkit-details-marker { display: none; }
+details.day > summary .day-name::before { content: "▸ "; color: var(--muted); }
+details.day[open] > summary .day-name::before { content: "▾ "; }
+details.day > summary .day-name { font-weight: 700; }
+details.day > summary .day-count { color: var(--muted); font-size: 11.5px; }
+details.day > ul.rows { padding: 6px; }
+#fb-done-box details.day { opacity: 0.85; }
+.networks > li.network-row { padding: 0; background: none; border: 0; display: block; }
+.network-row label { width: 100%; box-sizing: border-box; border-color: var(--border); background: rgba(0, 0, 0, 0.12); }
+li.row .when span:empty { display: none; }
+
+/* ------------------------------ 1.16 : réglages clairs, abonnement à 3 formules */
+/* Dossier choisi : une seule ligne, on clique sur le nom pour changer. */
+.chosen { padding: 6px 8px; gap: 8px; }
+.chosen .check { width: 20px; height: 20px; font-size: 11px; }
+.chosen-name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 2px 4px;
+  color: var(--text); text-align: left; cursor: pointer; border-radius: 6px; }
+.chosen-name:hover { background: rgba(255, 255, 255, 0.06); }
+.chosen-name strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chosen-edit { flex: none; font-size: 11px; color: var(--muted); text-decoration: underline; }
+.folder-what { margin: -4px 0 10px; }
+.card h2 { line-height: 1.3; }
+
+/* Croix de fermeture (bandeau, dossier, fenêtre de paiement). */
+.icon-close { flex: none; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  border-radius: 6px; border: 0; background: none; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; }
+.icon-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.job { position: relative; padding-right: 36px; }
+.job > .icon-close { position: absolute; top: 8px; right: 8px; }
+.job-actions:empty, .job-actions:not(:has(button:not([hidden]))) { display: none; }
+
+/* Comment KappGen publie */
+.how-card { border-color: rgba(0, 194, 255, 0.35); background: rgba(0, 194, 255, 0.06); }
+.how-card .small { margin: 0; }
+
+/* Pages et comptes */
+.pages { display: grid; gap: 6px; }
+.page-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 0; }
+.page-label { font-size: 12px; font-weight: 600; }
+.page-row input { height: 32px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border); color: var(--text); min-width: 0; width: 100%; margin: 0; }
+.page-row input:focus { outline: none; border-color: var(--accent); }
+.page-open { font-size: 11.5px; color: var(--accent-strong); text-decoration: none; }
+.ok-text { color: var(--ok); margin: 8px 0 0; }
+
+/* Boutons segmentés (visibilité YouTube) au lieu du menu déroulant du système */
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); }
+.segmented button { height: 30px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.segmented button:hover { color: var(--text); }
+.segmented button.active { background: var(--accent); color: #06121f; }
+#yt-visibility-hint { margin: 0; }
+
+/* Réseaux utilisés : lignes plus basses, tout est cliquable */
+.network-row label { padding: 7px 10px; align-items: center; }
+.network-row label .small { margin: 0; }
+.networks { gap: 5px; }
+
+/* Listes de vidéos et de posts : moins hautes */
+li.row { padding: 5px 8px; gap: 8px; }
+li.row .mini { width: 36px; height: 36px; }
+li.row .mini.wide { width: 64px; height: 36px; }
+li.row.media { grid-template-columns: 64px minmax(0, 1fr) auto; }
+li.row .when strong { font-size: 13.5px; }
+li.row .acts .btn { height: 26px; }
+
+/* Abonnement : 3 formules */
+.offers { display: grid; gap: 8px; margin: 0 0 14px; text-align: left; }
+.offer { position: relative; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; padding: 10px 12px;
+  border-radius: 10px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.18); color: var(--text); cursor: pointer; text-align: left; }
+.offer:hover { border-color: rgba(0, 194, 255, 0.5); }
+.offer.active { border-color: var(--accent); background: rgba(0, 194, 255, 0.1); box-shadow: 0 0 0 1px var(--accent); }
+.offer-name { font-weight: 700; font-size: 13.5px; }
+.offer-price { font-size: 12px; color: var(--muted); justify-self: end; }
+.offer-price strong { font-size: 16px; color: var(--text); }
+.offer-note { grid-column: 1 / -1; font-size: 11.5px; color: var(--ok); }
+.offer-tag { position: absolute; top: -9px; right: 10px; padding: 1px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+  background: #ffcf6e; color: #2a1b00; }
+.offer.best { border-color: rgba(255, 207, 110, 0.55); }
+.offer.best.active { border-color: #ffcf6e; box-shadow: 0 0 0 1px #ffcf6e; background: rgba(255, 207, 110, 0.08); }
+.pw-current { margin: 0 0 12px; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; color: var(--ok);
+  background: rgba(126, 226, 168, 0.1); border: 1px solid rgba(126, 226, 168, 0.4); }
+#pw-message.waiting::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px;
+  border-radius: 50%; border: 2px solid var(--accent-strong); border-right-color: transparent; animation: spin 0.8s linear infinite; }
+.profile-plan.free { color: var(--muted); }
+
+/* Fenêtre « Comment veux-tu payer ? » */
+.modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(3, 8, 20, 0.7); backdrop-filter: blur(3px); }
+.modal-box { position: relative; width: 100%; max-width: 360px; padding: 18px 16px 14px; border-radius: 14px; background: #16233f;
+  border: 1px solid var(--border); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); display: grid; gap: 10px; }
+.modal-box h2 { margin: 0; font-size: 15px; padding-right: 24px; }
+.modal-box .small { margin: 0; }
+.modal-box > .icon-close { position: absolute; top: 10px; right: 10px; }
+.pay-method { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border-radius: 10px; text-align: left; cursor: pointer;
+  border: 1px solid var(--border); background: rgba(0, 0, 0, 0.2); color: var(--text); }
+.pay-method:hover:not(:disabled) { border-color: var(--accent); background: rgba(0, 194, 255, 0.08); }
+.pay-method:disabled { opacity: 0.5; cursor: wait; }
+.pay-method > span:last-child { display: grid; gap: 2px; }
+.pay-method strong { font-size: 13.5px; }
+.pm-ico { font-size: 20px; }
+
+/* 1.16 : tri des posts en boutons (plus de menu déroulant du navigateur), ligne « partager sur les réseaux » */
+.segmented.small-seg button{padding:4px 9px;font-size:12px}
+.social-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px}
+.segmented.small-seg{grid-template-columns:repeat(2,auto);display:inline-grid}
+/* 1.16 : réseaux sur une seule ligne (nom + précision), toute la ligne est cliquable */
+.networks > li.network-row label { padding: 7px 10px !important; min-height: 0 !important; cursor: pointer; }
+.networks > li.network-row label > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.networks > li.network-row label > div > strong { flex: none; }
+.networks > li.network-row label > div > .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
