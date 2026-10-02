@@ -197,18 +197,26 @@ let setupOpened = false;
 async function renderSetup() {
   const config = await settings();
   const folderOk = (await KappDossier.access()).state === 'granted';
-  const pagesOk = PAGE_FIELDS.filter(([name]) => networkIsOn(config, name)).every(([name]) => pageUrlOf(config, name));
+  // Only the networks ticked (and that really publish) need their link.
+  const pagesOk = PAGE_FIELDS.filter(([name]) => LIVE_NETWORKS.has(name) && networkIsOn(config, name)).every(([name]) => pageUrlOf(config, name));
   const fbOk = (await KappDossier.fbAccess().catch(() => ({}))).state === 'granted';
   $('setup-folder').classList.toggle('done', folderOk);
   $('setup-fb').classList.toggle('done', fbOk);
   $('setup-pages').classList.toggle('done', pagesOk);
-  // The posts folder is optional: the card goes once the videos folder and the links are set.
-  $('setup').hidden = folderOk && pagesOk;
+  // The posts folder is optional: the card goes once the videos folder and the
+  // links are set, or for good when closed with its ✕.
+  const { setupClosed } = await chrome.storage.local.get('setupClosed');
+  $('setup').hidden = !!setupClosed || (folderOk && pagesOk);
   if (!folderOk && !setupOpened) {
     setupOpened = true;
     document.querySelector('.topbar [data-tab="settings"]').click();
   }
 }
+$('setup-close').addEventListener('click', async () => {
+  await chrome.storage.local.set({ setupClosed: true });
+  $('setup').hidden = true;
+});
+
 // Each step opens the settings right on its own card, which lights up briefly.
 for (const stepButton of document.querySelectorAll('.setup-steps button')) {
   stepButton.addEventListener('click', () => {
@@ -477,6 +485,34 @@ function sentItem(video) {
 
 // ------------------------------------------------------ networks used
 
+// Each network's logo (brand colour) and short name, for the tabs and settings.
+const LOGOS = {
+  youtube: { short: 'YT', color: '#ff0033', svg: '<path d="M23.5 6.19a3.02 3.02 0 0 0-2.12-2.14C19.5 3.55 12 3.55 12 3.55s-7.5 0-9.38.5A3.02 3.02 0 0 0 .5 6.19C0 8.07 0 12 0 12s0 3.93.5 5.81a3.02 3.02 0 0 0 2.12 2.14c1.87.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 0 0 2.12-2.14C24 15.93 24 12 24 12s0-3.93-.5-5.81zM9.55 15.57V8.43L15.82 12l-6.27 3.57z"/>' },
+  facebook: { short: 'FB', color: '#1877f2', svg: '<path d="M9.1 23.69v-7.98H6.63v-3.67H9.1v-1.58c0-4.09 1.85-5.98 5.86-5.98.4 0 .96.04 1.47.1.4.05.79.11 1.14.2v3.32a8.6 8.6 0 0 0-1.39-.05c-.71 0-1.26.1-1.68.31a1.69 1.69 0 0 0-.68.62c-.26.42-.37 1-.37 1.75v1.3h3.92l-.39 2.1-.29 1.57h-3.25v8.24C19.4 23.24 24 18.18 24 12.04 24 5.42 18.63.04 12 .04S0 5.42 0 12.04c0 5.63 3.87 10.35 9.1 11.65Z"/>' },
+  tiktok: { short: 'TikTok', color: '#ffffff', svg: '<path d="M12.53.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>' },
+  instagram: { short: 'Insta', color: '#e1306c', svg: '<path fill="none" stroke="currentColor" stroke-width="2.2" d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"/><circle cx="12" cy="12" r="4.3" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="17.6" cy="6.4" r="1.4"/>' },
+  linkedin: { short: 'In', color: '#0a66c2', svg: '<path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/>' },
+  snapchat: { short: 'Snap', color: '#fffc00', svg: '<path d="M12.2 1c2.6 0 4.9 1.5 5.9 3.8.5 1.1.4 2.9.3 4.3l-.1.6c.1.1.3.1.6.1.4 0 .9-.2 1.4-.4.2-.1.4-.1.5-.1.4 0 .9.3.9.8 0 .4-.3.7-1 1-.1 0-.2.1-.4.1-.6.2-1.4.4-1.6.9-.1.3 0 .6.2 1v.1c.1.1 1.8 4 5.4 4.6.3 0 .5.3.5.6 0 .1 0 .2-.1.3-.3.6-1.5 1.1-3.6 1.4-.1.1-.1.5-.2.8 0 .2-.1.4-.2.7-.1.3-.3.4-.6.4h-.1c-.2 0-.5 0-.8-.1-.5-.1-1.1-.2-1.8-.2-.4 0-.8 0-1.3.1-.8.1-1.5.6-2.2 1.1-1.1.8-2.2 1.6-3.9 1.6h-.3c-1.7 0-2.8-.8-3.8-1.6-.7-.5-1.4-1-2.2-1.1-.4-.1-.9-.1-1.3-.1-.8 0-1.4.1-1.8.2-.3.1-.6.1-.8.1-.2 0-.6-.1-.7-.5-.1-.3-.1-.5-.2-.7-.1-.3-.1-.7-.2-.8C1.5 20 .3 19.5 0 18.9c0-.1-.1-.2-.1-.3 0-.3.2-.6.5-.6 3.6-.6 5.3-4.5 5.4-4.6v-.1c.2-.4.3-.7.2-1-.2-.5-1-.7-1.6-.9-.1 0-.3-.1-.4-.1-.8-.3-1-.7-1-1 0-.4.4-.8.9-.8.2 0 .3 0 .4.1.5.2.9.4 1.3.4.3 0 .5-.1.6-.1l-.1-.6c-.1-1.4-.2-3.2.3-4.3C7.3 2.5 9.6 1 12.2 1z"/>' },
+  x: { short: 'X', color: '#ffffff', svg: '<path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.58-6.64 7.58H.47l8.6-9.83L0 1.15h7.59l5.24 6.93zM17.61 20.64h2.04L6.49 3.24H4.3z"/>' },
+};
+const logo = (name, size = 14) => {
+  const l = LOGOS[name];
+  if (!l) return null;
+  const span = document.createElement('span');
+  span.className = 'net-logo';
+  span.style.color = l.color;
+  span.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true">${l.svg}</svg>`;
+  return span;
+};
+// Network tabs: logo + short name (full name on hover).
+for (const tab of document.querySelectorAll('.tabs button[data-tab]')) {
+  const l = LOGOS[tab.dataset.tab];
+  if (!l) continue;
+  tab.title = tab.textContent.trim();
+  tab.setAttribute('aria-label', tab.title);
+  tab.replaceChildren(logo(tab.dataset.tab), document.createTextNode(l.short));
+}
+
 const NETWORKS = [
   ['youtube', 'YouTube', 'Vidéos et Shorts depuis le dossier.', 'youtube'],
   ['facebook', 'Facebook', 'Reels, vidéos et posts programmés sur ta page.', 'facebook'],
@@ -486,7 +522,12 @@ const NETWORKS = [
   ['snapchat', 'Snapchat', 'En développement.', 'snapchat'],
   ['x', 'X', 'En développement.', 'x'],
 ];
-const networkIsOn = (config, name) => ((config.networks || {})[name] !== false);
+// Networks still in development are off unless ticked; the others on unless unticked.
+const LIVE_NETWORKS = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);
+const networkIsOn = (config, name) => {
+  const value = (config.networks || {})[name];
+  return value === undefined ? LIVE_NETWORKS.has(name) : value !== false;
+};
 
 // Hides the tabs (and the per-channel Facebook fields) of the networks switched off.
 async function applyNetworks() {
@@ -512,7 +553,9 @@ async function renderNetworks() {
     box.type = 'checkbox';
     box.checked = networkIsOn(config, name);
     const text = el('div');
-    text.append(el('strong', null, label), el('div', 'small muted', hint));
+    const title = el('strong', null, label);
+    if (LOGOS[name]) title.prepend(logo(name, 13));
+    text.append(title, el('div', 'small muted', hint));
     const wrap = el('label');
     wrap.append(box, text);
     box.addEventListener('change', async () => {
@@ -629,7 +672,7 @@ function postRow(post) {
   const live = el('div', 'live');
   const due = post.due_at && post.due_at > Date.now();
   const states = {
-    a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'Part dans les 5 min'),
+    a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'En retard : part bientôt, un par un'),
     en_cours: pill('busy', 'Publication en cours…'),
     publie: pill('ok', 'Publié'),
     echec: pill('warn', post.error || 'Échec de la publication.'),
@@ -726,9 +769,11 @@ for (const chip of document.querySelectorAll('#fb-filters .chip')) {
     renderPosts();
   });
 }
-for (const b of $('fb-sort').querySelectorAll('button')) b.addEventListener('click', () => {
-  postSort = b.dataset.value;
-  for (const x of $('fb-sort').querySelectorAll('button')) { x.classList.toggle('active', x === b); x.setAttribute('aria-checked', String(x === b)); }
+// One small button flips the order (earliest / latest first).
+$('fb-sort').addEventListener('click', () => {
+  postSort = postSort === 'desc' ? 'asc' : 'desc';
+  $('fb-sort').textContent = postSort === 'desc' ? '↓' : '↑';
+  $('fb-sort').title = `Ordre : ${postSort === 'desc' ? 'plus tard' : 'plus tôt'} d’abord (cliquer pour inverser)`;
   renderPosts();
 });
 
@@ -746,6 +791,7 @@ async function renderGroups() {
   $('fb-groups-count').textContent = groups.length;
   if (document.activeElement !== $('fb-groups-per')) $('fb-groups-per').value = config.facebookGroupsPerPost || 9;
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
+  $('fb-groups-more').hidden = !config.facebookGroupsOn; // the number only once ticked
   const per = Math.min(config.facebookGroupsPerPost || 9, groups.length);
   const state = $('fb-groups-state');
   state.className = `pill ${config.facebookGroupsOn ? 'ok' : 'neutral'}`;
@@ -792,7 +838,7 @@ async function findGroups() {
 $('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
 $('fb-groups-save').addEventListener('click', saveGroups);
 $('fb-groups-per').addEventListener('change', saveGroups);
-$('fb-groups-on').addEventListener('change', saveGroups);
+$('fb-groups-on').addEventListener('change', () => { $('fb-groups-more').hidden = !$('fb-groups-on').checked; saveGroups(); });
 
 // null when no group list is set (no per-post button then).
 let groupsDefault = null;
@@ -1553,7 +1599,7 @@ function timeZoneLabel() {
   return `${zone.replace(/_/g, ' ')}, UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
 }
 async function renderAutoStatus() {
-  const { autoStatus, lastAutoTick, nextDueAt } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt']);
+  const { autoStatus, lastAutoTick, nextDueAt, catchUp, autoPaused } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt', 'catchUp', 'autoPaused']);
   const box = $('auto-status');
   const now = Date.now();
   // Folder access closed by Chrome: a card with one button instead of a sentence.
@@ -1564,6 +1610,8 @@ async function renderAutoStatus() {
   if (paused) {
     box.hidden = true;
     return;
+  } else if (autoPaused) {
+    tone = 'warn'; text = 'Tout est en pause : rien ne part automatiquement. Clique « Reprendre » pour relancer.';
   } else if (autoStatus && autoStatus.state === 'nofolder') {
     tone = 'warn'; text = 'Publication automatique en attente : choisis d’abord le dossier de tes vidéos (Réglages).';
   } else if (!lastAutoTick) {
@@ -1576,7 +1624,9 @@ async function renderAutoStatus() {
     tone = autoStatus && autoStatus.state === 'busy' ? 'busy' : '';
     const later = nextDueAt && new Date(nextDueAt).toDateString() !== new Date().toDateString()
       ? ` le ${new Date(nextDueAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : '';
-    text = `Publication automatique active${nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${later}` : ''} · heure de ton ordinateur : ${clock(now)} (${timeZoneLabel().split(',')[0].split('/').pop()})`;
+    text = catchUp && catchUp.count > 1
+      ? `Rattrapage : ${catchUp.count} posts en retard, un toutes les ${Math.round(catchUp.gap / 60000 * 10) / 10} min (prochain à ${clock(catchUp.next)})`
+      : `Publication automatique active${nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${later}` : ''} · heure de ton ordinateur : ${clock(now)} (${timeZoneLabel().split(',')[0].split('/').pop()})`;
   }
   box.className = `auto-status ${tone}`.trim();
   $('auto-status-text').textContent = text;
@@ -1608,7 +1658,7 @@ $('auto-resume').addEventListener('click', async () => {
   setTimeout(renderAutoStatus, 1500);
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt)) renderAutoStatus();
+  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt || changes.catchUp || changes.autoPaused)) { renderAutoStatus(); renderPauseButton(); }
 });
 setInterval(() => { if (!document.hidden) renderAutoStatus(); }, 30000);
 
@@ -1646,6 +1696,27 @@ $('partner-copy').addEventListener('click', async () => {
   $('partner-copy').textContent = 'Copié';
   setTimeout(() => { $('partner-copy').textContent = 'Copier'; }, 1800);
 });
+
+// Pause / Lecture: stops every automatic publication (YouTube, Facebook,
+// groups, TikTok, Instagram) until clicked again. « Publier » buttons still work.
+const PAUSE_ICON = '<svg class="ico" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+const PLAY_ICON = '<svg class="ico" viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5Z"/></svg>';
+async function renderPauseButton() {
+  const { autoPaused } = await chrome.storage.local.get('autoPaused');
+  const b = $('pause-all');
+  b.classList.toggle('paused', !!autoPaused);
+  b.innerHTML = `${autoPaused ? PLAY_ICON : PAUSE_ICON}<span>${autoPaused ? 'Reprendre' : 'Pause'}</span>`;
+  b.title = autoPaused ? 'Tout est en pause : cliquer pour reprendre les publications automatiques'
+    : 'Mettre en pause toutes les publications automatiques';
+}
+$('pause-all').addEventListener('click', async () => {
+  const { autoPaused } = await chrome.storage.local.get('autoPaused');
+  await chrome.storage.local.set({ autoPaused: !autoPaused });
+  if (autoPaused) send({ type: 'autoNow' }); // play: start again now
+  renderPauseButton();
+  renderAutoStatus();
+});
+renderPauseButton();
 
 async function start() {
   const { appUrl } = await chrome.storage.local.get('appUrl');
