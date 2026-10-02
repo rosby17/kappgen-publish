@@ -186,7 +186,7 @@
     keepQuiet(true);
     const create = await waitFor(
       () => byText(/^(create post|cr[eé]er une publication|cr[eé]er un post|nouvelle publication)$/i)
-        || [...document.querySelectorAll('[role="button"]')].find((n) => visible(n) && /what'?s on your mind|que voulez-vous dire|exprimez-vous|[àa] quoi pensez-vous/i.test(textOf(n))),
+        || [...document.querySelectorAll('[role="button"]')].find((n) => visible(n) && /what'?s on your mind|what'?s new|quoi de neuf|que voulez-vous dire|exprimez-vous|[àa] quoi pensez-vous/i.test(textOf(n))),
       45000, 'le bouton Créer une publication');
     click(create);
     await waitFor(() => [...document.querySelectorAll('[role="dialog"] [contenteditable="true"], [contenteditable="true"][role="textbox"]')].find(visible), 30000, 'la fenêtre de publication');
