@@ -1527,27 +1527,44 @@ async function renderAutoStatus() {
   const { autoStatus, lastAutoTick, nextDueAt } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt']);
   const box = $('auto-status');
   const now = Date.now();
-  const here = `Heure de cet ordinateur : ${clock(now)} (${timeZoneLabel()}). Les heures de publication suivent cette horloge.`;
+  // Folder access closed by Chrome: a card with one button instead of a sentence.
+  const paused = !!(autoStatus && autoStatus.state === 'folder');
+  $('paused').hidden = !paused;
   let tone = '';
   let text;
-  if (!lastAutoTick) {
+  if (paused) {
+    box.hidden = true;
+    return;
+  } else if (!lastAutoTick) {
     text = 'Publication automatique : démarrage…';
   } else if (autoStatus && autoStatus.state === 'subscription') {
-    tone = 'warn'; text = 'Publication automatique arrêtée : abonnement inactif.';
-  } else if (autoStatus && autoStatus.state === 'folder') {
-    tone = 'warn'; text = 'Publication automatique arrêtée : clique l’icône KappGen puis « Autoriser » pour rouvrir l’accès au dossier.';
+    tone = 'warn'; text = 'Publication automatique en pause : ton abonnement n’est plus actif.';
   } else if (now - lastAutoTick > 12 * 60000) {
-    tone = 'warn'; text = `Dernière vérification à ${clock(lastAutoTick)} : Chrome était fermé ou l’ordinateur en veille. Ce qui était prévu entre-temps part maintenant.`;
+    tone = 'warn'; text = `Pas de vérification depuis ${clock(lastAutoTick)} (Chrome fermé ou ordinateur en veille). Ce qui était prévu part maintenant.`;
   } else {
     tone = autoStatus && autoStatus.state === 'busy' ? 'busy' : '';
-    text = `Publication automatique active · vérifiée à ${clock(lastAutoTick)}`
-      + (nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${new Date(nextDueAt).toDateString() !== new Date().toDateString() ? ` le ${new Date(nextDueAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : ''}` : '')
-      + '.';
+    const later = nextDueAt && new Date(nextDueAt).toDateString() !== new Date().toDateString()
+      ? ` le ${new Date(nextDueAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : '';
+    text = `Publication automatique active${nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${later}` : ''} · heure de ton ordinateur : ${clock(now)} (${timeZoneLabel().split(',')[0].split('/').pop()})`;
   }
   box.className = `auto-status ${tone}`.trim();
-  $('auto-status-text').textContent = `${text} ${here}`;
+  $('auto-status-text').textContent = text;
+  box.title = `Les heures de publication suivent l’horloge de cet ordinateur (${timeZoneLabel()}). Dernière vérification : ${lastAutoTick ? clock(lastAutoTick) : '—'}.`;
   box.hidden = false;
 }
+// « Reprendre les publications »: Chrome's own prompt, for the videos folder
+// (and the posts folder if there is one), straight from the click.
+$('auto-resume').addEventListener('click', async () => {
+  const main = rootHandle || await KappDossier.loadRoot();
+  if (main) await main.requestPermission({ mode: 'readwrite' }).catch(() => {});
+  const fb = fbRootHandle || await KappDossier.loadFbRoot().catch(() => null);
+  if (fb && await fb.queryPermission({ mode: 'readwrite' }).catch(() => 'granted') !== 'granted') {
+    await fb.requestPermission({ mode: 'readwrite' }).catch(() => {});
+  }
+  await send({ type: 'autoNow' });
+  renderFolder();
+  setTimeout(renderAutoStatus, 1500);
+});
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt)) renderAutoStatus();
 });
