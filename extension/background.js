@@ -1301,11 +1301,11 @@ const newer = (a, b) => {
   for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
   return false;
 };
-async function checkNewRelease() {
+async function checkNewRelease({ maxAge = 6 * 3600 * 1000 } = {}) {
   const { releaseCheck } = await chrome.storage.local.get('releaseCheck');
   const current = chrome.runtime.getManifest().version;
   let latest = releaseCheck && releaseCheck.latest;
-  if (!releaseCheck || Date.now() - releaseCheck.at > 6 * 3600 * 1000) {
+  if (!releaseCheck || Date.now() - releaseCheck.at > maxAge) {
     const response = await fetch(RELEASES_URL, { cache: 'no-store' });
     if (!response.ok) return;
     latest = String((await response.json()).tag_name || '').replace(/^v/, '');
@@ -1504,6 +1504,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       await chrome.storage.session.set({ job: { running: false, done: false, error: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.', message: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.' } });
       return {};
     },
+    // Panel opened: look for a newer version (at most once every 15 min).
+    checkRelease: async () => { await checkNewRelease({ maxAge: 15 * 60 * 1000 }); return {}; },
     clearJob: async () => {
       const { job } = await chrome.storage.session.get('job');
       if (!job || !job.running) await chrome.storage.session.remove('job');
