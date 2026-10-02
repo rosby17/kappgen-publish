@@ -351,9 +351,25 @@
     const want = Math.min(9, Math.max(count || 0, names.length));
     if (!want) return { groups: [], extra: [] };
     const OPTION = X('groupOption');
-    const option = choice(OPTION, topDialog() || document)
-      || [...(topDialog() || document).querySelectorAll(S('optionNodes'))]
-        .find((n) => visible(n) && labelsOf(n).some((l) => OPTION.test(l)));
+    // Last resort: the row's heading itself, whatever plain element holds it
+    // (Facebook does not always give it a button/menu role or a tabindex) —
+    // a native click() on it still bubbles up to whichever ancestor handles it.
+    const findHeading = (pattern, root) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const text = (node.nodeValue || '').replace(/\s+/g, ' ').trim();
+        if (text && pattern.test(text) && visible(node.parentElement)) return node.parentElement;
+      }
+      return null;
+    };
+    const findOption = () => {
+      const root = topDialog() || document;
+      return choice(OPTION, root)
+        || [...root.querySelectorAll(S('optionNodes'))].find((n) => visible(n) && labelsOf(n).some((l) => OPTION.test(l)))
+        || findHeading(OPTION, root);
+    };
+    const option = await waitFor(findOption, 8000, 'l’option « Partager dans des groupes »').catch(() => null);
     if (!option) return { groups: [], extra: [] };
     click(option);
     // Facebook garde souvent la même boîte de dialogue (même nœud DOM) et ne
