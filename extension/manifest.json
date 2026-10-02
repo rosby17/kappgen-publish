@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "KappGen Publish",
-  "version": "1.12.0",
+  "version": "1.13.5",
   "description": "Publie toutes seules tes vidéos et tes posts sur tes réseaux sociaux (YouTube, Facebook…) depuis un dossier de ton ordinateur.",
   "icons": {
     "16": "icons/icon16.png",
@@ -37,7 +37,8 @@
     "https://www.youtube.com/*",
     "https://www.facebook.com/*",
     "https://facebook.com/*",
-    "https://business.facebook.com/*"
+    "https://business.facebook.com/*",
+    "https://www.tiktok.com/*"
   ],
   "web_accessible_resources": [
     {
@@ -48,7 +49,8 @@
         "https://studio.youtube.com/*",
         "https://www.facebook.com/*",
         "https://facebook.com/*",
-        "https://business.facebook.com/*"
+        "https://business.facebook.com/*",
+        "https://www.tiktok.com/*"
       ]
     }
   ],

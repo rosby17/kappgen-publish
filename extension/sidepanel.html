@@ -10,6 +10,7 @@
   <header>
     <img src="logo.png" alt="" width="36" height="36">
     <h1>KappGen Publish</h1>
+    <button id="plan-pill" class="plan-pill" hidden title="Mon abonnement"></button>
     <div id="profile" class="profile" hidden>
       <button id="avatar" class="avatar" title="Mon compte" aria-haspopup="true" aria-expanded="false"></button>
       <div id="profile-menu" class="profile-menu" role="menu" hidden>
@@ -49,7 +50,7 @@
       <li>YouTube : vidéos, Shorts, titre, description et miniature</li>
       <li>Facebook : vidéos, Reels, posts photo et texte</li>
       <li>Programmation à l’heure que tu veux, jamais de doublon</li>
-      <li>TikTok, Instagram, LinkedIn et X arrivent</li>
+      <li>TikTok : toutes tes vidéos. Instagram, LinkedIn et X arrivent</li>
     </ul>
     <div class="price"><strong>1 200 FCFA</strong><span> / mois</span></div>
     <div class="paywall-actions">
@@ -78,6 +79,11 @@
     <button data-tab="videos" class="active">Vidéos</button>
     <button data-tab="sent">YouTube</button>
     <button data-tab="facebook">Facebook</button>
+    <button data-tab="tiktok">TikTok</button>
+    <button data-tab="instagram">Instagram</button>
+    <button data-tab="linkedin">LinkedIn</button>
+    <button data-tab="x">X</button>
+    <button data-tab="networks">Réseaux</button>
     <button data-tab="help">Aide</button>
   </nav>
 
@@ -132,10 +138,9 @@
   </div>
 
   <div id="tab-sent" class="tab" hidden>
-    <h2>Déjà publiées sur YouTube</h2>
-    <p class="muted small">Tu as changé le titre, la description ou la miniature dans le dossier ? Clique « Mettre à jour maintenant ». Sinon, KappGen le fait tout seul dans les 5 à 10 minutes.</p>
+    <p class="muted small">Ce qui est déjà en ligne reste replié : ce qui compte, ce sont les vidéos encore à publier (onglet Vidéos). Une vidéo que tu publies à la main : clique « Déjà publiée » sur elle, elle passe ici.</p>
     <p id="sent-summary" class="muted small"></p>
-    <ul id="sent"></ul>
+    <details id="sent-box" class="done-box" hidden><summary id="sent-title">Déjà publiées</summary><ul id="sent"></ul></details>
   </div>
 
   <div id="tab-facebook" class="tab" hidden>
@@ -150,6 +155,7 @@
     <h2>Vidéos YouTube à partager sur Facebook</h2>
     <ul id="facebook"></ul>
     <p id="no-facebook" class="muted" hidden>Aucune vidéo publiée sur YouTube pour l’instant.</p>
+    <details id="facebook-done-box" class="done-box" hidden><summary id="facebook-done-title"></summary><ul id="facebook-done"></ul></details>
 
     <section class="card">
       <h2>Dossier des Reels et posts</h2>
@@ -164,17 +170,52 @@
         <button id="fb-pick" class="btn primary wide">Choisir le dossier Facebook</button>
         <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
       </div>
-      <p id="fb-folder-hint" class="muted small">Importe le dossier où tu ranges tes Reels et posts : un sous-dossier par post, avec <code>texte.txt</code> et une image ou une vidéo verticale. Chaque post part tout seul, à son heure s’il en a une.</p>
-      <div class="field fb-times-field">
-        <div class="field-head"><label for="fb-times">Horaires des posts (obligatoires)</label><span id="fb-times-state" class="pill warn">À remplir</span></div>
-        <div class="input-group">
-          <input id="fb-times" type="text" placeholder="ex. 08:00, 12:30, 18:00, 21:00">
-          <button id="fb-times-save" class="btn secondary">Enregistrer</button>
-        </div>
-        <p class="muted small">Chaque nouveau post prend le prochain horaire libre. Un post qui a déjà sa date garde la sienne.</p>
-      </div>
-      <p id="fb-summary" class="muted small"></p>
-      <ul id="fb-posts"></ul>
+      <p id="fb-folder-hint" class="muted small">Importe le dossier où tu ranges tes Reels et posts : un sous-dossier par post, avec <code>texte.txt</code> et une image ou une vidéo. L’heure de chaque post est celle écrite dans son dossier ; un post sans heure part tout de suite.</p>
+    </section>
+
+    <div class="list-head"><h2>Posts</h2><span id="fb-summary" class="muted small"></span></div>
+    <details id="fb-done-box" class="done-box" hidden><summary id="fb-done-title"></summary><ul id="fb-done" class="rows"></ul></details>
+    <ul id="fb-posts" class="rows"></ul>
+    <p id="no-posts" class="muted small" hidden>Aucun post à venir.</p>
+  </div>
+
+  <div id="tab-tiktok" class="tab" hidden>
+    <section class="card">
+      <div class="field-head"><h2>TikTok</h2><span class="pill ok">Disponible</span></div>
+      <p class="small muted">Toutes tes vidéos peuvent partir sur TikTok, horizontales comme verticales : la vidéo publiée sur YouTube (ou sa version verticale <code>short.mp4</code> si elle existe) et les vidéos de ton dossier de posts. Reste connecté à TikTok dans ce Chrome.</p>
+    </section>
+    <h2>À publier sur TikTok</h2>
+    <details id="tiktok-done-box" class="done-box" hidden><summary id="tiktok-done-title"></summary><ul id="tiktok-done"></ul></details>
+    <ul id="tiktok-list"></ul>
+    <p id="no-tiktok" class="muted" hidden>Aucune vidéo pour l’instant : publie d’abord une vidéo sur YouTube, ou ajoute une vidéo dans ton dossier de posts.</p>
+  </div>
+
+  <div id="tab-instagram" class="tab" hidden>
+    <section class="card">
+      <div class="field-head"><h2>Instagram</h2><span class="pill neutral">En développement</span></div>
+      <p class="small muted">Bientôt : les vidéos en Reels (horizontales ou verticales) et les posts photo de ton dossier de posts, publiés depuis ton compte Instagram ouvert dans ce Chrome, à l’heure écrite dans chaque post.</p>
+    </section>
+  </div>
+
+  <div id="tab-linkedin" class="tab" hidden>
+    <section class="card">
+      <div class="field-head"><h2>LinkedIn</h2><span class="pill neutral">En développement</span></div>
+      <p class="small muted">Bientôt : tes vidéos et tes posts (texte, photo) sur ton profil ou ta page LinkedIn, avec le même dossier et les mêmes heures.</p>
+    </section>
+  </div>
+
+  <div id="tab-x" class="tab" hidden>
+    <section class="card">
+      <div class="field-head"><h2>X</h2><span class="pill neutral">En développement</span></div>
+      <p class="small muted">Bientôt : tes vidéos et tes posts (texte, photo) sur ton compte X, avec le même dossier et les mêmes heures.</p>
+    </section>
+  </div>
+
+  <div id="tab-networks" class="tab" hidden>
+    <section class="card">
+      <div class="field-head"><h2>Réseaux utilisés</h2></div>
+      <p class="small muted">Coche seulement les réseaux sur lesquels tu publies. Un réseau décoché disparaît du panneau et KappGen n'y envoie plus rien, même automatiquement.</p>
+      <ul id="networks" class="networks"></ul>
     </section>
   </div>
 
@@ -251,9 +292,18 @@ Ingrédients : …</pre>
         <ol class="steps">
           <li>Onglet <strong>Facebook</strong> : colle le lien de ta page (ex. <code>https://www.facebook.com/ta-page</code>) puis « Enregistrer ».</li>
           <li><strong>Vidéos YouTube à partager</strong> : chaque vidéo déjà sur YouTube a un bouton « Publier sur Facebook ». Elle part avec son titre.</li>
-          <li><strong>Reels et posts</strong> : choisis un dossier à part (même règle : un dossier par post, avec une image ou une vidéo verticale et un texte). Le texte est publié tel quel.</li>
-          <li><strong>Horaires des posts (obligatoires)</strong> : écris tes heures, ex. <code>08:00, 12:30, 18:00</code>. Chaque nouveau post prend le prochain horaire libre.</li>
+          <li><strong>Reels et posts</strong> : choisis un dossier à part (même règle : un dossier par post, avec une image ou une vidéo et un texte). Le texte est publié tel quel.</li>
+          <li><strong>Heure de publication</strong> : celle écrite dans le post (<code>publication.json</code> ou le nom du dossier, ex. <code>2026-10-02-1830-sujet</code>). Un post sans heure part tout de suite.</li>
         </ol>
+      </section>
+
+      <section class="help-card">
+        <h3>TikTok</h3>
+        <ul class="guide">
+          <li>TikTok accepte <strong>toutes les vidéos</strong>, horizontales comme verticales : la vidéo publiée sur YouTube part telle quelle (ou sa version verticale <code>short.mp4</code> si tu en as mis une), ainsi que les vidéos de ton dossier de posts.</li>
+          <li>Reste connecté à TikTok dans ce Chrome. KappGen utilise ton onglet TikTok s’il est ouvert, envoie la vidéo, attend 100 %, écrit le titre (et les mots-clés en hashtags) puis publie.</li>
+          <li>Instagram, LinkedIn et X arrivent bientôt.</li>
+        </ul>
       </section>
 
       <section class="help-card">

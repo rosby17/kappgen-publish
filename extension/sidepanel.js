@@ -255,7 +255,7 @@ function channelItem(channel, panelOwn) {
     own.monetization = money.value;
   });
   const socialLabel = document.createElement('label');
-  socialLabel.className = 'social-row';
+  socialLabel.className = 'social-row net-facebook';
   const social = document.createElement('input');
   social.type = 'checkbox';
   social.checked = own.facebook === true;
@@ -268,6 +268,7 @@ function channelItem(channel, panelOwn) {
   });
   const facebookPage = document.createElement('input');
   facebookPage.type = 'url';
+  facebookPage.classList.add('net-facebook');
   // Always visible: the Page is also needed by the scheduled posts of
   // FACEBOOK/A-PUBLIER, even when the videos do not go to Facebook.
   facebookPage.placeholder = 'Lien de ta page Facebook, ex. https://www.facebook.com/MaPage';
@@ -326,7 +327,10 @@ function sentItem(video) {
   const extra = [];
   let status;
   let item;
-  if (!video.youtube_id) {
+  if (video.manual && !video.youtube_id) {
+    // Marked "Déjà publiée": published by hand, nothing to send or update.
+    status = pill('ok', 'Publiée à la main (rien à envoyer).');
+  } else if (!video.youtube_id) {
     // Sent, but its YouTube link is unknown: give it, or send it again.
     status = pill('warn', 'Le lien YouTube de cette vidéo n’a pas été enregistré.');
     const group = el('div', 'input-group');
@@ -351,13 +355,18 @@ function sentItem(video) {
     else if (video.applied_hash === video.hash) status = pill('ok', 'À jour sur YouTube.');
     else if (video.update_error && video.update_tried_hash === video.hash) status = pill('warn', `Mise à jour échouée : ${video.update_error}`);
     else status = pill('neutral', 'Modifications à envoyer : mise à jour toute seule dans 5 à 10 min.');
-    const link = el('a', 'btn ghost', 'Ouvrir dans Studio');
-    link.href = `https://studio.youtube.com/video/${video.youtube_id}/edit`;
+    // A published video needs no buttons: it is listed small, and updated by
+    // itself. "Mettre à jour" only shows when an update failed.
+    const link = el('a', 'btn ghost', 'Voir sur YouTube');
+    link.href = `https://youtu.be/${video.youtube_id}`;
     link.target = '_blank';
-    const update = button('Mettre à jour maintenant', 'btn primary', () => act(item, update,
-      { type: 'update', path: video.relative_path }, 'Mise à jour sur YouTube en cours…'));
-    update.dataset.publish = '1';
-    actions.push(link, update);
+    actions.push(link);
+    if (video.update_error && video.update_tried_hash === video.hash) {
+      const update = button('Réessayer la mise à jour', 'btn primary', () => act(item, update,
+        { type: 'update', path: video.relative_path }, 'Mise à jour sur YouTube en cours…'));
+      update.dataset.publish = '1';
+      actions.push(update);
+    }
   }
   item = card({
     path: video.relative_path, preview: video.preview_path, title: video.title || video.relative_path.split('/').pop(),
@@ -365,6 +374,55 @@ function sentItem(video) {
     status, actions, extra,
   });
   return item;
+}
+
+
+// ------------------------------------------------------ networks used
+
+const NETWORKS = [
+  ['youtube', 'YouTube', 'Envoi des vidéos depuis le dossier.', 'sent'],
+  ['facebook', 'Facebook', 'Reels, vidéos et posts programmés sur ta page.', 'facebook'],
+  ['tiktok', 'TikTok', 'Vidéos verticales (et horizontales) sur ton compte.', 'tiktok'],
+  ['instagram', 'Instagram', 'En développement.', 'instagram'],
+  ['linkedin', 'LinkedIn', 'En développement.', 'linkedin'],
+  ['x', 'X', 'En développement.', 'x'],
+];
+const networkIsOn = (config, name) => ((config.networks || {})[name] !== false);
+
+// Hides the tabs (and the per-channel Facebook fields) of the networks switched off.
+async function applyNetworks() {
+  const config = await settings();
+  for (const [name, , , tab] of NETWORKS) {
+    const on = networkIsOn(config, name);
+    const button = document.querySelector(`.tabs button[data-tab="${tab}"]`);
+    if (button) button.hidden = !on;
+    document.body.classList.toggle(`off-${name}`, !on);
+    const pane = $(`tab-${tab}`);
+    if (!on && pane && !pane.hidden) document.querySelector('.tabs button[data-tab="videos"]').click();
+  }
+}
+
+async function renderNetworks() {
+  const config = await settings();
+  $('networks').replaceChildren(...NETWORKS.map(([name, label, hint]) => {
+    const row = el('li', 'network-row');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = networkIsOn(config, name);
+    const text = el('div');
+    text.append(el('strong', null, label), el('div', 'small muted', hint));
+    const wrap = el('label');
+    wrap.append(box, text);
+    box.addEventListener('change', async () => {
+      const current = await settings();
+      current.networks = { ...(current.networks || {}), [name]: box.checked };
+      await chrome.storage.local.set({ folder: current });
+      await applyNetworks();
+      send({ type: 'autoNow' });
+    });
+    row.append(wrap);
+    return row;
+  }));
 }
 
 // ------------------------------------------------ publication settings
@@ -378,10 +436,6 @@ async function renderPublishSettings() {
   for (const radio of document.querySelectorAll('input[name="yt-when"]')) radio.checked = radio.value === when;
   $('yt-times-row').hidden = when !== 'times';
   $('yt-times').value = config.times || '';
-  $('fb-times').value = config.fbTimes || '';
-  const ok = TIMES.test(config.fbTimes || '');
-  $('fb-times-state').className = `pill ${ok ? 'ok' : 'warn'}`;
-  $('fb-times-state').textContent = ok ? 'Horaires enregistrés' : 'À remplir';
 }
 
 async function saveSetting(patch) {
@@ -420,8 +474,7 @@ function timesSaver(input, key, extra = {}) {
   };
 }
 $('yt-times-save').addEventListener('click', timesSaver('yt-times', 'times', { schedule: 'times' }));
-$('fb-times-save').addEventListener('click', timesSaver('fb-times', 'fbTimes'));
-for (const id of ['yt-times', 'fb-times']) {
+for (const id of ['yt-times']) {
   $(id).addEventListener('input', () => $(id).setCustomValidity(''));
   $(id).addEventListener('keydown', (event) => { if (event.key === 'Enter') $(`${id}-save`).click(); });
 }
@@ -442,57 +495,82 @@ async function renderFbAccess() {
   return access;
 }
 
-// Today's posts (and failures of any day, and posts without a date), by time.
+// One aligned row per post: time, picture, text and state. Already published
+// posts are folded away (with their count); everything to come is listed below.
+function postRow(post) {
+  const item = el('li', `row state-${post.statut}`);
+  item.dataset.path = post.path;
+  const when = el('div', 'when');
+  if (post.statut === 'publie' && post.published_at) {
+    const d = new Date(post.published_at);
+    when.append(el('strong', null, `${pad2(d.getHours())}:${pad2(d.getMinutes())}`), el('span', null, d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })));
+  } else if (post.due_at) {
+    const d = new Date(post.due_at);
+    const today = d.toDateString() === new Date().toDateString();
+    when.append(el('strong', null, `${pad2(d.getHours())}:${pad2(d.getMinutes())}`), el('span', null, today ? 'aujourd’hui' : d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })));
+  } else {
+    when.append(el('strong', null, '—'), el('span', null, 'sans heure'));
+  }
+  const mini = el('div', 'mini', POST_TYPES[post.type]);
+  if (post.image_path) KappDossier.fileAt(post.image_path).then((file) => { const img = document.createElement('img'); img.src = URL.createObjectURL(file); img.alt = ''; mini.replaceChildren(img); }).catch(() => {});
+  const what = el('div', 'what');
+  what.append(el('div', 't', post.text.split('\n')[0] || '(sans texte)'));
+  const live = el('div', 'live');
+  const due = post.due_at && post.due_at > Date.now();
+  const states = {
+    a_publier: due ? pill('neutral', 'Programmé') : pill('neutral', 'Part dans les 5 min'),
+    en_cours: pill('busy', 'Publication en cours…'),
+    publie: pill('ok', 'Publié'),
+    echec: pill('warn', post.error || 'Échec de la publication.'),
+  };
+  live.append(states[post.statut] || pill('neutral', post.statut));
+  what.append(live);
+  const acts = el('div', 'acts');
+  if (post.statut === 'a_publier' || post.statut === 'echec') {
+    const change = timeButton(() => item, post.due_at, async (at) => {
+      const d = new Date(at);
+      await KappDossier.markPost(post.path, { date_locale: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+        heure_prevue: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`, statut: 'a_publier', erreur: null, horaire: 'manuel' });
+      renderPosts();
+    }, { label: '🕒' });
+    change.title = 'Changer l’heure de publication';
+    const go = button(post.statut === 'echec' ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
+      { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
+    go.dataset.publish = '1';
+    acts.append(change, go);
+  }
+  item.append(when, mini, what, acts);
+  item.say = (kind, text) => live.replaceChildren(pill(kind, text));
+  return item;
+}
+
 async function renderPosts() {
   const access = await renderFbAccess();
   const reply = await send({ type: 'facebookPosts' });
   const posts = reply && reply.ok ? reply.data : [];
   lastPosts = posts;
-  const today = new Date().toDateString();
-  // Everything still to come (to change its time), failures, and today's published posts.
-  const shown = posts.filter((p) => p.statut !== 'publie' || new Date(p.published_at || p.due_at || 0).toDateString() === today);
-  const count = (state) => shown.filter((p) => p.statut === state).length;
   const config = await settings();
   const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl) || config.facebookPageUrl;
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
+  const rank = { en_cours: 0, echec: 1, a_publier: 2 };
+  const toCome = posts.filter((p) => p.statut !== 'publie')
+    .sort((a, b) => (rank[a.statut] ?? 3) - (rank[b.statut] ?? 3) || (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
+  const done = posts.filter((p) => p.statut === 'publie')
+    .sort((a, b) => Date.parse(b.published_at || 0) - Date.parse(a.published_at || 0));
   const summary = $('fb-summary');
-  if (reply && !reply.ok) {
-    summary.className = 'warn';
-    summary.textContent = reply.error;
-  } else if (!posts.length) {
+  if (reply && !reply.ok) { summary.className = 'warn'; summary.textContent = reply.error; }
+  else {
     summary.className = 'muted small';
-    summary.textContent = access.state === 'granted' ? 'Aucun post ni Reel dans ce dossier.' : '';
-  } else {
-    summary.className = 'muted small';
-    summary.textContent = `Aujourd’hui : ${count('publie')} publié(s), ${count('a_publier')} à publier${count('echec') ? `, ${count('echec')} en échec` : ''}. Les posts programmés partent à leur heure (un toutes les 5 min au plus).`
-      + (missingPage ? ' Il manque le lien de la page Facebook (en haut).' : '');
+    summary.textContent = !posts.length ? (access.state === 'granted' ? 'Aucun post dans ce dossier.' : '')
+      : `${toCome.length} à venir · ${done.length} publié(s)` + (missingPage ? ' · lien de la page manquant (en haut)' : '');
   }
-  $('fb-posts').replaceChildren(...shown.map((post) => {
-    const when = post.due_at ? whenText(post.due_at) : 'Sans heure prévue';
-    const states = { a_publier: post.needs_times ? pill('warn', 'Horaire à définir : remplis « Horaires des posts » ci-dessus.') : pill('neutral', `Prévu ${when}`), en_cours: pill('busy', 'Publication en cours…'),
-      publie: pill('ok', 'Publié sur Facebook.'), echec: pill('warn', post.error || 'Échec de la publication.') };
-    const actions = [];
-    let item;
-    if (post.statut === 'a_publier' || post.statut === 'echec') {
-      const change = timeButton(() => item, post.due_at, async (at) => {
-        const d = new Date(at);
-        await KappDossier.markPost(post.path, { date_locale: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
-          heure_prevue: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`, statut: 'a_publier', erreur: null, horaire: 'manuel' });
-        renderPosts();
-      }, { label: post.due_at ? 'Modifier l’heure' : 'Programmer' });
-      const go = button(post.statut === 'echec' ? 'Réessayer maintenant' : 'Publier maintenant', 'btn primary', () => act(item, go,
-        { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
-      go.dataset.publish = '1';
-      actions.push(change, go);
-    }
-    item = card({
-      path: post.path, preview: post.image_path || undefined, emptyLabel: POST_TYPES[post.type],
-      title: post.text.split('\n')[0] || '(sans texte)', details: [[POST_TYPES[post.type], chan(post.channel_name)].filter(Boolean).join(' · ')],
-      status: states[post.statut] || pill('neutral', post.statut), actions,
-    });
-    return item;
-  }));
+  $('fb-done-box').hidden = !done.length;
+  $('fb-done-title').textContent = `Déjà publiés (${done.length})`;
+  $('fb-done').replaceChildren(...done.slice(0, 200).map(postRow));
+  $('fb-posts').replaceChildren(...toCome.map(postRow));
+  $('no-posts').hidden = !(posts.length && !toCome.length);
   applyJob();
+  renderTikTok();
   renderPages();
 }
 
@@ -548,13 +626,15 @@ async function renderFolder() {
   defaultVisibility = config.schedule === 'times' ? 'SCHEDULE' : (VISIBILITY_LABELS[config.visibility] ? config.visibility : 'UNLISTED');
   showChannels = new Set([...data.videos, ...data.sent].map((v) => v.channel_key)).size > 1;
   for (const [key, own] of Object.entries(config.channels)) autoVisibility.set(key, own.visibility);
-  $('videos').replaceChildren(...data.videos.map(videoItem));
+  const order = (v) => (v.schedule_at && v.schedule_at > Date.now() ? v.schedule_at : v.auto_ok ? Date.now() : Infinity);
+  $('videos').replaceChildren(...[...data.videos].sort((a, b) => order(a) - order(b)).map(videoItem));
   queueMicrotask(applyJob);
   $('no-videos').hidden = data.videos.length > 0;
   const total = data.sent.reduce((sum, v) => sum + v.size_bytes, 0);
   $('sent-summary').textContent = '';
   renderOnYoutube(data, config);
   renderFacebook(data);
+  renderTikTok();
   renderPages();
 }
 
@@ -580,20 +660,70 @@ function facebookItem(video, page) {
   return item;
 }
 
+// TikTok: every video already on YouTube (its vertical version if there is
+// one, otherwise the video itself, horizontal or not) and the videos of the
+// posts folder.
+function renderTikTok() {
+  const items = [];
+  for (const v of (lastScan && lastScan.sent) || []) {
+    if (!v.youtube_id && !v.published_at) continue;
+    items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), preview: v.preview_path,
+      detail: [chan(v.channel_name), v.vertical_path ? 'version verticale' : 'vidéo publiée sur YouTube'].filter(Boolean).join(' · '),
+      done: v.tiktok_published_at, error: v.tiktok_error, date: v.date });
+  }
+  for (const p of lastPosts) {
+    if (!p.video_path) continue;
+    items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
+      detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
+      done: p.tiktok_statut === 'publie', error: p.tiktok_error, date: p.due_at });
+  }
+  const tiktokCard = (it) => {
+    let item;
+    const actions = [];
+    let status;
+    if (it.done) status = pill('ok', 'Publiée sur TikTok.');
+    else {
+      status = it.error ? pill('warn', `Échec sur TikTok : ${it.error}`) : pill('neutral', 'Prête à partir sur TikTok.');
+      const go = button(it.error ? 'Réessayer' : 'Publier sur TikTok', 'btn primary', () => act(item, go,
+        { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
+      go.dataset.publish = '1';
+      actions.push(go);
+    }
+    item = card({ path: it.path, preview: it.preview, emptyLabel: 'Vidéo', title: it.title, details: [it.detail], status, actions });
+    return item;
+  };
+  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
+  const waiting = items.filter((it) => !it.done).sort(recent);
+  const done = items.filter((it) => it.done).sort(recent);
+  $('tiktok-list').replaceChildren(...waiting.map(tiktokCard));
+  $('no-tiktok').hidden = items.length > 0;
+  $('tiktok-done-box').hidden = !done.length;
+  $('tiktok-done-title').textContent = `Déjà sur TikTok (${done.length})`;
+  $('tiktok-done').replaceChildren(...done.map(tiktokCard));
+  applyJob();
+}
+
 async function renderFacebook(data) {
   const config = await settings();
   const pageOf = (v) => ({ ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) }).facebookPageUrl || config.facebookPageUrl;
-  const sent = [...data.sent].sort((a, b) => Number(!!a.facebook_published_at) - Number(!!b.facebook_published_at));
-  $('facebook').replaceChildren(...sent.map((video) => facebookItem(video, pageOf(video))));
+  const recent = (a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0);
+  const waiting = data.sent.filter((v) => !v.facebook_published_at).sort(recent);
+  const posted = data.sent.filter((v) => v.facebook_published_at).sort(recent);
+  $('facebook').replaceChildren(...waiting.map((video) => facebookItem(video, pageOf(video))));
+  $('facebook-done-box').hidden = !posted.length;
+  $('facebook-done-title').textContent = `Déjà sur Facebook (${posted.length})`;
+  $('facebook-done').replaceChildren(...posted.map((video) => facebookItem(video, pageOf(video))));
   applyJob();
-  $('no-facebook').hidden = sent.length > 0;
+  $('no-facebook').hidden = data.sent.length > 0;
 }
 
 // What KappGen sent from the selected publication folder. No channel
 // selection is required here: the folder and its manifest identify each
 // publication.
 async function renderOnYoutube(data, config) {
-  $('sent').replaceChildren(...data.sent.map(sentItem));
+  $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0)).map(sentItem));
+  $('sent-title').textContent = `Déjà publiées (${data.sent.length})`;
+  $('sent-box').hidden = !data.sent.length;
   applyJob();
   if (!data.sent.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';
 }
@@ -705,14 +835,14 @@ async function renderSubscription({ fresh = false } = {}) {
   const until = state.expires_at ? new Date(state.expires_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '';
   $('account-plan').textContent = !active ? 'Pas d’abonnement actif'
     : state.kind === 'lifetime' ? 'Accès à vie (offert)'
+    : state.kind === 'unlimited' ? 'Accès illimité (offert)'
       : state.kind === 'trial' ? `Essai gratuit : ${state.days_left} jour(s) restant(s)` : `Abonnement actif jusqu’au ${until}`;
-  const banner = $('plan-banner');
-  banner.hidden = !(active && state.kind !== 'lifetime' && state.days_left <= 3);
-  if (!banner.hidden) {
-    banner.replaceChildren(el('span', null, state.kind === 'trial'
-      ? `Essai gratuit : plus que ${state.days_left} jour(s).` : `Ton abonnement se termine le ${until}.`),
-    button('S’abonner', 'btn primary', () => { paywallBack = true; renderSubscription(); }));
-  }
+  // Small badge on the title line: the trial, or a subscription ending soon.
+  const pill = $('plan-pill');
+  pill.hidden = !(active && state.kind !== 'lifetime' && state.kind !== 'unlimited' && (state.kind === 'trial' || state.days_left <= 3));
+  pill.className = `plan-pill${state.days_left <= 1 ? ' urgent' : ''}`;
+  pill.textContent = state.kind === 'trial' ? `Essai gratuit · ${state.days_left} j` : `Abonnement · ${state.days_left} j`;
+  $('plan-banner').hidden = true;
   return active;
 }
 
@@ -748,6 +878,7 @@ $('pw-check').addEventListener('click', async () => {
   if (state) { $('pw-message').className = 'small warn'; $('pw-message').textContent = 'Paiement pas encore confirmé. Réessaie dans une minute.'; }
 });
 $('pw-back').addEventListener('click', () => { paywallBack = false; renderSubscription(); });
+$('plan-pill').addEventListener('click', () => { paywallBack = true; renderSubscription(); });
 $('renew').addEventListener('click', () => { toggleProfile(false); paywallBack = true; renderSubscription(); });
 // Back from the payment tab: check on its own.
 document.addEventListener('visibilitychange', async () => {
@@ -884,6 +1015,7 @@ async function renderApp() {
 // ------------------------------------------------------------- the job
 
 let currentJob = null;
+let jobHideTimer = null;
 
 // The running job, on its own card (and the other publish buttons wait).
 function applyJob() {
@@ -917,6 +1049,10 @@ function renderJob(job) {
     $('job-unblock').hidden = !(job.running && quiet > 5 * 60 * 1000);
   }
   applyJob();
+  clearTimeout(jobHideTimer);
+  if (job && job.done && !job.error && !job.running) {
+    jobHideTimer = setTimeout(async () => { await send({ type: 'clearJob' }); renderJob(null); }, 6000);
+  }
   if (wasRunning && !jobRunning) { renderFolder(); renderApp(); renderPosts(); }
 }
 
@@ -948,6 +1084,8 @@ async function start() {
   const { job } = await chrome.storage.session.get('job');
   renderJob(job);
   renderPublishSettings();
+  renderNetworks();
+  applyNetworks();
   renderFolder();
   renderApp();
   renderPosts();

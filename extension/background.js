@@ -173,11 +173,9 @@ async function folder(type, payload = {}) {
   return reply.data;
 }
 
-// Facebook posts, with the posting times of the panel (required for the
-// posts that have no date of their own).
+// Facebook posts: each one at the time written in it (or right away).
 async function postsList() {
-  const settings = await folderSettings();
-  return folder('posts', { times: settings.fbTimes || '' });
+  return folder('posts', {});
 }
 
 async function folderQueue() {
@@ -192,6 +190,23 @@ function channelIdOf(text) {
 }
 
 // Runs one window.__kappgen step inside the Studio tab.
+// Same as step(), for a network driven by its own script (TikTok…).
+async function stepIn(tabId, namespace, name, args) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async (ns, fn, input) => {
+      try {
+        return { ok: true, value: await window[ns][fn](input) };
+      } catch (error) {
+        return { ok: false, error: String((error && error.message) || error) };
+      }
+    },
+    args: [namespace, name, args || {}],
+  });
+  if (!result || !result.ok) throw new Error((result && result.error) || `Étape « ${name} » impossible.`);
+  return result.value;
+}
+
 async function step(tabId, name, args) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
@@ -253,6 +268,7 @@ async function tabToReuse(pattern, patterns) {
   const anywhere = await chrome.tabs.query({ url: patterns });
   return anywhere[0] || null;
 }
+const tiktokTabToReuse = () => tabToReuse(/^https:\/\/www\.tiktok\.com\//, ['https://www.tiktok.com/*']);
 const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
 const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
   ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
@@ -336,6 +352,10 @@ async function whileShown(tabId, fn) {
 // The Facebook Page is one link for the whole panel (settings.facebookPageUrl);
 // publishing a YouTube video on Facebook automatically is only decided by the
 // channel's own file (reglages-publication.json), never by the panel.
+// Networks the creator switched off in the panel's « Réseaux » tab: nothing is
+// sent to them, automatically or by a click (YouTube, Facebook, TikTok...).
+const networkOn = (settings, name) => ((settings && settings.networks) || {})[name] !== false;
+
 function ownOf(settings, video) {
   const { facebook, ...panel } = (settings.channels || {})[video.channel_key] || {};
   const own = { ...panel, ...((video && video.channel_config) || {}) };
@@ -346,6 +366,7 @@ function ownOf(settings, video) {
     own.visibility = settings.schedule === 'times' ? 'SCHEDULE' : settings.visibility;
   }
   if (!own.times && settings.times) own.times = settings.times;
+  if (!networkOn(settings, 'facebook')) own.facebook = false;
   return own;
 }
 
@@ -601,6 +622,22 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
         }
       }
 
+      // The draft exists on YouTube as soon as Studio shows its link. Record it
+      // NOW: if a later step fails (monetization, visibility...), the video is
+      // known as sent with its link, so a retry edits that draft ("Mettre à
+      // jour") instead of uploading the same file a second time.
+      const early = await earlyLink(tabId);
+      if (early) {
+        linkedYoutubeId = early;
+        job = { ...job, youtubeId: early };
+        await chrome.storage.local.set({ pending: job });
+        if (source === 'folder') {
+          await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeId: early, visibility, channel: video.channel_key, hash: video.hash, draft: true } });
+        } else {
+          await api(`/studio-upload/${videoId}/published`, { method: 'POST', body: JSON.stringify({ youtube_video_id: early }) }).catch(() => {});
+        }
+      }
+
       await setJob({ message: 'Visibilité…' });
       await step(tabId, 'chooseVisibility', { visibility, monetization, scheduleAt });
     });
@@ -609,9 +646,10 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
     await finishUpload(job);
   } catch (error) {
     const message = friendly(error);
-    await setJob({ running: false, done: false, error: message, message });
+    const draftNote = linkedYoutubeId ? ` Le brouillon existe déjà sur YouTube (https://studio.youtube.com/video/${linkedYoutubeId}/edit) : termine-le là ou utilise « Mettre à jour », sans renvoyer la vidéo.` : '';
+    await setJob({ running: false, done: false, error: message + draftNote, message: message + draftNote });
     await chrome.storage.local.remove('pending');
-    if (source === 'folder' && !job.social) {
+    if (source === 'folder' && !(job && job.social)) {
       if (marked && !linkedYoutubeId) await folder('mark', { path: video.relative_path, status: 'failed', data: { error: message } }).catch(() => {});
     } else {
       if (!linkedYoutubeId) await api(`/studio-upload/${videoId}/failed`, { method: 'POST', body: JSON.stringify({ error: message }) }).catch(() => {});
@@ -619,6 +657,17 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
   }
 }
 
+
+// Link of the video being uploaded, as soon as the Details page shows it.
+async function earlyLink(tabId, timeout = 60000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    const { youtubeId } = await step(tabId, 'progress').catch(() => ({}));
+    if (youtubeId) return youtubeId;
+    await sleep(1500);
+  }
+  return null;
+}
 
 // Second half of an upload, shared by publish() and resume(): save as soon as
 // Studio has given the video its YouTube link, then keep the Studio tab open
@@ -849,6 +898,76 @@ async function publishFacebookOnly(relativePath, { auto = false } = {}) {
   }
 }
 
+// ---------------------------------------------------------------- TikTok
+
+// TikTok Studio's upload page, in the TikTok tab already open if there is one.
+async function openTikTok() {
+  const tab = await reuseOrOpen(tiktokTabToReuse, 'https://www.tiktok.com/tiktokstudio/upload?from=webapp');
+  const start = Date.now();
+  while (Date.now() - start < 90000) {
+    const current = await chrome.tabs.get(tab.id);
+    const url = current.url || current.pendingUrl || '';
+    if (/\/login|\/signup/.test(url)) throw new Error('Connecte-toi d’abord à TikTok dans ce navigateur, puis relance.');
+    if (url.startsWith('https://www.tiktok.com/') && /upload/.test(url) && current.status === 'complete') {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/page-kit.js', 'tiktok.js'] });
+      return tab.id;
+    }
+    await sleep(700);
+  }
+  throw new Error('TikTok Studio ne s’est pas ouvert.');
+}
+
+// One vertical video to TikTok with its caption.
+async function sendToTikTok({ filePath, caption, title, channel, path }) {
+  await chrome.storage.session.set({ job: { running: true, source: 'tiktok', kind: 'tiktok', path, title, channel, message: 'Ouverture de TikTok Studio…', startedAt: Date.now() } });
+  const tabId = await openTikTok();
+  await whileShown(tabId, async () => {
+    await setJob({ message: 'Envoi de la vidéo à TikTok…' });
+    await stepIn(tabId, '__kappgenTikTok', 'sendVideo', { path: filePath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`) });
+    await setJob({ message: 'Envoi à TikTok (jusqu’à 100 %), puis description…' });
+    await stepIn(tabId, '__kappgenTikTok', 'writeCaption', { caption });
+    await setJob({ message: 'Publication sur TikTok…' });
+    await stepIn(tabId, '__kappgenTikTok', 'post');
+  });
+  closeStudioTab(tabId); // only a tab opened for this post is closed
+}
+
+const hashtags = (tags) => (tags || []).slice(0, 5).map((t) => `#${String(t).replace(/[^\p{L}\p{N}]+/gu, '')}`).filter((t) => t.length > 1).join(' ');
+
+// A video already on YouTube: its vertical version if there is one, otherwise
+// the video itself (TikTok takes horizontal videos too).
+async function publishTikTokVideo(relativePath, { auto = false } = {}) {
+  try {
+    const { sent } = await folderQueue();
+    const video = sent.find((item) => item.relative_path === relativePath);
+    if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
+    const filePath = video.vertical_path || video.relative_path;
+    const caption = [video.title, hashtags(video.tags)].filter(Boolean).join(' ').slice(0, 2200);
+    await sendToTikTok({ filePath, caption, title: video.title, channel: video.channel_name, path: relativePath });
+    await folder('mark', { path: relativePath, status: 'published', data: { tiktokPublishedAt: new Date().toISOString() } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur TikTok.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('mark', { path: relativePath, status: 'published', data: { tiktokError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// A Reel (vertical video) of the posts folder.
+async function publishTikTokPost(postPath) {
+  const post = (await postsList()).find((p) => p.path === postPath);
+  try {
+    if (!post || !post.video_path) throw new Error('Ce post n’a pas de vidéo pour TikTok.');
+    await sendToTikTok({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath });
+    await folder('markPost', { path: postPath, patch: { tiktok: { statut: 'publie', published_at: new Date().toISOString() } } });
+    await setJob({ running: false, done: true, error: null, message: 'Publié sur TikTok.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('markPost', { path: postPath, patch: { tiktok: { statut: 'echec', erreur: message } } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
 // ------------------------------------------------------ Facebook posts
 
 // The Page of a post: its own publication.json / planning.json, otherwise the
@@ -970,7 +1089,7 @@ async function autoTick() {
   if ((await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
   const { videos, sent } = await folderQueue();
   let next = null;
-  for (const candidate of videos.filter((v) => v.auto_ok)) {
+  for (const candidate of networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
       await folder('mark', { path: candidate.relative_path, status: 'ignored', data: { reason: 'déjà sur la chaîne (même titre)' } }).catch(() => {});
       continue;
@@ -987,10 +1106,20 @@ async function autoTick() {
     return;
   }
   // No video to send: a Facebook post whose time has come.
-  const post = await nextDuePost();
+  const post = networkOn(settings, 'facebook') ? await nextDuePost() : null;
   if (post) {
     await publishFacebookPost(post, { auto: true });
     return;
+  }
+  // TikTok, when switched on: videos published on YouTube since then
+  // (vertical version if any, otherwise the video; never retried after a failure).
+  if (settings.tiktokAuto && networkOn(settings, 'tiktok')) {
+    const next = sent.find((v) => v.youtube_id && !v.tiktok_published_at && !v.tiktok_error
+      && v.published_at && v.published_at >= (settings.tiktokSince || Infinity));
+    if (next) {
+      await publishTikTokVideo(next.relative_path, { auto: true });
+      return;
+    }
   }
   // Then a video already on YouTube, for a channel whose Facebook publishing
   // is automatic (videos published on YouTube since it was switched on).
@@ -1003,7 +1132,7 @@ async function autoTick() {
   }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
   let stale = null;
-  for (const v of sent) {
+  for (const v of networkOn(settings, 'youtube') ? sent : []) {
     if (!v.youtube_id || !v.has_content || ownOf(settings, v).auto === false) continue;
     if (!v.applied_hash && !v.force_update) {
       // first time this video is watched: what is on YouTube now is the reference
@@ -1020,6 +1149,19 @@ async function autoTick() {
 // "Chrome connecté" in the app: check in with KappGen every minute.
 function heartbeat() {
   api('/studio-upload/status').catch(() => {});
+  selfUpdate().catch(() => {});
+}
+
+// Unpacked install, several Chrome profiles: each profile keeps running the
+// code it loaded until someone clicks ↻. When the files on disk carry a newer
+// version, reload by ourselves (never in the middle of an upload).
+async function selfUpdate() {
+  const { job } = await chrome.storage.session.get('job');
+  if (job && job.running) return;
+  const { pending } = await chrome.storage.local.get('pending');
+  if (pending) return;
+  const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
+  if (disk.version && disk.version !== chrome.runtime.getManifest().version) chrome.runtime.reload();
 }
 chrome.alarms.create('heartbeat', { periodInMinutes: 1 });
 chrome.alarms.create('auto', { periodInMinutes: AUTO_EVERY_MINUTES });
@@ -1112,6 +1254,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         throw new Error('Ajoute d’abord le lien de ta page Facebook (en haut de l’onglet Facebook).');
       }
       publishFacebookOnly(message.path);
+      return { started: true };
+    },
+    tiktok: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishTikTokVideo(message.path).catch(() => {});
+      return { started: true };
+    },
+    tiktokPost: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishTikTokPost(message.path).catch(() => {});
       return { started: true };
     },
     // The video is on YouTube but its link was not recorded: record it, then

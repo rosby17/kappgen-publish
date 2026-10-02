@@ -472,7 +472,7 @@ const KappDossier = (() => {
     const sentCopies = new Set();
     for (const unit of units) {
       const rec = (await sideFor(unit.node))[unit.video.name] || recordFor(unit.node, pathIn(unit.node, unit.video.name), unit.video.name);
-      if (rec.status === 'published') sentCopies.add(`${unit.video.name}|${unit.video.size}`);
+      if (rec.status === 'published' || rec.status === 'ignored') sentCopies.add(`${unit.video.name}|${unit.video.size}`);
     }
 
     const videos = [];
@@ -489,16 +489,18 @@ const KappDossier = (() => {
       const channelKey = channel.path || `./${tree.name}`;
       const fileConfig = await configFor(channel);
       const channelName = channel.path ? channel.name : tree.name;
-      if (record.status === 'ignored') continue;
-      if (record.status !== 'published' && sentCopies.has(`${video.name}|${video.size}`)) continue;
-      if (record.status !== 'published' && unit.kind === 'vrac' && now - video.modified > LOOSE_MAX_AGE) continue;
+      // "Déjà publiée" (published by hand) counts as sent: it is listed in the
+      // YouTube tab, never sent again, never "updated" (no YouTube link).
+      const isSent = record.status === 'published' || record.status === 'ignored';
+      if (!isSent && sentCopies.has(`${video.name}|${video.size}`)) continue;
+      if (!isSent && unit.kind === 'vrac' && now - video.modified > LOOSE_MAX_AGE) continue;
 
       let sheet = {};
       for (const [owner, names] of unit.sheets) {
         if (owner && names.length) sheet = { ...sheet, ...(await readSheets(owner, names)) };
       }
       // "## Destination" in the sheet without YouTube (e.g. site only): not ours.
-      if (sheet.destination && record.status !== 'published') {
+      if (sheet.destination && !isSent) {
         const d = KappFiches.plain(sheet.destination);
         const notYoutube = !/youtube/.test(d) || /\b(non|pas|jamais|sans|not|no)\b[^.\n]{0,40}youtube/.test(d)
           || /\b(site|facebook|tiktok|instagram)\b[^.\n]{0,40}\b(uniquement|seulement|only|exclusi)/.test(d);
@@ -509,8 +511,8 @@ const KappDossier = (() => {
       // What YouTube should show: changes to it are applied automatically.
       // Independent of the chosen folder: only the thumbnail's own name counts.
       const hash = hashOf([sheet.title, sheet.description, (sheet.tags || []).join(','), thumb && thumb.path.split('/').pop(), thumb && thumb.size, thumb && thumb.modified]);
-      if (record.status === 'published') {
-        sent.push({ relative_path: relativePath, channel_key: channelKey, channel_name: channelName, size_bytes: video.size,
+      if (isSent) {
+        sent.push({ manual: record.status === 'ignored', relative_path: relativePath, channel_key: channelKey, channel_name: channelName, size_bytes: video.size,
           youtube_id: record.youtubeId || null, date: record.date,
           title: sheet.title ? KappFiches.clean(sheet.title, 100) : null,
           description: KappFiches.clean(sheet.description, 5000),
@@ -523,6 +525,7 @@ const KappDossier = (() => {
           vertical_path: vertical && vertical.path, vertical_size_bytes: vertical && vertical.size,
           short_youtube_id: record.shortYoutubeId || null, facebook_published_at: record.facebookPublishedAt || null,
           facebook_error: record.facebookError || null, published_at: record.publishedAt || null,
+          tiktok_published_at: record.tiktokPublishedAt || null, tiktok_error: record.tiktokError || null,
           channel_config: fileConfig });
         continue;
       }
@@ -647,6 +650,8 @@ const KappDossier = (() => {
         if (data.forceUpdate) { record.forceUpdate = true; delete record.appliedHash; delete record.updateTriedHash; delete record.updateError; }
         if (data.facebookPublishedAt) { record.facebookPublishedAt = data.facebookPublishedAt; delete record.facebookError; }
         if (data.facebookError) record.facebookError = data.facebookError;
+        if (data.tiktokPublishedAt) { record.tiktokPublishedAt = data.tiktokPublishedAt; delete record.tiktokError; }
+        if (data.tiktokError) record.tiktokError = data.tiktokError;
       }
       if (status === 'failed') record.error = data.error || 'Erreur inconnue';
       state[relativePath] = record;
@@ -759,7 +764,6 @@ const KappDossier = (() => {
 
   async function facebookPosts({ now = Date.now(), times = '' } = {}) {
     const posts = [];
-    const unscheduled = [];
     for (const dirInfo of await postDirs()) {
       const postDir = dirInfo.handle;
       const name = dirInfo.name;
@@ -801,40 +805,18 @@ const KappDossier = (() => {
         error: info.erreur || null,
         started_at: info.started_at || null,
         published_at: info.published_at || null,
+        tiktok_statut: (info.tiktok && info.tiktok.statut) || null,
+        tiktok_error: (info.tiktok && info.tiktok.erreur) || null,
       };
-      if (!due && statut === 'a_publier') unscheduled.push(post);
       posts.push(post);
     }
-    // Posting times are required: each new post takes the next free time.
-    const slots = slotsFrom(times);
-    if (slots.length && unscheduled.length) {
-      const taken = new Set(posts.filter((p) => p.due_at).map((p) => p.due_at));
-      const start = new Date(now);
-      unscheduled.sort((x, y) => x.path.localeCompare(y.path));
-      let day = 0;
-      let index = 0;
-      for (const post of unscheduled) {
-        for (;;) {
-          if (index >= slots.length) { index = 0; day += 1; }
-          const [h, m] = slots[index];
-          index += 1;
-          const at = new Date(start.getFullYear(), start.getMonth(), start.getDate() + day, h, m).getTime();
-          if (at <= now || taken.has(at)) continue;
-          taken.add(at);
-          post.due_at = at;
-          break;
-        }
-        const d = new Date(post.due_at);
-        const pad = (n) => String(n).padStart(2, '0');
-        await markPost(post.path, { date_locale: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-          heure_prevue: `${pad(d.getHours())}:${pad(d.getMinutes())}`, statut: 'a_publier', horaire: 'automatique' }).catch(() => {});
-      }
-    }
+    // The time of a post is the one written in it (publication.json or the
+    // folder name, set by whoever prepares the post). Without one, it goes now.
     for (const post of posts) {
-      post.needs_times = !post.due_at && post.statut === 'a_publier';
-      post.ready = post.statut === 'a_publier' && !!post.due_at && post.due_at <= now && !!(post.text || post.image_path || post.video_path);
+      post.needs_times = false;
+      post.ready = post.statut === 'a_publier' && (!post.due_at || post.due_at <= now) && !!(post.text || post.image_path || post.video_path);
     }
-    posts.sort((a, b) => (a.due_at || Infinity) - (b.due_at || Infinity) || a.path.localeCompare(b.path));
+    posts.sort((a, b) => (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
     return posts;
   }
 

@@ -82,16 +82,32 @@
     }
     const trigger = dropdown || (section && section.querySelector('#child-input, ytcp-dropdown-trigger, [role="button"]'));
     if (!trigger) throw new Error('YouTube Studio : menu « Monétisation » introuvable.');
+    // Studio's dropdown opens on a pointer press, and its choices are not always
+    // radio buttons ("On" / "Off" can be plain menu items with a description).
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) trigger.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
     click(trigger);
-    const choice = mode === 'on' ? /^(On|Activ[ée]e?)$/i : /^(Off|D[ée]sactiv[ée]e?)$/i;
-    const option = await waitFor(
-      () => document.querySelector(`tp-yt-paper-radio-button#radio-${mode}`) || findByText('tp-yt-paper-radio-button, [role="radio"], [role="option"], tp-yt-paper-item', choice),
-      { timeout: 15000, what: 'le choix de monétisation' },
-    );
+    const wanted = mode === 'on' ? /^(On|Activ[ée]e?)\b/i : /^(Off|D[ée]sactiv[ée]e?)\b/i;
+    const CHOICES = 'tp-yt-paper-radio-button, [role="radio"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="listitem"], tp-yt-paper-item, ytcp-text-menu *, tp-yt-paper-listbox *, ytcp-form-select-item, li';
+    const findChoice = () => {
+      const exact = document.querySelector(`tp-yt-paper-radio-button#radio-${mode}`);
+      if (exact && visible(exact)) return exact;
+      const hits = [...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && wanted.test(textOf(n)) && textOf(n).length < 200);
+      // the innermost match is the item itself, not a list that contains it
+      return hits.find((n) => !hits.some((o) => o !== n && n.contains(o))) || null;
+    };
+    let option;
+    try {
+      option = await waitFor(findChoice, { timeout: 15000, what: 'le choix de monétisation' });
+    } catch (error) {
+      const seen = [...new Set([...document.querySelectorAll(CHOICES)].filter(visible).map(textOf).filter((t) => t && t.length < 80))].slice(0, 8);
+      throw new Error(`${error.message} Choix visibles : ${seen.join(' | ') || 'aucun'}.`);
+    }
     click(option);
     await sleep(600);
-    const done = await waitFor(() => findByText(BUTTONS, /^(Done|OK|Termin[ée]|Valider|Enregistrer|Save)$/i), { timeout: 10000, what: 'le bouton Terminé' });
-    click(done);
+    // Older Studio: a small dialog with "Done". Current Studio: the choice sticks
+    // and the dialog's own "Next" (clicked by chooseVisibility) moves on.
+    const done = await waitFor(() => findByText(BUTTONS, /^(Done|OK|Termin[ée]|Valider|Enregistrer|Save)$/i), { timeout: 4000, what: 'le bouton Terminé' }).catch(() => null);
+    if (done) click(done);
     await sleep(1500);
     return true;
   }
