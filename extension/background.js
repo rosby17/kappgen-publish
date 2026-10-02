@@ -61,7 +61,7 @@ async function setJob(patch) {
 
 // The day's publications, on this computer's clock; sent once in the evening
 // (21:00) to creators who ticked « Bilan du soir par mail » (off by default).
-const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram']);
+const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram', 'x']);
 const REPORT_HOUR = 21;
 const pad2 = (n) => String(n).padStart(2, '0');
 const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -262,6 +262,22 @@ async function stepIn(tabId, namespace, name, args) {
   return result.value;
 }
 
+// sendPost / publish: when the page reloads right after « Publier » (no
+// answer from the script), the mark left in the tab tells it was clicked.
+async function postStep(tabId, name, args) {
+  try { await chrome.scripting.executeScript({ target: { tabId }, func: () => sessionStorage.removeItem('kappgenPublishClicked') }); } catch { /* checked below */ }
+  try {
+    return await step(tabId, name, args);
+  } catch (error) {
+    if (!/impossible\.$/.test(String(error.message))) throw error;
+    await sleep(4000);
+    const [{ result } = {}] = await chrome.scripting.executeScript({ target: { tabId },
+      func: () => Number(sessionStorage.getItem('kappgenPublishClicked') || 0) }).catch(() => [{}]);
+    if (result && Date.now() - result < 30 * 60000) return { groups: [], extra: [], reloaded: true };
+    throw error;
+  }
+}
+
 async function step(tabId, name, args) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
@@ -281,6 +297,7 @@ async function step(tabId, name, args) {
 // Chrome's own messages ("Frame with ID 0 is showing error page"...) mean
 // nothing to a creator; say what actually went wrong instead.
 function friendly(error) {
+  if (cancelRequested) { cancelRequested = false; return 'Publication annulée.'; }
   const message = String((error && error.message) || error);
   if (/error page|ERR_|Cannot access contents|No tab with id/i.test(message)) {
     return 'La page (YouTube Studio, Facebook…) n’a pas pu se charger (connexion Internet ?) ou l’onglet a été fermé. Relance l’envoi.';
@@ -325,6 +342,7 @@ async function tabToReuse(pattern, patterns) {
 }
 const tiktokTabToReuse = () => tabToReuse(/^https:\/\/www\.tiktok\.com\//, ['https://www.tiktok.com/*']);
 const instagramTabToReuse = () => tabToReuse(/^https:\/\/www\.instagram\.com\//, ['https://www.instagram.com/*']);
+const xTabToReuse = () => tabToReuse(/^https:\/\/(x|twitter)\.com\//, ['https://x.com/*', 'https://twitter.com/*']);
 const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
 const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
   ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
@@ -392,13 +410,18 @@ async function setLocalFile(tabId, selector, path) {
 // Studio only moves through its upload dialog while its tab is shown (a
 // hidden tab gets no animation frames). Show it for the few seconds the
 // dialog needs, then give the user back the tab they were on.
+// The tab a publication is working in, so « Annuler » can stop it.
+let workTabId = null;
+let cancelRequested = false;
 async function whileShown(tabId, fn) {
+  workTabId = tabId;
   const tab = await chrome.tabs.get(tabId);
   const [previous] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
   await chrome.tabs.update(tabId, { active: true });
   try {
     return await fn();
   } finally {
+    if (workTabId === tabId) workTabId = null;
     if (previous && previous.id !== tabId) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
   }
 }
@@ -410,7 +433,12 @@ async function whileShown(tabId, fn) {
 // channel's own file (reglages-publication.json), never by the panel.
 // Networks the creator switched off in the panel's « Réseaux » tab: nothing is
 // sent to them, automatically or by a click (YouTube, Facebook, TikTok...).
-const networkOn = (settings, name) => ((settings && settings.networks) || {})[name] !== false;
+// Networks on unless unticked; the newer ones (X…) only once ticked.
+const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);
+const networkOn = (settings, name) => {
+  const value = ((settings && settings.networks) || {})[name];
+  return value === undefined ? DEFAULT_ON.has(name) : value !== false;
+};
 
 function ownOf(settings, video) {
   const { facebook, ...panel } = (settings.channels || {})[video.channel_key] || {};
@@ -422,6 +450,11 @@ function ownOf(settings, video) {
     own.visibility = settings.schedule === 'times' ? 'SCHEDULE' : settings.visibility;
   }
   if (!own.times && settings.times) own.times = settings.times;
+  // YouTube videos and Shorts also go to the Facebook Page (panel switch,
+  // on by default, for videos published from the moment it was switched on),
+  // unless the channel's own folder settings say otherwise.
+  if (own.facebook === undefined) own.facebook = settings.facebookFromYoutube !== false;
+  if (!own.facebookSince) own.facebookSince = settings.facebookFromYoutubeSince || Date.now();
   if (!networkOn(settings, 'facebook')) own.facebook = false;
   return own;
 }
@@ -546,7 +579,7 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
       // Only the catchy title of the YouTube video goes with it on Facebook.
       await step(tabId, 'fillCaption', { caption: (video.title || '').slice(0, 500) });
       await setJob({ message: 'Envoi de la vidéo à Facebook, puis publication (peut prendre plusieurs minutes)…' });
-      await step(tabId, 'sendPost', { timeout: 15 * 60000 });
+      await postStep(tabId, 'sendPost', { timeout: 15 * 60000 });
     });
     return true;
   }
@@ -562,7 +595,7 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
       // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
       const caption = (video.title || video.description || '').slice(0, 5000);
       await step(tabId, 'fillCaption', { caption });
-      picked = await step(tabId, 'publish', { groups, groupCount });
+      picked = await postStep(tabId, 'publish', { groups, groupCount });
     });
     return picked;
   } finally {
@@ -969,22 +1002,29 @@ async function updateVideo(relativePath, auto = false) {
 // Publish only the detected Facebook derivative. This is deliberately an
 // explicit action from the Facebook tab because it opens Facebook and posts
 // externally; detecting a reel file must not publish it silently.
-async function publishFacebookOnly(relativePath, { auto = false } = {}) {
+// A YouTube video on the Facebook Page: `as` "video" = the long video as a
+// video post, "reel" = its Short (vertical version) as a Reel.
+async function publishFacebookOnly(relativePath, { auto = false, as = null } = {}) {
   await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'facebook', path: relativePath, auto, message: 'Préparation de la publication Facebook…', startedAt: Date.now() } });
+  let reel = as === 'reel';
   try {
     const { sent } = await folderQueue();
     const video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo longue doit d’abord être publiée sur YouTube.');
     const own = ownOf(await folderSettings(), video);
-    const file = own.facebookMode !== 'video' && video.vertical_path ? video.vertical_path : video.relative_path;
-    await setJob({ title: video.title, message: 'Ouverture de Facebook…' });
+    // Without `as` (the « Publier » button): the Short as a Reel if there is one, else the video.
+    if (as === null) reel = own.facebookMode !== 'video' && !!video.vertical_path;
+    if (reel && !video.vertical_path) throw new Error('Pas de version verticale (short.mp4) pour un Réel.');
+    const file = reel ? video.vertical_path : video.relative_path;
+    await setJob({ title: video.title, message: reel ? 'Réel sur Facebook…' : 'Vidéo sur Facebook…' });
     await publishFacebookReel(video, video.channel_name, own.facebookPageUrl, file);
-    await folder('mark', { path: relativePath, status: 'published', data: { facebookPublishedAt: new Date().toISOString() } });
-    await setJob({ running: false, done: true, error: null, message: 'Publiée sur Facebook.' });
+    const at = new Date().toISOString();
+    await folder('mark', { path: relativePath, status: 'published', data: reel ? { facebookReelAt: at } : { facebookPublishedAt: at } });
+    await setJob({ running: false, done: true, error: null, message: reel ? 'Réel publié sur Facebook.' : 'Vidéo publiée sur Facebook.' });
   } catch (error) {
     const message = friendly(error);
     // Not retried on its own (never a double post): the panel offers « Réessayer ».
-    await folder('mark', { path: relativePath, status: 'published', data: { facebookError: message } }).catch(() => {});
+    await folder('mark', { path: relativePath, status: 'published', data: reel ? { facebookReelError: message } : { facebookError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1041,6 +1081,89 @@ async function publishTikTokVideo(relativePath, { auto = false, long = false } =
   } catch (error) {
     const message = friendly(error);
     await folder('mark', { path: relativePath, status: 'published', data: { tiktokError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// ---------------------------------------------------------------- X
+
+// X's « new post » window, in the X tab already open if there is one.
+async function openX() {
+  const tab = await reuseOrOpen(xTabToReuse, 'https://x.com/compose/post');
+  const start = Date.now();
+  while (Date.now() - start < 90000) {
+    const current = await chrome.tabs.get(tab.id);
+    const url = current.url || current.pendingUrl || '';
+    if (/\/login|\/i\/flow\/(login|signup)|\/logout/.test(url)) throw new Error('Connecte-toi d’abord à X dans ce navigateur, puis relance.');
+    if (/^https:\/\/(x|twitter)\.com\//.test(url) && current.status === 'complete') {
+      if (!/\/compose\/post/.test(url)) {
+        await chrome.tabs.update(tab.id, { url: 'https://x.com/compose/post' });
+        await sleep(2500);
+        continue;
+      }
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/page-kit.js', 'x.js'] });
+      return tab.id;
+    }
+    await sleep(700);
+  }
+  throw new Error('X ne s’est pas ouvert.');
+}
+
+// 280 characters for a normal X account: the text is cut cleanly, a link kept whole.
+function xText(text, link = '') {
+  const room = 280 - (link ? 25 : 0);
+  let body = String(text || '').trim();
+  if (body.length > room) body = `${body.slice(0, room - 1).replace(/\s+\S*$/, '')}…`;
+  return link ? `${body}\n\n${link}` : body;
+}
+
+async function sendToX({ text, mediaPath, title, channel, path }) {
+  await chrome.storage.session.set({ job: { running: true, source: 'x', kind: 'x', path, title, channel, message: 'Ouverture de X…', startedAt: Date.now() } });
+  const tabId = await openX();
+  await whileShown(tabId, async () => {
+    await setJob({ message: 'Texte du post…' });
+    await stepIn(tabId, '__kappgenX', 'writePost', { text });
+    if (mediaPath) {
+      await setJob({ message: 'Envoi du média à X…' });
+      await stepIn(tabId, '__kappgenX', 'addMedia', { path: mediaPath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(mediaPath)}`) });
+      await sleep(3000);
+    }
+    await setJob({ message: 'Publication sur X…' });
+    await stepIn(tabId, '__kappgenX', 'send');
+  });
+  closeStudioTab(tabId); // only a tab opened for this post is closed
+}
+
+// A video already on YouTube: its title and link, with its Short attached
+// when there is one (X takes short videos; the long one stays a link).
+async function publishXVideo(relativePath, { auto = false } = {}) {
+  try {
+    const { sent } = await folderQueue();
+    const video = sent.find((item) => item.relative_path === relativePath);
+    if (!video || !video.youtube_id) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
+    await sendToX({ text: xText(video.title, `https://youtu.be/${video.youtube_id}`), mediaPath: video.vertical_path || null,
+      title: video.title, channel: video.channel_name, path: relativePath });
+    await folder('mark', { path: relativePath, status: 'published', data: { xPublishedAt: new Date().toISOString() } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur X.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('mark', { path: relativePath, status: 'published', data: { xError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// A post of the posts folder: its text, and its photo or video.
+async function publishXPost(postPath, { auto = false } = {}) {
+  const post = (await postsList()).find((p) => p.path === postPath);
+  try {
+    if (!post) throw new Error('Post introuvable (déplacé ?).');
+    await sendToX({ text: xText(post.text), mediaPath: post.video_path || post.image_path || null,
+      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath });
+    await folder('markPost', { path: postPath, patch: { x: { statut: 'publie', published_at: new Date().toISOString() } } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur X.' });
+  } catch (error) {
+    const message = friendly(error);
+    await folder('markPost', { path: postPath, patch: { x: { statut: 'echec', erreur: message } } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1184,7 +1307,7 @@ async function publishFacebookPost(post, { auto = false } = {}) {
         await setJob({ message: 'Texte…' });
         await step(tabId, 'fillCaption', { caption: post.text });
         await setJob({ message: count ? `Publication sur la Page et dans ${count} groupe(s)…` : 'Publication…' });
-        markDuring(await step(tabId, 'sendPost', { groups: during.map((url) => names[url]), groupCount: count }));
+        markDuring(await postStep(tabId, 'sendPost', { groups: during.map((url) => names[url]), groupCount: count }));
       });
       closeStudioTab(tabId); // only a tab opened for this post is closed
     }
@@ -1397,7 +1520,7 @@ async function shareInGroups(post) {
           await sleep(post.video_path ? 3000 : 2500);
         }
         await step(tabId, 'fillCaption', { caption: post.text });
-        await step(tabId, 'sendPost', { timeout: post.video_path ? 15 * 60000 : 90000 });
+        await postStep(tabId, 'sendPost', { timeout: post.video_path ? 15 * 60000 : 90000 });
       });
       done[url] = { statut: 'publie', published_at: new Date().toISOString() };
       ok += 1;
@@ -1608,14 +1731,31 @@ async function autoPass() {
       return;
     }
   }
+  // X, when ticked in « Réseaux utilisés »: what is published from then on
+  // (YouTube videos, then the posts already out on Facebook), never retried
+  // on its own after a failure.
+  if (networkOn(settings, 'x') && settings.xSince) {
+    const xNext = sent.find((v) => v.youtube_id && !v.x_published_at && !v.x_error && v.published_at && v.published_at >= settings.xSince);
+    if (xNext) { await publishXVideo(xNext.relative_path, { auto: true }); return; }
+    const xPost = (await postsList().catch(() => [])).find((p) => p.statut === 'publie' && !p.x_statut
+      && p.published_at && Date.parse(p.published_at) >= settings.xSince);
+    if (xPost) { await publishXPost(xPost.path, { auto: true }); return; }
+  }
   // Then a video already on YouTube, for a channel whose Facebook publishing
   // is automatic (videos published on YouTube since it was switched on).
+  // (the long video as a video post, then its Short as a Reel).
   for (const v of sent) {
     const own = ownOf(settings, v);
-    if (!own.facebook || !own.facebookPageUrl || v.facebook_published_at || v.facebook_error || !v.youtube_id) continue;
+    if (!own.facebook || !own.facebookPageUrl || !v.youtube_id) continue;
     if (!v.published_at || v.published_at < (own.facebookSince || 0)) continue;
-    await publishFacebookOnly(v.relative_path, { auto: true });
-    return;
+    if (!v.facebook_published_at && !v.facebook_error) {
+      await publishFacebookOnly(v.relative_path, { auto: true, as: 'video' });
+      return;
+    }
+    if (v.vertical_path && v.short_youtube_id && !v.facebook_reel_at && !v.facebook_reel_error) {
+      await publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' });
+      return;
+    }
   }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
   let stale = null;
@@ -1704,6 +1844,15 @@ async function selfUpdate() {
   const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
   if (disk.version && disk.version !== chrome.runtime.getManifest().version) chrome.runtime.reload();
 }
+// YouTube → Facebook switch: on by default, for videos published from now on
+// (never the whole older catalogue at once).
+(async () => {
+  const settings = await folderSettings().catch(() => null);
+  if (settings && !settings.facebookFromYoutubeSince) {
+    settings.facebookFromYoutubeSince = Date.now();
+    await chrome.storage.local.set({ folder: settings });
+  }
+})();
 ensureAlarms().catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'heartbeat') heartbeat();
@@ -1826,7 +1975,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (video && !ownOf(await folderSettings(), video).facebookPageUrl) {
         throw new Error('Ajoute d’abord le lien de ta page Facebook (en haut de l’onglet Facebook).');
       }
-      publishFacebookOnly(message.path);
+      publishFacebookOnly(message.path, { as: message.as === 'reel' || message.as === 'video' ? message.as : null });
+      return { started: true };
+    },
+    x: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishXVideo(message.path).catch(() => {});
+      return { started: true };
+    },
+    xPost: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishXPost(message.path).catch(() => {});
       return { started: true };
     },
     tiktok: async () => {
@@ -1890,6 +2053,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return { started: true };
     },
     // A job that never finished (tab closed, Facebook stuck) must not block everything.
+    // « Annuler »: the work tab is stopped (reloaded if it is the creator's own,
+    // closed otherwise), so the running step ends at once; the publication is
+    // marked « Publication annulée. » and never sent again on its own.
+    cancelJob: async () => {
+      cancelRequested = true;
+      if (workTabId) {
+        if ((await borrowedTabs()).has(workTabId)) await chrome.tabs.reload(workTabId).catch(() => {});
+        else await chrome.tabs.remove(workTabId).catch(() => {});
+      }
+      await chrome.storage.local.remove('pending');
+      // Safety net: a step that does not end by itself is closed after 15 s.
+      setTimeout(async () => {
+        const { job } = await chrome.storage.session.get('job');
+        if (job && job.running) await setJob({ running: false, done: false, error: 'Publication annulée.', message: 'Publication annulée.' });
+        cancelRequested = false;
+      }, 15000);
+      return {};
+    },
     unblockJob: async () => {
       await chrome.storage.session.set({ job: { running: false, done: false, error: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.', message: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.' } });
       return {};

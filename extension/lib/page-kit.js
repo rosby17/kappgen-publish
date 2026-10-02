@@ -52,7 +52,7 @@
   // Text of an element without what was typed in it (a title may hold « 50 % »).
   function ownText(root) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) => (node.parentElement && node.parentElement.closest('[contenteditable="true"], textarea, input') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      acceptNode: (node) => (node.parentElement && node.parentElement.closest('[contenteditable="true"], textarea, input, script, style, noscript') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     let text = '';
     while (walker.nextNode()) text += ` ${walker.currentNode.nodeValue}`;

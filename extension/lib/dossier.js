@@ -534,6 +534,8 @@ const KappDossier = (() => {
           tiktok_published_at: record.tiktokPublishedAt || null, tiktok_error: record.tiktokError || null,
           instagram_published_at: record.instagramPublishedAt || null, instagram_error: record.instagramError || null,
           short_error: record.shortError || null,
+          facebook_reel_at: record.facebookReelAt || null, facebook_reel_error: record.facebookReelError || null,
+          x_published_at: record.xPublishedAt || null, x_error: record.xError || null,
           channel_config: fileConfig });
         continue;
       }
@@ -659,6 +661,10 @@ const KappDossier = (() => {
         if (data.forceUpdate) { record.forceUpdate = true; delete record.appliedHash; delete record.updateTriedHash; delete record.updateError; }
         if (data.facebookPublishedAt) { record.facebookPublishedAt = data.facebookPublishedAt; delete record.facebookError; }
         if (data.facebookError) record.facebookError = data.facebookError;
+        if (data.facebookReelAt) { record.facebookReelAt = data.facebookReelAt; delete record.facebookReelError; }
+        if (data.facebookReelError) record.facebookReelError = data.facebookReelError;
+        if (data.xPublishedAt) { record.xPublishedAt = data.xPublishedAt; delete record.xError; }
+        if (data.xError) record.xError = data.xError;
         if (data.tiktokPublishedAt) { record.tiktokPublishedAt = data.tiktokPublishedAt; delete record.tiktokError; }
         if (data.tiktokError) record.tiktokError = data.tiktokError;
         if (data.instagramPublishedAt) { record.instagramPublishedAt = data.instagramPublishedAt; delete record.instagramError; }
@@ -818,6 +824,8 @@ const KappDossier = (() => {
         published_at: info.published_at || null,
         tiktok_statut: (info.tiktok && info.tiktok.statut) || null,
         tiktok_error: (info.tiktok && info.tiktok.erreur) || null,
+        x_statut: (info.x && info.x.statut) || null,
+        x_error: (info.x && info.x.erreur) || null,
         instagram_statut: (info.instagram && info.instagram.statut) || null,
         instagram_error: (info.instagram && info.instagram.erreur) || null,
         // Facebook groups: "groupes" in publication.json overrides the panel's
