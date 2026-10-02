@@ -124,12 +124,12 @@
 
   <section id="setup" class="card setup-card" hidden>
     <h2>Bienvenue ! Pour commencer</h2>
-    <p class="small muted">Deux réglages, une seule fois, et tes publications partent toutes seules.</p>
+    <p class="small muted">À faire une seule fois. Clique sur une étape pour y aller.</p>
     <ol class="setup-steps">
-      <li id="setup-folder"><span class="setup-dot"></span><span>Choisis le <strong>dossier de tes vidéos</strong> et clique « Autoriser à chaque visite »</span></li>
-      <li id="setup-pages"><span class="setup-dot"></span><span>Colle le <strong>lien de ta chaîne YouTube</strong> et de tes autres pages</span></li>
+      <li><button type="button" id="setup-folder" data-target="set-folder"><span class="setup-num">1</span><span class="setup-text"><strong>Dossier de tes vidéos</strong><small>Choisis-le, puis « Autoriser à chaque visite »</small></span><span class="setup-state"></span></button></li>
+      <li><button type="button" id="setup-fb" data-target="set-fb-folder"><span class="setup-num">2</span><span class="setup-text"><strong>Dossier de tes posts Facebook</strong><small>Facultatif : textes, photos et Reels</small></span><span class="setup-state"></span></button></li>
+      <li><button type="button" id="setup-pages" data-target="set-pages"><span class="setup-num">3</span><span class="setup-text"><strong>Liens de tes pages</strong><small>Ta chaîne YouTube, ta page Facebook…</small></span><span class="setup-state"></span></button></li>
     </ol>
-    <button id="setup-go" class="btn primary wide">Ouvrir les réglages</button>
   </section>
 
   <nav class="topbar" aria-label="Réglages et aide">
@@ -241,7 +241,7 @@
       <p class="small">KappGen publie <strong>comme toi, dans ce Chrome</strong> : il ouvre YouTube Studio, Facebook, TikTok… et remplit les champs à ta place. Il ne passe pas par une API ni par un mot de passe. <strong>Chaque compte doit donc être ouvert et connecté dans ce même Chrome</strong> (ce profil) : une page non connectée ici ne peut pas recevoir de publication.</p>
     </section>
 
-    <section class="card">
+    <section class="card" id="set-folder">
       <h2>Dossier des vidéos YouTube</h2>
       <p class="small muted folder-what">Tes vidéos longues finies, une par dossier (vidéo + miniature + texte). Elles partent sur YouTube, puis, si tu veux, sur Facebook et TikTok.</p>
       <div id="folder-chosen" class="chosen" hidden>
@@ -255,7 +255,7 @@
       </div>
       <p id="folder-hint" class="muted small">Choisis le dossier <code>YOUTUBE</code> (toutes tes chaînes) ou le dossier d’une chaîne.</p>
     </section>
-    <section class="card">
+    <section class="card" id="set-fb-folder">
       <h2>Dossier des posts (Facebook, TikTok, Instagram)</h2>
       <p class="small muted folder-what">Tes publications courtes : <strong>textes</strong>, <strong>photos</strong> et <strong>vidéos courtes / Reels</strong>. Un sous-dossier par post, avec un fichier texte et, si besoin, une image ou une vidéo. Les textes et photos partent sur Facebook ; les vidéos sur Facebook, TikTok et Instagram.</p>
       <div id="fb-folder-chosen" class="chosen" hidden>
@@ -271,7 +271,7 @@
       <p id="fb-folder-hint" class="muted small">L’heure de chaque post est celle écrite dans son dossier ; un post sans heure part tout de suite.</p>
     </section>
 
-    <section class="card">
+    <section class="card" id="set-pages">
       <div class="field-head"><h2>Tes pages et comptes</h2><span id="pages-state" class="pill warn"></span></div>
       <p class="small muted">Colle le lien de chaque page ou compte où publier. Ouvre-le une fois dans ce Chrome pour vérifier que tu y es bien connecté.</p>
       <div id="pages" class="pages"></div>

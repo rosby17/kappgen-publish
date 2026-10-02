@@ -186,7 +186,6 @@ for (const tab of document.querySelectorAll('nav [data-tab]')) {
   tab.addEventListener('click', () => {
     for (const other of document.querySelectorAll('nav [data-tab]')) other.classList.toggle('active', other === tab);
     for (const pane of document.querySelectorAll('.tab')) pane.hidden = pane.id !== `tab-${tab.dataset.tab}`;
-    $('setup-go').hidden = tab.dataset.tab === 'settings';
   });
 }
 
@@ -199,15 +198,28 @@ async function renderSetup() {
   const config = await settings();
   const folderOk = (await KappDossier.access()).state === 'granted';
   const pagesOk = PAGE_FIELDS.filter(([name]) => networkIsOn(config, name)).every(([name]) => pageUrlOf(config, name));
+  const fbOk = (await KappDossier.fbAccess().catch(() => ({}))).state === 'granted';
   $('setup-folder').classList.toggle('done', folderOk);
+  $('setup-fb').classList.toggle('done', fbOk);
   $('setup-pages').classList.toggle('done', pagesOk);
+  // The posts folder is optional: the card goes once the videos folder and the links are set.
   $('setup').hidden = folderOk && pagesOk;
   if (!folderOk && !setupOpened) {
     setupOpened = true;
     document.querySelector('.topbar [data-tab="settings"]').click();
   }
 }
-$('setup-go').addEventListener('click', () => document.querySelector('.topbar [data-tab="settings"]').click());
+// Each step opens the settings right on its own card, which lights up briefly.
+for (const stepButton of document.querySelectorAll('.setup-steps button')) {
+  stepButton.addEventListener('click', () => {
+    document.querySelector('.topbar [data-tab="settings"]').click();
+    const target = $(stepButton.dataset.target);
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.remove('flash');
+    void target.offsetWidth;
+    target.classList.add('flash');
+  });
+}
 
 // ---------------------------------------------------------------- folder
 
@@ -772,6 +784,7 @@ $('fb-groups-on').addEventListener('change', async () => {
 
 async function renderPosts() {
   renderGroups().catch(() => {});
+  renderSetup().catch(() => {});
   const access = await renderFbAccess();
   const reply = await send({ type: 'facebookPosts' });
   const posts = reply && reply.ok ? reply.data : [];
