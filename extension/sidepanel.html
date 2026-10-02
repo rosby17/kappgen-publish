@@ -129,8 +129,8 @@
     <h2>Bienvenue ! Pour commencer</h2>
     <p class="small muted">À faire une seule fois. Clique sur une étape pour y aller.</p>
     <ol class="setup-steps">
-      <li><button type="button" id="setup-folder" data-target="set-folder"><span class="setup-num">1</span><span class="setup-text"><strong>Dossier de tes vidéos</strong><small>Choisis-le, puis « Autoriser à chaque visite »</small></span><span class="setup-state"></span></button></li>
-      <li><button type="button" id="setup-fb" data-target="set-fb-folder"><span class="setup-num">2</span><span class="setup-text"><strong>Dossier de tes posts Facebook</strong><small>Facultatif : textes, photos et Reels</small></span><span class="setup-state"></span></button></li>
+      <li><button type="button" id="setup-folder" data-target="set-folder"><span class="setup-num">1</span><span class="setup-text"><strong>Ton dossier principal</strong><small>Choisis-le, puis « Autoriser à chaque visite »</small></span><span class="setup-state"></span></button></li>
+      <li><button type="button" id="setup-fb" data-target="set-net-folders"><span class="setup-num">2</span><span class="setup-text"><strong>Un dossier par réseau</strong><small>Facultatif : sinon le dossier principal sert à tous</small></span><span class="setup-state"></span></button></li>
       <li><button type="button" id="setup-pages" data-target="set-pages"><span class="setup-num">3</span><span class="setup-text"><strong>Liens de tes pages</strong><small>Ta chaîne YouTube, ta page Facebook…</small></span><span class="setup-state"></span></button></li>
     </ol>
   </section>
@@ -197,21 +197,29 @@
   <div id="tab-facebook" class="tab" hidden>
     <details class="card tab-settings" id="fb-settings">
       <summary>Réglages Facebook <span id="fb-groups-state" class="pill neutral"></span></summary>
-      <label class="check-line small"><input type="checkbox" id="fb-from-yt"> Publier aussi mes vidéos YouTube sur ma Page (la vidéo, et son Short en Réel)</label>
-      <label class="check-line small"><input type="checkbox" id="fb-groups-on"> Partager aussi mes posts Facebook dans des groupes</label>
-      <div id="fb-groups-more" hidden>
-        <div class="groups-per">
-          <label class="small" for="fb-groups-per">Nombre de groupes par post (9 au plus par publication)</label>
-          <input id="fb-groups-per" type="number" min="1" max="25" value="9">
+      <label class="set-row">
+        <span class="set-text"><strong>Mes vidéos YouTube sur ma Page</strong><small>La vidéo, et son Short en Réel</small></span>
+        <span class="switch"><input type="checkbox" id="fb-from-yt"><span></span></span>
+      </label>
+      <label class="set-row">
+        <span class="set-text"><strong>Partager mes posts dans des groupes</strong><small>Cochés au hasard au moment de publier</small></span>
+        <span class="switch"><input type="checkbox" id="fb-groups-on"><span></span></span>
+      </label>
+      <div id="fb-groups-more" class="set-sub" hidden>
+        <div class="set-row">
+          <span class="set-text"><strong>Groupes par post</strong><small>9 au plus par publication</small></span>
+          <span class="stepper"><button type="button" id="fb-groups-less" aria-label="Moins">−</button><input id="fb-groups-per" type="number" min="1" max="25" value="9" aria-label="Groupes par post"><button type="button" id="fb-groups-plus" aria-label="Plus">+</button></span>
         </div>
-        <p class="small muted">Cochés au hasard parmi tes groupes, à la publication.</p>
-        <details class="mini-details">
-          <summary>Groupes préférés (facultatif, <span id="fb-groups-count">0</span>)</summary>
-          <p class="small muted">Cochés en priorité. « Trouver mes groupes » les charge, ou colle leurs liens, un par ligne.</p>
-          <textarea id="fb-groups" rows="4" placeholder="https://www.facebook.com/groups/mon-groupe"></textarea>
-          <div class="groups-actions"><button id="fb-groups-find" class="btn secondary">Trouver mes groupes</button><button id="fb-groups-save" class="btn secondary">Enregistrer</button></div>
-        </details>
-        <span id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</span>
+        <div class="set-row">
+          <span class="set-text"><strong>Groupes préférés <span id="fb-groups-count" class="count-badge">0</span></strong><small>Pris en priorité. Sans eux : tous tes groupes.</small></span>
+          <button type="button" id="fb-groups-find" class="btn ghost small-btn" title="Charger tous les groupes de ton compte Facebook"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Trouver</span></button>
+        </div>
+        <ul id="fb-group-list" class="group-list"></ul>
+        <div class="group-add">
+          <input id="fb-group-new" type="url" placeholder="Colle le lien d’un groupe">
+          <button type="button" id="fb-group-add" class="btn secondary">Ajouter</button>
+        </div>
+        <p id="fb-groups-saved" class="small ok-text" hidden>Enregistré.</p>
       </div>
     </details>
 
@@ -264,14 +272,44 @@
   </div>
 
   <div id="tab-linkedin" class="tab" hidden>
-    <section class="card">
-      <div class="field-head"><h2>LinkedIn</h2><span class="pill neutral">En développement</span></div>
-      <p class="small muted">Bientôt : tes vidéos et tes posts (texte, photo) sur ton profil ou ta page LinkedIn, avec le même dossier et les mêmes heures.</p>
-    </section>
+    <details class="card tab-settings net-settings" data-net="linkedin">
+      <summary>Réglages LinkedIn <span class="pill neutral net-state"></span></summary>
+      <label class="set-row">
+        <span class="set-text"><strong>Mes vidéos YouTube</strong><small>Titre, début de la description et lien</small></span>
+        <span class="switch"><input type="checkbox" data-key="linkedinFromYoutube"><span></span></span>
+      </label>
+      <label class="set-row">
+        <span class="set-text"><strong>Mes posts Facebook</strong><small>Juste après Facebook : texte, photo ou vidéo</small></span>
+        <span class="switch"><input type="checkbox" data-key="linkedinFromFacebook"><span></span></span>
+      </label>
+      <div class="set-row">
+        <span class="set-text"><strong>Posts pour LinkedIn seulement</strong><small class="net-folder-line"></small></span>
+        <button type="button" class="btn ghost small-btn net-folder-btn">Dossier</button>
+      </div>
+      <p class="small muted net-note">Publié sur ton profil. Reste connecté à LinkedIn dans ce Chrome.</p>
+    </details>
+    <ul id="linkedin-list" class="rows"></ul>
+    <p id="no-linkedin" class="muted small" hidden>Rien à publier sur LinkedIn pour l’instant.</p>
+    <details id="linkedin-done-box" class="done-box" hidden><summary id="linkedin-done-title"></summary><ul id="linkedin-done" class="rows"></ul></details>
   </div>
 
   <div id="tab-x" class="tab" hidden>
-    <p class="small muted x-intro">Partent tout seuls sur X ce qui est publié depuis que tu as coché X : tes vidéos YouTube (titre + lien, avec le Short) et tes posts Facebook (texte + photo ou vidéo). Reste connecté à X dans ce Chrome.</p>
+    <details class="card tab-settings net-settings" data-net="x">
+      <summary>Réglages X <span class="pill neutral net-state"></span></summary>
+      <label class="set-row">
+        <span class="set-text"><strong>Mes vidéos YouTube</strong><small>Titre et lien, avec le Short</small></span>
+        <span class="switch"><input type="checkbox" data-key="xFromYoutube"><span></span></span>
+      </label>
+      <label class="set-row">
+        <span class="set-text"><strong>Mes posts Facebook</strong><small>Juste après Facebook : texte, photo ou vidéo</small></span>
+        <span class="switch"><input type="checkbox" data-key="xFromFacebook"><span></span></span>
+      </label>
+      <div class="set-row">
+        <span class="set-text"><strong>Posts pour X seulement</strong><small class="net-folder-line"></small></span>
+        <button type="button" class="btn ghost small-btn net-folder-btn">Dossier</button>
+      </div>
+      <p class="small muted net-note">Reste connecté à X dans ce Chrome. Un post part sur tous tes réseaux avant le suivant.</p>
+    </details>
     <ul id="x-list" class="rows"></ul>
     <p id="no-x" class="muted small" hidden>Rien à publier sur X pour l’instant.</p>
     <details id="x-done-box" class="done-box" hidden><summary id="x-done-title"></summary><ul id="x-done" class="rows"></ul></details>
@@ -280,33 +318,24 @@
   <div id="tab-settings" class="tab" hidden>
     <h3 class="set-group">Dossiers</h3>
     <section class="card" id="set-folder">
-      <h2>Dossier des vidéos YouTube</h2>
-      <p class="small muted folder-what">Une vidéo par dossier : vidéo + miniature + texte.</p>
+      <h2>Dossier principal</h2>
+      <p class="small muted folder-what">Sert à tous tes réseaux. Une vidéo par dossier (vidéo + miniature + texte) ; les posts dans <code>FACEBOOK/A-PUBLIER</code>, <code>X/A-PUBLIER</code>, <code>LINKEDIN/A-PUBLIER</code>…</p>
       <div id="folder-chosen" class="chosen" hidden>
         <span class="check">✓</span>
         <button id="pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="folder-name"></strong><span class="chosen-edit">changer</span></button>
       </div>
       <p id="folder-status" class="status" hidden></p>
       <div id="folder-actions" class="actions">
-        <button id="pick" class="btn primary wide">Choisir le dossier des vidéos YouTube</button>
+        <button id="pick" class="btn primary wide">Choisir le dossier principal</button>
         <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
       </div>
-      <p id="folder-hint" class="muted small">Le dossier <code>YOUTUBE</code> ou celui d’une chaîne.</p>
+      <p id="folder-hint" class="muted small">Le dossier de ta chaîne, ou celui qui regroupe toutes tes chaînes.</p>
     </section>
-    <section class="card" id="set-fb-folder">
-      <h2>Dossier des posts (Facebook, TikTok, Instagram)</h2>
-      <p class="small muted folder-what">Un post par dossier : texte, et une photo ou une vidéo si besoin.</p>
-      <div id="fb-folder-chosen" class="chosen" hidden>
-        <span class="check">✓</span>
-        <button id="fb-pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="fb-folder-name"></strong><span class="chosen-edit">changer</span></button>
-        <button id="fb-forget" class="icon-close" title="Ne plus utiliser ce dossier" aria-label="Retirer le dossier">✕</button>
-      </div>
-      <p id="fb-folder-status" class="status" hidden></p>
-      <div id="fb-folder-actions" class="actions">
-        <button id="fb-pick" class="btn primary wide">Choisir le dossier des posts</button>
-        <button id="fb-grant" class="btn primary wide" hidden>Autoriser l’accès</button>
-      </div>
-      <p id="fb-folder-hint" class="muted small">Chaque post part à l’heure écrite dans son dossier.</p>
+    <section class="card" id="set-net-folders">
+      <h2>Dossier de chaque réseau</h2>
+      <p class="small muted folder-what">Chaque réseau prend le dossier principal. Choisis-lui un autre dossier pour décider toi-même ce qui y part.</p>
+      <ul id="net-folders" class="net-folders"></ul>
+      <p id="net-folders-status" class="status error" hidden></p>
     </section>
     <h3 class="set-group">Réseaux et pages</h3>
     <section class="card">

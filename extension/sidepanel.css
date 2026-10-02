@@ -466,8 +466,6 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outlin
 .networks > li.network-row { min-width: 0; }
 .networks > li.network-row label { min-width: 0; max-width: 100%; overflow: hidden; }
 .networks > li.network-row label > div { min-width: 0; }
-.groups-per { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
-.groups-per input { width: 70px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.04); color: var(--text); text-align: center; }
 .chip-toggle { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: none; color: var(--muted); cursor: pointer; white-space: nowrap; }
 .chip-toggle.on { border-color: rgba(0, 194, 255, 0.6); color: var(--accent, #00c2ff); background: rgba(0, 194, 255, 0.08); }
 /* ------------------------------------------- settings sections, compact bits */
@@ -548,3 +546,59 @@ li.row .when span.was { text-decoration: line-through; color: #ff6b6b; opacity: 
 .pw-account-hint { margin: 4px 0 0; text-align: center; font-size: 11.5px; }
 /* A Short's row: vertical thumbnail, same height as a video's. */
 li.row.is-short .mini.wide { width: 25px; }
+/* -------------------------------------------- settings rows (tabs) */
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); cursor: pointer; }
+.tab-settings > .set-row:first-of-type { border-top: 0; padding-top: 2px; }
+div.set-row { cursor: default; }
+.set-row.off { opacity: 0.45; }
+.set-text { display: grid; gap: 2px; min-width: 0; }
+.set-text strong { font-size: 12.5px; font-weight: 600; color: var(--text); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.set-text small { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+.set-sub { margin: 2px 0 0 12px; padding-left: 12px; border-left: 2px solid rgba(255, 255, 255, 0.08); }
+.net-note { margin: 8px 0 0; }
+/* On/off switch */
+.switch { position: relative; flex: none; width: 34px; height: 20px; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.16); transition: background 0.15s; pointer-events: none; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(14px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.switch input:disabled { cursor: default; }
+/* − 9 + */
+.stepper { flex: none; display: inline-flex; align-items: center; height: 28px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.stepper button { width: 26px; height: 100%; border: 0; background: rgba(255, 255, 255, 0.05); color: var(--text); font-size: 15px; cursor: pointer; padding: 0; }
+.stepper button:hover { background: rgba(255, 255, 255, 0.12); }
+.stepper input { width: 34px; height: 100%; border: 0; padding: 0; background: transparent; color: var(--text); text-align: center; font-family: inherit; font-size: 12.5px; font-weight: 600; -moz-appearance: textfield; }
+.stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.btn.small-btn { height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
+.btn.ghost.small-btn { border-color: var(--border); color: var(--text); }
+.btn.small-btn .ico { width: 14px; height: 14px; }
+.count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); font-size: 11px; font-weight: 700; color: var(--text); }
+/* Favourite groups: one chip each */
+.group-list { list-style: none; margin: 2px 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 150px; overflow-y: auto; }
+.group-list:empty { display: none; }
+.group-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 26px; padding: 0 2px 0 10px; border-radius: 999px; background: rgba(24, 119, 242, 0.14); border: 1px solid rgba(24, 119, 242, 0.35); }
+.group-chip a { color: var(--text); font-size: 11.5px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; text-transform: capitalize; }
+.group-chip a:hover { text-decoration: underline; }
+.group-drop { width: 20px; height: 20px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 10px; cursor: pointer; padding: 0; }
+.group-drop:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.group-add { display: flex; gap: 6px; }
+.group-add input { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.04); color: var(--text); font-size: 12px; }
+.group-add .btn { height: 30px; }
+#fb-groups-saved { margin: 6px 0 0; }
+/* Réglages → one folder per network */
+.net-folders { list-style: none; margin: 8px 0 0; padding: 0; }
+.net-folders { gap: 0; }
+.net-folders > li.net-folder { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 2px 10px;
+  padding: 9px 0; margin: 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.06); border-radius: 0; background: none; }
+.net-folders > li.net-folder:first-child { border-top: 0; }
+.net-folder-name { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.net-folder-name strong { font-size: 12.5px; }
+.net-folder-name small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-folder-acts { grid-column: 2; grid-row: 1 / 3; }
+.net-folder-where { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11.5px; color: var(--muted); padding-left: 20px; }
+.net-folder-where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.net-folder.own .net-folder-where { color: var(--text); font-weight: 600; }
+.net-folder-where .ico { width: 14px; height: 14px; flex: none; color: var(--accent); }
+.net-folder-acts { display: flex; align-items: center; gap: 4px; }

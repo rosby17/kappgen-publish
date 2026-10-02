@@ -130,3 +130,27 @@ Ordre : YouTube d'abord ; Facebook juste après, une fois l'envoi YouTube termin
 - Un post dont l'heure est arrivée passe avant une nouvelle vidéo YouTube.
 - **Posts en retard** (Chrome fermé, ordinateur en veille…) : jamais tous d'un coup. Ils partent un par un, deux fois plus vite que l'écart habituel entre tes posts (2 min 30 au minimum), jusqu'à rattraper le retard, puis le rythme normal reprend, 24 h/24.
 - **Groupes** (facultatif) : Réglages → « Groupes Facebook » → « Partager aussi mes posts Facebook dans des groupes » et le **nombre de groupes par publication** (9 par défaut). Pendant la publication, après « Suivant », l'extension clique « Partager dans les groupes » et coche ce nombre de groupes (9 au plus, limite de Facebook) : d'abord ceux de ta liste de groupes préférés (facultative, « Trouver mes groupes » ou liens collés), puis **au hasard parmi les groupes que Facebook propose**, et publie. Post par post : bouton « Groupes : oui / non », ou dans `publication.json` `"groupes": true` / `false` / une liste de liens. Résultat dans `"groupes_partages"`.
+
+## 6. Un dossier pour tous les réseaux, ou un dossier par réseau (1.18)
+
+Réglages → **Dossiers** :
+
+- **Dossier principal** : il sert à **tous** tes réseaux. Ce qui est publié sur YouTube (la vidéo, son Short) et sur Facebook (les posts) part ensuite sur tes autres réseaux cochés.
+- **Dossier de chaque réseau** (YouTube, Facebook, Instagram, TikTok, X, LinkedIn) : par défaut, « Dossier principal ». Choisis un autre dossier pour un réseau et **seul le contenu de ce dossier** y part (un dossier = un post : texte, et une photo ou une vidéo, à l'heure écrite dans son nom ou son `publication.json`). La croix ✕ le remet sur le dossier principal.
+- Dans le dossier principal, chaque réseau a aussi **ses propres posts**, rangés comme ceux de Facebook :
+
+```
+<CHAÎNE>/
+├── VIDEO/…                  ← YouTube (puis Facebook, X, LinkedIn… si cochés)
+├── FACEBOOK/A-PUBLIER/…     ← Facebook (puis X, LinkedIn… si cochés)
+├── X/A-PUBLIER/…            ← X seulement
+├── LINKEDIN/A-PUBLIER/…     ← LinkedIn seulement
+├── INSTAGRAM/A-PUBLIER/…    ← Instagram seulement (une vidéo verticale)
+└── TIKTOK/A-PUBLIER/…       ← TikTok seulement (une vidéo)
+```
+
+  Les vidéos rangées dans ces dossiers de réseau ne sont jamais prises pour des vidéos YouTube. L'état d'un post propre à un réseau est écrit sous son nom dans `publication.json` (`"x": {"statut": "publie"}`).
+
+**Ordre de publication** : une publication part sur **tous** tes réseaux avant la suivante. Exemple : post Facebook n°1, puis le même post sur X, puis sur LinkedIn ; ensuite seulement le post Facebook n°2. Pour une vidéo : YouTube, son Short, la Page Facebook (vidéo puis Réel), TikTok, Instagram, X, LinkedIn. Les réseaux passent l'un après l'autre (un seul onglet travaille à la fois), sans attendre la tournée suivante.
+
+Dans les onglets **X** et **LinkedIn**, « Réglages » choisit ce qui y part : tes vidéos YouTube, tes posts Facebook, et le dossier des posts rien que pour ce réseau.

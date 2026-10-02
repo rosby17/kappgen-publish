@@ -47,6 +47,7 @@ function pill(kind, text) {
 
 // Small line icons (no emoji): clock, link, play, refresh.
 const ICON_PATHS = {
+  folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2h8.8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   link: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
   short: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="m10.5 9.5 4 2.5-4 2.5z"/>',
@@ -633,12 +634,12 @@ const NETWORKS = [
   ['facebook', 'Facebook', 'Reels, vidéos et posts programmés sur ta page.', 'facebook'],
   ['tiktok', 'TikTok', 'Vidéos verticales (et horizontales) sur ton compte.', 'tiktok'],
   ['instagram', 'Instagram', 'Reels (versions verticales) sur ton compte.', 'instagram'],
-  ['linkedin', 'LinkedIn', 'En développement.', 'linkedin'],
+  ['linkedin', 'LinkedIn', 'Vidéos (lien) et posts sur ton profil.', 'linkedin'],
   ['snapchat', 'Snapchat', 'En développement.', 'snapchat'],
   ['x', 'X', 'Posts et vidéos sur ton compte.', 'x'],
 ];
 // Networks still in development are off unless ticked; the others on unless unticked.
-const LIVE_NETWORKS = new Set(['youtube', 'facebook', 'tiktok', 'instagram', 'x']); // they really publish
+const LIVE_NETWORKS = new Set(['youtube', 'facebook', 'tiktok', 'instagram', 'x', 'linkedin']); // they really publish
 const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);          // on until unticked
 const networkIsOn = (config, name) => {
   const value = (config.networks || {})[name];
@@ -679,7 +680,7 @@ async function renderNetworks() {
       const current = await settings();
       current.networks = { ...(current.networks || {}), [name]: box.checked };
       // X: what is published from now on goes there (never the older catalogue).
-      if (name === 'x' && box.checked) current.xSince = Date.now();
+      if ((name === 'x' || name === 'linkedin') && box.checked) current[`${name}Since`] = Date.now();
       await chrome.storage.local.set({ folder: current });
       await applyNetworks();
       renderPages();
@@ -760,12 +761,11 @@ const POST_TYPES = { photo: 'Photo', texte: 'Texte', reel: 'Réel' };
 let lastScan = null;  // last scan of the videos folder
 let lastPosts = [];   // last list of Facebook posts
 
-// Facebook folder (Reels and posts), chosen apart from the videos folder.
+// Facebook folder (Reels and posts): its own, or the main one.
 async function renderFbAccess() {
-  const access = await KappDossier.fbAccess().catch(() => ({ state: 'none' }));
-  showFolder('fb-', access);
-  $('fb-forget').hidden = access.state === 'none';
-  return access;
+  const all = await KappDossier.folders().catch(() => ({}));
+  renderNetFolders(all);
+  return all.facebook || { state: 'none' };
 }
 
 // One aligned row per post: time, picture, text and state. Already published
@@ -900,60 +900,84 @@ const groupLink = (url) => {
     .match(/^https:\/\/www\.facebook\.com\/groups\/[^/?#\s]+/i);
   return m ? `${m[0]}/` : null;
 };
+// A group's name, from its link (its address name, or its number).
+const groupName = (url) => {
+  const slug = decodeURIComponent((String(url).match(/\/groups\/([^/?#]+)/) || [])[1] || url);
+  return /^\d+$/.test(slug) ? `Groupe ${slug}` : slug.replace(/[-_.]+/g, ' ');
+};
+let groupList = [];
 async function renderGroups() {
   const config = await settings();
-  const groups = config.facebookGroups || [];
-  if (document.activeElement !== $('fb-groups')) $('fb-groups').value = groups.join('\n');
-  $('fb-groups-count').textContent = groups.length;
+  groupList = config.facebookGroups || [];
+  $('fb-groups-count').textContent = groupList.length;
   if (document.activeElement !== $('fb-groups-per')) $('fb-groups-per').value = config.facebookGroupsPerPost || 9;
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
-  $('fb-groups-more').hidden = !config.facebookGroupsOn; // the number only once ticked
+  $('fb-groups-more').hidden = !config.facebookGroupsOn; // the rest only once ticked
   $('fb-from-yt').checked = config.facebookFromYoutube !== false;
-  const per = Math.min(config.facebookGroupsPerPost || 9, groups.length);
+  $('fb-group-list').replaceChildren(...groupList.map((link) => {
+    const item = el('li', 'group-chip');
+    const a = el('a', null, groupName(link));
+    a.href = link;
+    a.target = '_blank';
+    a.title = link;
+    const drop = el('button', 'group-drop', '✕');
+    drop.type = 'button';
+    drop.title = 'Retirer ce groupe';
+    drop.addEventListener('click', () => { groupList = groupList.filter((g) => g !== link); saveGroups(); });
+    item.append(a, drop);
+    return item;
+  }));
+  const per = Math.min(config.facebookGroupsPerPost || 9, groupList.length);
   const state = $('fb-groups-state');
   state.className = `pill ${config.facebookGroupsOn ? 'ok' : 'neutral'}`;
-  state.textContent = !config.facebookGroupsOn ? 'Désactivé'
-    : groups.length ? `${per} par post sur ${groups.length}` : `${Math.min(config.facebookGroupsPerPost || 9, 9)} par post`;
+  state.textContent = !config.facebookGroupsOn ? 'Groupes désactivés'
+    : groupList.length ? `${per} groupes par post sur ${groupList.length}` : `${Math.min(config.facebookGroupsPerPost || 9, 9)} groupes par post`;
+}
+function groupsSaid(text, warn = false) {
+  const saved = $('fb-groups-saved');
+  saved.className = `small ${warn ? 'warn' : 'ok-text'}`;
+  saved.textContent = text;
+  saved.hidden = false;
+  clearTimeout(groupsSaid.timer);
+  groupsSaid.timer = setTimeout(() => { saved.hidden = true; }, 5000);
 }
 async function saveGroups() {
-  const lines = $('fb-groups').value.split(/\s+/).filter(Boolean);
-  const valid = [...new Set(lines.map(groupLink).filter(Boolean))].slice(0, 500);
-  const wrong = lines.filter((l) => !groupLink(l));
   const current = await settings();
-  current.facebookGroups = valid;
+  current.facebookGroups = [...new Set(groupList.map(groupLink).filter(Boolean))].slice(0, 500);
   current.facebookGroupsPerPost = Math.min(25, Math.max(1, Number($('fb-groups-per').value) || 9));
   current.facebookGroupsOn = $('fb-groups-on').checked; // no list needed: Facebook's own list is used
   await chrome.storage.local.set({ folder: current });
-  $('fb-groups').value = valid.join('\n');
-  const saved = $('fb-groups-saved');
-  saved.className = `small ${wrong.length ? 'warn' : 'ok-text'}`;
-  saved.textContent = wrong.length ? `Enregistré. Ignoré (pas un lien de groupe) : ${wrong.slice(0, 3).join(', ')}` : 'Enregistré.';
-  saved.hidden = false;
-  setTimeout(() => { saved.hidden = true; }, 5000);
   renderGroups();
 }
+// Pasted links (one or several), added to the list.
+async function addGroups() {
+  const typed = $('fb-group-new').value.split(/\s+/).filter(Boolean);
+  if (!typed.length) return;
+  const valid = typed.map(groupLink).filter(Boolean);
+  if (!valid.length) { groupsSaid('Ce n’est pas un lien de groupe Facebook (facebook.com/groups/…).', true); return; }
+  groupList = [...new Set([...groupList, ...valid])];
+  $('fb-group-new').value = '';
+  await saveGroups();
+  groupsSaid(valid.length > 1 ? `${valid.length} groupes ajoutés.` : 'Groupe ajouté.');
+}
+$('fb-group-add').addEventListener('click', addGroups);
+$('fb-group-new').addEventListener('keydown', (event) => { if (event.key === 'Enter') addGroups(); });
 // « Trouver mes groupes »: all the groups of the connected Facebook account.
 async function findGroups() {
   const find = $('fb-groups-find');
-  const saved = $('fb-groups-saved');
+  const label = find.querySelector('span');
   find.disabled = true;
-  find.textContent = 'Chargement de tous tes groupes…';
+  label.textContent = 'Recherche…';
   const reply = await send({ type: 'findGroups' });
   find.disabled = false;
-  find.textContent = 'Trouver mes groupes';
-  if (!reply || !reply.ok) {
-    saved.className = 'small warn';
-    saved.textContent = reply ? reply.error : 'Recherche impossible.';
-    saved.hidden = false;
-    return false;
-  }
-  // Found groups first, the ones already typed kept after them.
-  const typed = $('fb-groups').value.split(/\s+/).filter(Boolean);
-  $('fb-groups').value = [...new Set([...reply.data.groups, ...typed.map(groupLink).filter(Boolean)])].slice(0, 500).join('\n');
-  return true;
+  label.textContent = 'Trouver';
+  if (!reply || !reply.ok) { groupsSaid(reply ? reply.error : 'Recherche impossible.', true); return; }
+  const before = groupList.length;
+  groupList = [...new Set([...reply.data.groups, ...groupList])].slice(0, 500);
+  await saveGroups();
+  groupsSaid(`${groupList.length - before} groupe(s) trouvé(s).`);
 }
-$('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
-$('fb-groups-save').addEventListener('click', saveGroups);
+$('fb-groups-find').addEventListener('click', findGroups);
 // YouTube videos and Shorts on the Page too (from the moment it is switched on).
 $('fb-from-yt').addEventListener('change', async () => {
   const current = await settings();
@@ -963,6 +987,12 @@ $('fb-from-yt').addEventListener('change', async () => {
   send({ type: 'autoNow' });
 });
 $('fb-groups-per').addEventListener('change', saveGroups);
+for (const [id, step] of [['fb-groups-less', -1], ['fb-groups-plus', 1]]) {
+  $(id).addEventListener('click', () => {
+    $('fb-groups-per').value = Math.min(25, Math.max(1, (Number($('fb-groups-per').value) || 9) + step));
+    saveGroups();
+  });
+}
 $('fb-groups-on').addEventListener('change', () => { $('fb-groups-more').hidden = !$('fb-groups-on').checked; saveGroups(); });
 
 // null when no group list is set (no per-post button then).
@@ -1035,9 +1065,18 @@ async function renderPosts() {
   $('fb-done-days').replaceChildren(...dayGroups(doneShown, (p) => Date.parse(p.published_at || 0) || p.due_at, 'done', { openFirst: true }));
   $('no-posts').hidden = !(posts.length && !upcoming.length);
   applyJob();
+  // The folders of each network, then the tabs that depend on them.
+  netFolders = await KappDossier.folders().catch(() => ({}));
+  ownPosts = {};
+  await Promise.all(['tiktok', 'instagram', 'x', 'linkedin'].map(async (net) => {
+    const reply = await send({ type: 'networkPosts', net });
+    ownPosts[net] = reply && reply.ok ? reply.data : [];
+  }));
   renderTikTok();
   renderInstagram();
-  renderX();
+  renderShare('x');
+  renderShare('linkedin');
+  renderNetSettings();
   renderPages();
 }
 
@@ -1168,9 +1207,18 @@ async function renderFolder() {
   renderOnYoutube(data, config);
   applyYtFilter();
   renderFacebook(data);
+  // The folders of each network, then the tabs that depend on them.
+  netFolders = await KappDossier.folders().catch(() => ({}));
+  ownPosts = {};
+  await Promise.all(['tiktok', 'instagram', 'x', 'linkedin'].map(async (net) => {
+    const reply = await send({ type: 'networkPosts', net });
+    ownPosts[net] = reply && reply.ok ? reply.data : [];
+  }));
   renderTikTok();
   renderInstagram();
-  renderX();
+  renderShare('x');
+  renderShare('linkedin');
+  renderNetSettings();
   renderPages();
 }
 
@@ -1208,67 +1256,93 @@ function facebookItem(video, page, as = 'video') {
 // one, otherwise the video itself, horizontal or not) and the videos of the
 // posts folder.
 // X: YouTube videos and Facebook posts published since X was ticked, and the rest on request.
-let xConfig = null;
-async function renderX() {
-  xConfig = await settings();
+// Each network's own folder (Réglages → Dossiers) and its own posts
+// (that folder, or <NETWORK>/A-PUBLIER in the main folder).
+let netFolders = {};
+let ownPosts = {};
+const hasOwn = (net) => !!(netFolders[net] && netFolders[net].own);
+// A network's own post, as a row of its tab.
+function ownPostItem(p, net) {
+  return { path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Post', preview: p.image_path,
+    detail: [POST_TYPES[p.type] || 'Post', 'dossier du réseau', chan(p.channel_name)].filter(Boolean).join(' · '),
+    done: p.statut === 'publie', error: p.statut === 'echec' ? (p.error || 'échec') : null, date: p.published_at || p.due_at,
+    auto: true, at: p.statut === 'a_publier' && p.due_at && p.due_at > Date.now() ? p.due_at : null, own: true, net };
+}
+
+// X and LinkedIn: what is published since the network was ticked (YouTube
+// videos, Facebook posts), unless it has its own folder; and its own posts.
+const SHARE = {
+  x: { name: 'X', video: 'x', post: 'xPost', doneAt: 'x_published_at', error: 'x_error', statut: 'x_statut', perr: 'x_error' },
+  linkedin: { name: 'LinkedIn', video: 'linkedin', post: 'linkedinPost', doneAt: 'linkedin_published_at', error: 'linkedin_error', statut: 'linkedin_statut', perr: 'linkedin_error' },
+};
+async function renderShare(net) {
+  const config = await settings();
+  const k = SHARE[net];
   const items = [];
-  for (const v of (lastScan && lastScan.sent) || []) {
-    if (!v.youtube_id) continue;
-    items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), youtubeId: v.youtube_id,
-      detail: [v.vertical_path ? 'Vidéo + Short' : 'Vidéo (lien)', chan(v.channel_name)].filter(Boolean).join(' · '),
-      done: v.x_published_at, error: v.x_error, date: v.date });
+  if (!hasOwn(net)) {
+    const since = config[`${net}Since`] || Date.now();
+    if (config[`${net}FromYoutube`] !== false) {
+      for (const v of (lastScan && lastScan.sent) || []) {
+        if (!v.youtube_id) continue;
+        items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), youtubeId: v.youtube_id,
+          detail: [v.vertical_path && net === 'x' ? 'Vidéo + Short' : 'Vidéo (lien)', chan(v.channel_name)].filter(Boolean).join(' · '),
+          done: v[k.doneAt], error: v[k.error], date: v.date, auto: (v.published_at || 0) >= since });
+      }
+    }
+    if (config[`${net}FromFacebook`] !== false) {
+      for (const p of lastPosts) {
+        if (p.statut !== 'publie') continue;
+        items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Post', preview: p.image_path,
+          detail: [POST_TYPES[p.type] || 'Post', 'Facebook', chan(p.channel_name)].filter(Boolean).join(' · '),
+          done: p[k.statut] === 'publie', error: p[k.perr], date: p.published_at, auto: Date.parse(p.published_at || 0) >= since });
+      }
+    }
   }
-  for (const p of lastPosts) {
-    if (p.statut !== 'publie') continue;
-    items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Post', preview: p.image_path,
-      detail: [POST_TYPES[p.type] || 'Post', chan(p.channel_name)].filter(Boolean).join(' · '),
-      done: p.x_statut === 'publie', error: p.x_error, date: p.published_at });
-  }
-  // What X sends by itself: what is published since X was ticked.
-  const since = (xConfig && xConfig.xSince) || Date.now();
-  for (const it of items) it.auto = (Date.parse(it.date) || it.date || 0) >= since;
-  const xCard = (it) => {
+  for (const p of ownPosts[net] || []) items.push(ownPostItem(p, net));
+  const card = (it) => {
     let item;
     const actions = [];
     let status;
-    if (it.done) status = pill('ok', 'Publié sur X.');
+    if (it.done) status = pill('ok', `Publié sur ${k.name}.`);
     else {
       status = it.error ? pill('warn', `Échec : ${it.error}`)
-        : it.auto ? pill('ok', 'Part tout seul sur X.') : pill('neutral', 'Publié avant d’avoir coché X : clique « Publier ».');
+        : it.at ? pillIcon('neutral', `Programmé : ${whenText(it.at)}`, 'clock')
+          : it.auto ? pill('ok', `Part tout seul sur ${k.name}.`) : pill('neutral', `Publié avant d’avoir coché ${k.name} : clique « Publier ».`);
       const go = button(it.error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
-        { type: it.kind === 'video' ? 'x' : 'xPost', path: it.path }, 'Publication sur X en cours…'));
+        { type: it.kind === 'video' ? k.video : k.post, path: it.path }, `Publication sur ${k.name} en cours…`));
       go.dataset.publish = '1';
       actions.push(go);
     }
-    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
+    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, emptyLabel: it.kind === 'video' ? 'Vidéo' : 'Post', title: it.title, detail: it.detail, status, actions });
     return item;
   };
   const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
-  const waiting = items.filter((it) => !it.done).sort(recent).slice(0, 40);
+  const waiting = items.filter((it) => !it.done).sort((a, b) => (a.at || 0) - (b.at || 0) || recent(a, b)).slice(0, 60);
   const done = items.filter((it) => it.done).sort(recent);
-  $('x-list').replaceChildren(...waiting.map(xCard));
-  $('no-x').hidden = waiting.length > 0;
-  $('x-done-box').hidden = !done.length;
-  $('x-done-title').textContent = `Déjà sur X (${done.length})`;
-  $('x-done').replaceChildren(...done.map(xCard));
+  $(`${net}-list`).replaceChildren(...waiting.map(card));
+  $(`no-${net}`).hidden = waiting.length > 0;
+  $(`${net}-done-box`).hidden = !done.length;
+  $(`${net}-done-title`).textContent = `Déjà sur ${k.name} (${done.length})`;
+  $(`${net}-done`).replaceChildren(...done.map(card));
   applyJob();
 }
 
 function renderTikTok() {
   const items = [];
-  for (const v of (lastScan && lastScan.sent) || []) {
+  for (const v of hasOwn('tiktok') ? [] : (lastScan && lastScan.sent) || []) {
     if (!v.youtube_id && !v.published_at) continue;
     items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), preview: v.preview_path,
       youtubeId: v.youtube_id, vertical: !!v.vertical_path,
       detail: [chan(v.channel_name), v.vertical_path ? 'version verticale' : 'pas de version verticale : format long'].filter(Boolean).join(' · '),
       done: v.tiktok_published_at, error: v.tiktok_error, date: v.date });
   }
-  for (const p of lastPosts) {
+  for (const p of hasOwn('tiktok') ? [] : lastPosts) {
     if (!p.video_path) continue;
     items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
       detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
       done: p.tiktok_statut === 'publie', error: p.tiktok_error, date: p.due_at });
   }
+  for (const p of ownPosts.tiktok || []) if (p.video_path) items.push(ownPostItem(p, 'tiktok'));
   const tiktokCard = (it) => {
     let item;
     const actions = [];
@@ -1306,18 +1380,19 @@ function renderTikTok() {
 // horizontal one would be cropped to a square), and the videos of the posts folder.
 function renderInstagram() {
   const items = [];
-  for (const v of (lastScan && lastScan.sent) || []) {
+  for (const v of hasOwn('instagram') ? [] : (lastScan && lastScan.sent) || []) {
     if ((!v.youtube_id && !v.published_at) || !v.vertical_path) continue;
     items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), preview: v.preview_path,
       youtubeId: v.youtube_id, detail: [chan(v.channel_name), 'version verticale'].filter(Boolean).join(' · '),
       done: v.instagram_published_at, error: v.instagram_error, date: v.date });
   }
-  for (const p of lastPosts) {
+  for (const p of hasOwn('instagram') ? [] : lastPosts) {
     if (!p.video_path) continue;
     items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
       detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
       done: p.instagram_statut === 'publie', error: p.instagram_error, date: p.due_at });
   }
+  for (const p of ownPosts.instagram || []) if (p.video_path) items.push(ownPostItem(p, 'instagram'));
   const igCard = (it) => {
     let item;
     const actions = [];
@@ -1420,35 +1495,135 @@ async function pickFolder() {
 $('pick').addEventListener('click', pickFolder);
 $('pick-change').addEventListener('click', pickFolder);
 
-let fbRootHandle = null;
-KappDossier.loadFbRoot().then((handle) => { fbRootHandle = handle; }).catch(() => {});
-
-async function pickFbFolder() {
+// One folder per network (Réglages → Dossiers): by default the main one.
+const FOLDER_NETS = [
+  ['youtube', 'YouTube', 'tes vidéos'],
+  ['facebook', 'Facebook', 'posts et Reels'],
+  ['instagram', 'Instagram', 'Reels'],
+  ['tiktok', 'TikTok', 'vidéos'],
+  ['x', 'X', 'posts'],
+  ['linkedin', 'LinkedIn', 'posts'],
+];
+// Loaded in advance: Chrome only shows its prompt when requestPermission is
+// called right in the click.
+const netHandles = {};
+async function loadNetHandles() {
+  for (const [net] of FOLDER_NETS) netHandles[net] = await KappDossier.loadNetRoot(net).catch(() => null);
+}
+loadNetHandles();
+let fbRootHandle = null; // kept for the « Reprendre » button
+const netFolderSaid = (text) => {
+  const status = $('net-folders-status');
+  status.hidden = !text;
+  status.textContent = text || '';
+};
+async function pickNetFolder(net) {
   try {
-    fbRootHandle = await window.showDirectoryPicker({ id: 'kappgen-facebook', mode: 'readwrite' });
-    await KappDossier.saveFbRoot(fbRootHandle);
+    const handle = await window.showDirectoryPicker({ id: `kappgen-${net}`, mode: 'readwrite' });
+    await KappDossier.saveNetRoot(net, handle);
+    netHandles[net] = handle;
+    if (net === 'youtube') {
+      // Watching starts now: what is already in the folder waits for a click.
+      const current = await settings();
+      current.watchSince = Date.now();
+      await chrome.storage.local.set({ folder: current });
+    }
+    netFolderSaid('');
     send({ type: 'autoNow' });
   } catch (error) {
-    if (!error || error.name !== 'AbortError') {
-      $('fb-folder-status').hidden = false;
-      $('fb-folder-status').textContent = String((error && error.message) || error);
-    }
+    if (!error || error.name !== 'AbortError') netFolderSaid(String((error && error.message) || error));
   }
-  renderPosts();
+  refreshFolders();
 }
-$('fb-pick').addEventListener('click', pickFbFolder);
-$('fb-pick-change').addEventListener('click', pickFbFolder);
-$('fb-forget').addEventListener('click', async () => {
-  await KappDossier.clearFbRoot();
-  fbRootHandle = null;
-  renderPosts();
-});
-$('fb-grant').addEventListener('click', async () => {
-  const handle = fbRootHandle || await KappDossier.loadFbRoot();
-  if (handle) await handle.requestPermission({ mode: 'readwrite' }).catch(() => {});
-  renderPosts();
+async function forgetNetFolder(net) {
+  await KappDossier.clearNetRoot(net);
+  netHandles[net] = null;
   send({ type: 'autoNow' });
-});
+  refreshFolders();
+}
+async function grantNetFolder(net) {
+  const handle = netHandles[net];
+  if (handle) await handle.requestPermission({ mode: 'readwrite' }).catch(() => {});
+  send({ type: 'autoNow' });
+  refreshFolders();
+}
+function refreshFolders() {
+  renderFolder();
+  renderPosts();
+  renderNetSettings();
+}
+function renderNetFolders(all) {
+  fbRootHandle = netHandles.facebook || null;
+  $('net-folders').replaceChildren(...FOLDER_NETS.map(([net, label, what]) => {
+    const info = all[net] || { state: 'none' };
+    const row = el('li', `net-folder${info.own ? ' own' : ''}`);
+    const name = el('div', 'net-folder-name');
+    name.append(logo(net, 14), el('strong', null, label), el('small', null, what));
+    const where = el('div', 'net-folder-where');
+    if (info.own) where.append(icon('folder'), el('span', null, info.name));
+    else where.append(el('span', 'muted', all.main && all.main.state !== 'none' ? 'Dossier principal' : '—'));
+    const acts = el('div', 'net-folder-acts');
+    if (info.own && info.state === 'prompt') {
+      const grant = button('Autoriser', 'btn primary small-btn', () => grantNetFolder(net));
+      acts.append(grant);
+    }
+    const change = button(info.own ? 'Changer' : 'Choisir', 'btn ghost small-btn', () => pickNetFolder(net));
+    change.title = info.own ? 'Choisir un autre dossier pour ce réseau' : `Un dossier rien que pour ${label}`;
+    acts.append(change);
+    if (info.own) {
+      const back = el('button', 'icon-close', '✕');
+      back.type = 'button';
+      back.title = 'Revenir au dossier principal';
+      back.setAttribute('aria-label', back.title);
+      back.addEventListener('click', () => forgetNetFolder(net));
+      acts.append(back);
+    }
+    row.append(name, where, acts);
+    return row;
+  }));
+}
+
+// X / LinkedIn tabs: what goes there, and the folder of their own posts.
+async function renderNetSettings() {
+  const config = await settings();
+  const all = await KappDossier.folders().catch(() => ({}));
+  for (const box of document.querySelectorAll('.net-settings')) {
+    const net = box.dataset.net;
+    const own = all[net] && all[net].own;
+    for (const input of box.querySelectorAll('input[data-key]')) {
+      input.checked = config[input.dataset.key] !== false;
+      // A network with its own folder only takes that folder's posts.
+      input.disabled = !!own;
+      input.closest('.set-row').classList.toggle('off', !!own);
+    }
+    const dirName = { x: 'X', linkedin: 'LINKEDIN' }[net];
+    box.querySelector('.net-folder-line').textContent = own
+      ? `Dossier « ${all[net].name} » : seuls ses posts partent.`
+      : `Dans le dossier principal : ${dirName}/A-PUBLIER`;
+    const on = config.networks && config.networks[net];
+    const state = box.querySelector('.net-state');
+    state.className = `pill net-state ${on ? 'ok' : 'neutral'}`;
+    state.textContent = !on ? 'Désactivé' : own ? 'Son propre dossier' : 'Automatique';
+  }
+}
+for (const box of document.querySelectorAll('.net-settings')) {
+  for (const input of box.querySelectorAll('input[data-key]')) {
+    input.addEventListener('change', async () => {
+      const current = await settings();
+      current[input.dataset.key] = input.checked;
+      await chrome.storage.local.set({ folder: current });
+      send({ type: 'autoNow' });
+    });
+  }
+  box.querySelector('.net-folder-btn').addEventListener('click', () => {
+    document.querySelector('.topbar [data-tab="settings"]').click();
+    const target = $('set-net-folders');
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.remove('flash');
+    void target.offsetWidth;
+    target.classList.add('flash');
+  });
+}
 
 // Loaded in advance so the click calls requestPermission straight away
 // (Chrome ignores it when something was awaited first).
@@ -1909,9 +2084,10 @@ $('auto-resume').addEventListener('click', async () => {
     setTimeout(() => { $('auto-resume').textContent = 'Reprendre les publications'; }, 6000);
     return;
   }
-  const fb = fbRootHandle || await KappDossier.loadFbRoot().catch(() => null);
-  if (fb && await fb.queryPermission({ mode: 'readwrite' }).catch(() => 'granted') !== 'granted') {
-    await fb.requestPermission({ mode: 'readwrite' }).catch(() => {});
+  for (const handle of Object.values(netHandles)) {
+    if (handle && await handle.queryPermission({ mode: 'readwrite' }).catch(() => 'granted') !== 'granted') {
+      await handle.requestPermission({ mode: 'readwrite' }).catch(() => {});
+    }
   }
   await send({ type: 'autoNow' });
   renderFolder();
