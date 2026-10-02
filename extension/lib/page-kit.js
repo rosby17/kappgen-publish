@@ -6,15 +6,16 @@
 (() => {
   const VERSION = chrome.runtime.getManifest().version;
   if (window.KappKit && window.KappKit.version === VERSION) return;
+  const S = (key) => window.KappRecipe.sel('kit', key);
+  const X = (key) => window.KappRecipe.re('kit', key);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const visible = (node) => !!node && node.getClientRects().length > 0 && !node.closest('[hidden]');
   const textOf = (node) => (node.textContent || '').replace(/\s+/g, ' ').trim();
   const labelsOf = (node) => [textOf(node), (node.getAttribute('aria-label') || '').trim(), (node.getAttribute('data-e2e') || '').trim()].filter(Boolean);
   const enabled = (node) => node.getAttribute('aria-disabled') !== 'true' && !node.disabled && !/disabled/i.test(node.getAttribute('data-disabled') || '');
   const click = (node) => { node.scrollIntoView({ block: 'center' }); node.click(); };
-  const BUTTONS = 'button, [role="button"], a[role="button"]';
-  const dialogs = () => [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')].filter(visible);
-  const byText = (pattern, { needEnabled = false, root = document } = {}) => [...root.querySelectorAll(BUTTONS)]
+  const dialogs = () => [...document.querySelectorAll(S('dialogs'))].filter(visible);
+  const byText = (pattern, { needEnabled = false, root = document } = {}) => [...root.querySelectorAll(S('buttons'))]
     .find((node) => visible(node) && (!needEnabled || enabled(node)) && labelsOf(node).some((label) => pattern.test(label)));
   // The window on top first, then the page.
   const findButton = (pattern, options = {}) => {
@@ -26,7 +27,7 @@
     return null;
   };
   function seenButtons() {
-    return [...new Set([...document.querySelectorAll(BUTTONS)].filter(visible)
+    return [...new Set([...document.querySelectorAll(S('buttons'))].filter(visible)
       .map((node) => labelsOf(node).sort((a, b) => a.length - b.length)[0]).filter((label) => label && label.length < 40))].slice(0, 25);
   }
   const waitFor = async (finder, timeout, what, network) => {
@@ -39,7 +40,7 @@
     throw new Error(`${network} : ${what} introuvable. Termine l’action dans l’onglet ${network} resté ouvert. Boutons vus : ${seenButtons().join(' | ') || 'aucun'}`);
   };
   const silence = () => {
-    for (const video of document.querySelectorAll('video')) {
+    for (const video of document.querySelectorAll(S('video'))) {
       try { video.muted = true; if (!video.paused) video.pause(); } catch { /* not ours to fail on */ }
     }
   };
@@ -52,7 +53,7 @@
   // Text of an element without what was typed in it (a title may hold « 50 % »).
   function ownText(root) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) => (node.parentElement && node.parentElement.closest('[contenteditable="true"], textarea, input') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      acceptNode: (node) => (node.parentElement && node.parentElement.closest(S('typed')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     let text = '';
     while (walker.nextNode()) text += ` ${walker.currentNode.nodeValue}`;
@@ -60,14 +61,14 @@
   }
   // Still sending the file? (a progress bar under 100 %, « 45 % », « Uploading… »)
   const uploading = (root = document) => {
-    for (const bar of root.querySelectorAll('[role="progressbar"]')) {
+    for (const bar of root.querySelectorAll(S('progressbar'))) {
       if (!visible(bar)) continue;
       const now = Number(bar.getAttribute('aria-valuenow'));
       const max = Number(bar.getAttribute('aria-valuemax') || 100);
       if (!Number.isFinite(now) || now < max) return true;
     }
     const text = ownText(root);
-    return /\b\d{1,2}(?:[.,]\d+)?\s?%/.test(text) || /importation en cours|t[eé]l[eé]versement en cours|t[eé]l[eé]chargement en cours|uploading|en cours de chargement/i.test(text);
+    return X('percent').test(text) || X('uploadingText').test(text);
   };
   // Hands one file of the chosen folder to the page's file field.
   async function giveFile(input, { src, path }) {
@@ -122,6 +123,6 @@
     }
     return written();
   }
-  window.KappKit = { version: VERSION, sleep, visible, textOf, labelsOf, enabled, click, dialogs, byText, findButton, waitFor,
+  window.KappKit = { version: VERSION, S, X, sleep, visible, textOf, labelsOf, enabled, click, dialogs, byText, findButton, waitFor,
     silence, keepQuiet, uploading, giveFile, writeText, seenButtons };
 })();

@@ -6,6 +6,8 @@
   // A reused tab may hold the script of an older version: replace it.
   const VERSION = chrome.runtime.getManifest().version;
   if (window.__kappgen && window.__kappgen.version === VERSION) return;
+  const S = (key) => window.KappRecipe.sel('facebook', key);
+  const X = (key) => window.KappRecipe.re('facebook', key);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const visible = (node) => !!node && node.getClientRects().length > 0 && !node.closest('[hidden]');
   const textOf = (node) => (node.textContent || '').replace(/\s+/g, ' ').trim();
@@ -21,18 +23,17 @@
       await sleep(500);
     }
     // Says which buttons were on screen, so the next version can match them.
-    const seen = [...new Set([...document.querySelectorAll(buttons)].filter(visible)
+    const seen = [...new Set([...document.querySelectorAll(S('buttons'))].filter(visible)
       .map((node) => labelsOf(node).sort((a, b) => a.length - b.length)[0]).filter((label) => label && label.length < 40))].slice(0, 25);
     throw new Error(`Facebook : ${what} introuvable. Termine l’action dans l’onglet Facebook resté ouvert. Boutons vus : ${seen.join(' | ') || 'aucun'}`);
   };
-  const buttons = 'button, [role="button"], a[role="button"]';
   // The open composer window (« Créer une publication », Reel…): everything
   // is looked for inside it first, never in the page behind (comment boxes).
-  const composer = () => [...document.querySelectorAll('[role="dialog"]')].filter(visible)
-    .filter((d) => d.querySelector('[contenteditable="true"], input[type="file"]')).pop() || null;
+  const composer = () => [...document.querySelectorAll(S('dialog'))].filter(visible)
+    .filter((d) => d.querySelector(S('composerMarker'))).pop() || null;
   const scope = () => composer() || document;
   // The window on top (« Modifier le reel » over « Créer une publication »).
-  const topDialog = () => [...document.querySelectorAll('[role="dialog"]')].filter(visible).pop() || null;
+  const topDialog = () => [...document.querySelectorAll(S('dialog'))].filter(visible).pop() || null;
   // A button is looked for in the window on top first, then the composer, then the page.
   const findButton = (pattern, options = {}) => {
     for (const root of [topDialog(), composer(), document]) {
@@ -44,7 +45,7 @@
   };
   // Facebook plays the video in its editor: pause it and cut the sound.
   const silence = () => {
-    for (const video of document.querySelectorAll('[role="dialog"] video')) {
+    for (const video of document.querySelectorAll(S('dialogVideo'))) {
       try { video.muted = true; if (!video.paused) video.pause(); } catch { /* not ours to fail on */ }
     }
   };
@@ -59,7 +60,7 @@
   // Still sending the file to Facebook? (progress bar under 100 %, or « 45 % »).
   const uploading = () => {
     for (const root of [topDialog(), composer()].filter(Boolean)) {
-      for (const bar of root.querySelectorAll('[role="progressbar"]')) {
+      for (const bar of root.querySelectorAll(S('progressbar'))) {
         if (!visible(bar)) continue;
         const now = Number(bar.getAttribute('aria-valuenow'));
         const max = Number(bar.getAttribute('aria-valuemax') || 100);
@@ -67,25 +68,25 @@
       }
       // The window's own text, without what was typed (a title may contain « 50 % »).
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-        acceptNode: (node) => (node.parentElement && node.parentElement.closest('[contenteditable="true"], textarea') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+        acceptNode: (node) => (node.parentElement && node.parentElement.closest(S('typed')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
       });
       let text = '';
       while (walker.nextNode()) text += ` ${walker.currentNode.nodeValue}`;
-      if (/\b\d{1,2}\s?%/.test(text)) return true;
-      if (/importation en cours|t[eé]l[eé]versement en cours|uploading|chargement de la vid[eé]o/i.test(text)) return true;
+      if (X('percent').test(text)) return true;
+      if (X('uploadingText').test(text)) return true;
     }
     return false;
   };
-  const byText = (pattern, { needEnabled = false, root = document } = {}) => [...root.querySelectorAll(buttons)]
+  const byText = (pattern, { needEnabled = false, root = document } = {}) => [...root.querySelectorAll(S('buttons'))]
     .find((node) => visible(node) && (!needEnabled || enabled(node)) && labelsOf(node).some((label) => pattern.test(label)));
 
   // kind "image": the photo input of the post composer is usually hidden,
   // so any file input accepting images is used.
   async function receiveFile({ src, path, kind }) {
     const pick = () => {
-      const inputs = [...scope().querySelectorAll('input[type="file"]')];
-      if (kind === 'image') return inputs.filter((i) => /image|\*/.test(i.accept || '*')).pop();
-      if (kind === 'video') return inputs.filter((i) => /video|\*/.test(i.accept || '*')).pop();
+      const inputs = [...scope().querySelectorAll(S('fileInput'))];
+      if (kind === 'image') return inputs.filter((i) => X('acceptImage').test(i.accept || '*')).pop();
+      if (kind === 'video') return inputs.filter((i) => X('acceptVideo').test(i.accept || '*')).pop();
       return inputs.find(visible);
     };
     const input = await waitFor(pick, 60000, kind === 'image' ? 'l’ajout de photo' : 'le sélecteur de fichier du Reel');
@@ -112,14 +113,14 @@
 
   async function openReel() {
     keepQuiet(true);
-    const create = await waitFor(() => byText(/create\s+(a\s+)?reel|cr[eé]er\s+(un\s+)?r[eé]el|nouveau\s+r[eé]el/i)
-      || byText(/^r[eé]els?$/i), 45000, 'le bouton Créer un Reel');
+    const create = await waitFor(() => byText(X('createReel'))
+      || byText(X('reelsTab')), 45000, 'le bouton Créer un Reel');
     click(create);
     await sleep(1200);
     // Some Business Suite versions first open a generic composer.
-    const reel = byText(/reel|r[eé]el/i);
-    if (reel && !document.querySelector('input[type="file"]')) click(reel);
-    await waitFor(() => [...document.querySelectorAll('input[type="file"]')].some(visible), 60000, 'le sélecteur de fichier');
+    const reel = byText(X('reelWord'));
+    if (reel && !document.querySelector(S('fileInput'))) click(reel);
+    await waitFor(() => [...document.querySelectorAll(S('fileInput'))].some(visible), 60000, 'le sélecteur de fichier');
     return true;
   }
 
@@ -127,7 +128,7 @@
     if (!caption) return true;
     const field = await waitFor(() => {
       const root = scope();
-      const fields = [...root.querySelectorAll('[contenteditable="true"][role="textbox"], [contenteditable="true"], textarea')].filter(visible);
+      const fields = [...root.querySelectorAll(S('captionFields'))].filter(visible);
       return fields[0];
     }, 30000, 'le champ de texte de la publication');
     const start = caption.replace(/\s+/g, ' ').trim().slice(0, 12);
@@ -168,12 +169,12 @@
     for (let i = 0; i < 3; i += 1) {
       await waitFor(() => !uploading(), 15 * 60000, 'la fin de l’envoi du Reel (100 %)');
       await sleep(1500);
-      const next = findButton(/^(next|suivant)$/i, { needEnabled: true });
-      if (!next || byText(/^(publish|publier|share|partager|post)$/i, { needEnabled: true })) break;
+      const next = findButton(X('next'), { needEnabled: true });
+      if (!next || byText(X('publishShort'), { needEnabled: true })) break;
       click(next);
       await sleep(2500);
     }
-    const finalButton = /^(publish|publier|share now|share|partager maintenant|partager|publier maintenant|post)$/i;
+    const finalButton = X('publish');
     let button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 15 * 60000, 'le bouton Publier');
     let picked = { groups: [], extra: [] };
     if (groups.length || groupCount) {
@@ -191,15 +192,15 @@
   async function openPost({ photo }) {
     keepQuiet(true);
     const create = await waitFor(
-      () => byText(/^(create post|cr[eé]er une publication|cr[eé]er un post|nouvelle publication)$/i)
-        || [...document.querySelectorAll('[role="button"]')].find((n) => visible(n) && /what'?s on your mind|what'?s new|write something|quoi de neuf|[ée]crivez quelque chose|que voulez-vous dire|exprimez-vous|[àa] quoi pensez-vous/i.test(textOf(n))),
+      () => byText(X('createPost'))
+        || [...document.querySelectorAll(S('roleButton'))].find((n) => visible(n) && X('whatsOnMind').test(textOf(n))),
       45000, 'le bouton Créer une publication');
     click(create);
-    await waitFor(() => [...document.querySelectorAll('[role="dialog"] [contenteditable="true"], [contenteditable="true"][role="textbox"]')].find(visible), 30000, 'la fenêtre de publication');
+    await waitFor(() => [...document.querySelectorAll(S('composerOpen'))].find(visible), 30000, 'la fenêtre de publication');
     if (photo) {
       const root = composer() || document;
-      const add = byText(/^(photo\/vid[eé]o|photo\/video|photo|ajouter des photos|add photos)/i, { root })
-        || [...root.querySelectorAll('[aria-label]')].find((n) => visible(n) && /photo/i.test(n.getAttribute('aria-label')));
+      const add = byText(X('addPhoto'), { root })
+        || [...root.querySelectorAll(S('ariaLabelled'))].find((n) => visible(n) && X('photoAria').test(n.getAttribute('aria-label')));
       if (add) { click(add); await sleep(1200); }
     }
     return true;
@@ -213,7 +214,7 @@
     const dialog = composer();
     let groupsTried = false;
     let picked = { groups: [], extra: [] };
-    const final = /^(post|publier|publish|share now|share|partager maintenant|partager|publier maintenant)$/i;
+    const final = X('final');
     const isFinal = (node) => labelsOf(node).some((label) => final.test(label));
     // « Suivant » first when Facebook shows it (it stays grey while the text
     // or the video is not taken into account), then « Publier ».
@@ -224,7 +225,7 @@
       await sleep(1500);
       const button = await waitFor(() => {
         silence();
-        return !uploading() && (findButton(final, { needEnabled: true }) || findButton(/^(next|suivant)$/i, { needEnabled: true }));
+        return !uploading() && (findButton(final, { needEnabled: true }) || findButton(X('next'), { needEnabled: true }));
       }, timeout, 'le bouton Suivant / Publier actif (texte ou vidéo pas encore pris en compte)');
       silence();
       let target = button;
@@ -240,10 +241,10 @@
     // After « Publier », Facebook may show an offer (« Vous organisez un
     // évènement ? », boost…): the post itself is kept with « Publier la
     // publication d’origine » / « Pas maintenant », never the paid option.
-    const skip = /publier la publication d.origine|publish original post|post original|pas maintenant|not now|plus tard|later|ignorer|skip/i;
+    const skip = X('skipOffer');
     // Only inside a window (an offer is always one), never in the page.
     const inWindow = () => {
-      const top = [...document.querySelectorAll('[role="dialog"]')].filter(visible).pop();
+      const top = [...document.querySelectorAll(S('dialog'))].filter(visible).pop();
       return top ? byText(skip, { needEnabled: true, root: top }) : null;
     };
     const deadline = Date.now() + 5 * 60000;
@@ -267,27 +268,26 @@
 
   // ---------------------------------------------- sharing to several groups
   // Menus and lists of the share window are not always buttons.
-  const CHOICES = 'button, [role="button"], [role="menuitem"], [role="option"], [role="listitem"], [role="radio"], a';
-  const choice = (pattern, root = document) => [...root.querySelectorAll(CHOICES)]
+  const choice = (pattern, root = document) => [...root.querySelectorAll(S('choices'))]
     .find((node) => visible(node) && labelsOf(node).some((label) => pattern.test(label)));
 
   // On the Page: the post (found by the start of its text) → « Partager » →
   // « Groupe ». mode "multi" when the window has a box to tick per group.
   async function openShareToGroups({ snippet }) {
     const wanted = snippet.toLowerCase();
-    const article = await waitFor(() => [...document.querySelectorAll('[role="article"], [aria-posinset]')]
+    const article = await waitFor(() => [...document.querySelectorAll(S('article'))]
       .filter(visible).find((a) => textOf(a).toLowerCase().includes(wanted)), 60000, 'la publication sur la Page');
-    const share = choice(/^(partager|share)$/i, article)
-      || [...article.querySelectorAll('[aria-label]')].find((n) => visible(n) && /^(partager|share|envoyer ceci|send this)/i.test(n.getAttribute('aria-label')));
+    const share = choice(X('shareButton'), article)
+      || [...article.querySelectorAll(S('ariaLabelled'))].find((n) => visible(n) && X('shareAria').test(n.getAttribute('aria-label')));
     if (!share) throw new Error('Facebook : bouton « Partager » de la publication introuvable.');
     click(share);
     await sleep(1500);
-    const toGroup = await waitFor(() => choice(/^(groupe|group|partager dans un groupe|share to a group|dans un groupe|in a group)$/i)
-      || choice(/partager dans (un|des) groupes?|share (to|in) (a )?groups?/i), 15000, 'l’option « Groupe » du partage');
+    const toGroup = await waitFor(() => choice(X('toGroup'))
+      || choice(X('toGroupLoose')), 15000, 'l’option « Groupe » du partage');
     click(toGroup);
     await sleep(2500);
     const dialog = topDialog();
-    const boxes = dialog ? dialog.querySelectorAll('[role="checkbox"], input[type="checkbox"]').length : 0;
+    const boxes = dialog ? dialog.querySelectorAll(S('checkbox')).length : 0;
     return { mode: boxes > 0 ? 'multi' : 'single' };
   }
 
@@ -295,7 +295,7 @@
   async function pickGroups({ names }) {
     const dialog = topDialog();
     if (!dialog) throw new Error('Facebook : fenêtre de partage introuvable.');
-    const search = [...dialog.querySelectorAll('input[type="search"], input[type="text"], input:not([type])')].find(visible);
+    const search = [...dialog.querySelectorAll(S('searchInput'))].find(visible);
     const setSearch = async (text) => {
       if (!search) return;
       search.focus();
@@ -308,8 +308,8 @@
     for (const name of names) {
       await setSearch(name);
       const lower = name.toLowerCase();
-      const box = [...dialog.querySelectorAll('[role="checkbox"], input[type="checkbox"]')].find((node) => {
-        const row = node.closest('[role="listitem"], [role="option"], label, li') || node.parentElement;
+      const box = [...dialog.querySelectorAll(S('checkbox'))].find((node) => {
+        const row = node.closest(S('groupRow')) || node.parentElement;
         return row && (textOf(row).toLowerCase().includes(lower) || (node.getAttribute('aria-label') || '').toLowerCase().includes(lower));
       });
       if (!box) { missing.push(name); continue; }
@@ -325,10 +325,10 @@
   async function confirmShare({ caption }) {
     const dialog = topDialog();
     if (caption) {
-      const field = dialog && [...dialog.querySelectorAll('[contenteditable="true"], textarea')].find(visible);
+      const field = dialog && [...dialog.querySelectorAll(S('typed'))].find(visible);
       if (field) { field.focus(); document.execCommand('insertText', false, caption); await sleep(500); }
     }
-    const button = await waitFor(() => findButton(/^(publier|partager|post|share|publish|partager maintenant|share now|envoyer|send)$/i, { needEnabled: true }),
+    const button = await waitFor(() => findButton(X('confirmShare'), { needEnabled: true }),
       30000, 'le bouton « Publier » du partage');
     click(button);
     const start = Date.now();
@@ -345,25 +345,25 @@
   async function tickGroupsInComposer(names, count = names.length) {
     const want = Math.min(9, Math.max(count || 0, names.length));
     if (!want) return { groups: [], extra: [] };
-    const OPTION = /partager dans (des|un|les) groupes?|publier (aussi )?dans (des|les) groupes|share (to|in) (a )?groups?|post (to|in) groups?|^groupes?$|^groups?$/i;
+    const OPTION = X('groupOption');
     const option = choice(OPTION, topDialog() || document)
-      || [...(topDialog() || document).querySelectorAll('[role="switch"], [role="checkbox"], label, [tabindex="0"]')]
+      || [...(topDialog() || document).querySelectorAll(S('optionNodes'))]
         .find((n) => visible(n) && labelsOf(n).some((l) => OPTION.test(l)));
     if (!option) return { groups: [], extra: [] };
     const before = topDialog();
     click(option);
-    const list = await waitFor(() => { const d = topDialog(); return d && d !== before && d.querySelector('[role="checkbox"], input[type="checkbox"]') ? d : null; }, 15000, 'la liste des groupes');
+    const list = await waitFor(() => { const d = topDialog(); return d && d !== before && d.querySelector(S('checkbox')) ? d : null; }, 15000, 'la liste des groupes');
     // Long lists load while scrolling: a few turns to see more groups.
     for (let i = 0; i < 6; i += 1) {
-      for (const el of list.querySelectorAll('div, ul')) if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = el.scrollHeight;
+      for (const el of list.querySelectorAll(S('scrollables'))) if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = el.scrollHeight;
       await sleep(500);
     }
     const { picked } = names.length ? await pickGroups({ names: names.slice(0, want) }) : { picked: [] };
     const extra = [];
-    const boxes = () => [...list.querySelectorAll('[role="checkbox"], input[type="checkbox"]')].filter(visible);
+    const boxes = () => [...list.querySelectorAll(S('checkbox'))].filter(visible);
     const ticked = (b) => b.getAttribute('aria-checked') === 'true' || b.checked;
     const nameOf = (b) => {
-      const row = b.closest('[role="listitem"], [role="option"], label, li') || b.parentElement;
+      const row = b.closest(S('groupRow')) || b.parentElement;
       return (b.getAttribute('aria-label') || (row ? textOf(row) : '') || '').trim();
     };
     const free = boxes().filter((b) => !ticked(b));
@@ -377,7 +377,7 @@
       await sleep(350);
       if (ticked(box)) extra.push(nameOf(box));
     }
-    const save = await waitFor(() => findButton(/^(enregistrer|termin[ée]|ok|valider|confirmer|appliquer|save|done|apply|confirm)$/i, { needEnabled: true }), 10000, 'le bouton pour valider les groupes');
+    const save = await waitFor(() => findButton(X('saveGroups'), { needEnabled: true }), 10000, 'le bouton pour valider les groupes');
     click(save);
     await sleep(1500);
     return { groups: picked, extra };

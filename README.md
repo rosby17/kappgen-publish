@@ -63,3 +63,7 @@ L'extension lit uniquement le dossier que tu choisis et n'envoie tes vidéos qu'
 - Publier une nouvelle version : augmenter `version` dans `extension/manifest.json`, puis `./publier-version.sh` (crée la Release GitHub avec `kappgen-uploader.zip` ; pour le Chrome Web Store, envoyer `dist/kappgen-uploader-chrome-web-store.zip`, le même sans `key`).
 - `key` dans `manifest.json` fixe l'identifiant de l'extension (`ohgfmmejmlbdpflenlkikbnebgfegkic`) quel que soit le dossier d'où elle est chargée : ses réglages, dossiers choisis et connexion sont gardés d'une mise à jour à l'autre et d'un dossier à l'autre. Ne pas la retirer ni la changer.
 - Fiche Chrome Web Store (textes, justifications, images) : `store/`.
+
+## Recette de publication (protection, 1.17.0)
+Les sélecteurs et noms des boutons de YouTube Studio, Facebook, TikTok et Instagram ne sont PAS dans l'extension : le serveur KappGen les envoie (`GET /api/publish/recipe`, fichier `src/publish/recipe.json` du backend) aux seuls comptes en essai ou abonnés, marqués par compte. Les scripts de page les lisent avec `S('clé')` / `X('clé')` (lib/recette.js). RÈGLE : tout nouveau sélecteur ou texte de bouton va dans recipe.json (serveur), jamais en dur dans un script. Quand un site change : corriger recipe.json et redéployer le serveur, sans nouvelle version de l'extension.
+
