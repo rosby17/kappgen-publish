@@ -359,7 +359,7 @@ function videoItem(video) {
     status, actions: [drop, already, plan, go],
   });
   if (video.thumbnail_warning && !video.last_error) item.querySelector('.info').append(pill('warn', video.thumbnail_warning));
-  item.dataset.ytKinds = video.vertical_path ? 'video short' : 'video';
+  item.dataset.ytKinds = 'video';
   item.dataset.ytFailed = video.last_error ? '1' : '';
   return item;
 }
@@ -475,10 +475,19 @@ function channelItem(channel, panelOwn) {
 // YouTube tab filters: Tout / Vidéos / Shorts / Échecs, on the waiting and the published lists.
 let ytFilter = '';
 function applyYtFilter() {
-  for (const item of document.querySelectorAll('#videos > li, #sent > li')) {
-    const kinds = (item.dataset.ytKinds || 'video').split(' ');
-    item.hidden = ytFilter === 'echec' ? item.dataset.ytFailed !== '1' : !!ytFilter && !kinds.includes(ytFilter);
-  }
+  const shown = (list) => [...document.querySelectorAll(`#${list} > li`)].filter((item) => {
+    const kind = item.dataset.ytKinds || 'video';
+    item.hidden = ytFilter === 'echec' ? item.dataset.ytFailed !== '1' : !!ytFilter && kind !== ytFilter;
+    return !item.hidden;
+  }).length;
+  const waiting = shown('videos');
+  const sent = shown('sent');
+  const what = { video: ['Aucune vidéo en attente.', 'Vidéos déjà publiées'], short: ['Aucun Short en attente.', 'Shorts déjà publiés'],
+    echec: ['Aucun échec en attente.', 'Échecs parmi les publiées'] }[ytFilter] || ['Rien en attente : tout ce qui est dans le dossier est déjà publié (plus bas).', 'Déjà publiés'];
+  $('no-videos').textContent = what[0];
+  $('no-videos').hidden = waiting > 0 || !lastScan;
+  $('sent-title').textContent = `${what[1]} (${sent})`;
+  $('sent-box').hidden = !sent;
 }
 for (const chip of document.querySelectorAll('#yt-filters .chip')) {
   chip.addEventListener('click', () => {
@@ -524,16 +533,6 @@ function sentItem(video) {
     // A published video needs no buttons: it is listed small, and updated by
     // itself. "Mettre à jour" only shows when an update failed.
     actions.push(iconLink('link', 'Voir', `https://youtu.be/${video.youtube_id}`));
-    // Its vertical version (short.mp4) as a YouTube Short.
-    if (video.short_youtube_id) {
-      actions.push(iconLink('short', 'Short', `https://youtube.com/shorts/${video.short_youtube_id}`));
-    } else if (video.vertical_path) {
-      if (video.short_error) extra.push(el('div', 'small muted', `Short : ${video.short_error}`));
-      const short = button(video.short_error ? 'Réessayer le Short' : 'Publier le Short', 'btn secondary', () => act(item, short,
-        { type: 'shortYoutube', path: video.relative_path }, 'Envoi du Short sur YouTube en cours… (Studio s’ouvre)'));
-      short.dataset.publish = '1';
-      actions.push(short);
-    }
     if (video.update_error && video.update_tried_hash === video.hash) {
       const update = button('Réessayer la mise à jour', 'btn primary', () => act(item, update,
         { type: 'update', path: video.relative_path }, 'Mise à jour sur YouTube en cours…'));
@@ -544,11 +543,10 @@ function sentItem(video) {
   item = mediaRow({
     path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
     title: video.title || video.relative_path.split('/').pop(),
-    detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null,
-      video.short_youtube_id ? 'Short publié' : video.vertical_path ? 'Short prêt' : null].filter(Boolean).join(' · '),
+    detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
     status, actions: actions.filter((a) => !(a.tagName === 'A' && /youtu/.test(a.href))), extra,
   });
-  // The video's thumbnail opens it on YouTube; its Short's thumbnail next to it opens the Short.
+  // The video's thumbnail opens it on YouTube.
   const mini = item.querySelector('.mini');
   if (video.youtube_id && mini) {
     const link = el('a', 'mini-link');
@@ -557,21 +555,45 @@ function sentItem(video) {
     link.title = 'Voir la vidéo sur YouTube';
     mini.replaceWith(link);
     link.append(mini);
-    if (video.short_youtube_id) {
-      const short = el('a', 'mini-link short-thumb');
-      short.href = `https://youtube.com/shorts/${video.short_youtube_id}`;
-      short.target = '_blank';
-      short.title = 'Voir le Short sur YouTube';
-      const img = document.createElement('img');
-      img.src = `https://i.ytimg.com/vi/${video.short_youtube_id}/mqdefault.jpg`;
-      img.alt = '';
-      short.append(img, el('span', 'short-tag', 'Short'));
-      link.after(short);
-      item.classList.add('with-short');
-    }
   }
-  item.dataset.ytKinds = video.vertical_path || video.short_youtube_id ? 'video short' : 'video';
-  item.dataset.ytFailed = (video.update_error && video.update_tried_hash === video.hash) || video.short_error ? '1' : '';
+  item.dataset.ytKinds = 'video';
+  item.dataset.ytFailed = video.update_error && video.update_tried_hash === video.hash ? '1' : '';
+  return item;
+}
+
+// A video's Short (its vertical version, short.mp4): its own row, in « En
+// attente » until it is on YouTube, then in « Déjà publiés ».
+function shortItem(video) {
+  const actions = [];
+  let status;
+  let item;
+  if (video.short_youtube_id) {
+    status = pill('ok', 'Short publié sur YouTube.');
+  } else {
+    status = video.short_error ? pill('warn', `Échec : ${video.short_error}`) : pill('neutral', 'Part sur YouTube après sa vidéo.');
+    const go = button(video.short_error ? 'Réessayer' : 'Publier le Short', 'btn secondary', () => act(item, go,
+      { type: 'shortYoutube', path: video.relative_path }, 'Envoi du Short sur YouTube en cours… (Studio s’ouvre)'));
+    go.dataset.publish = '1';
+    actions.push(go);
+  }
+  item = mediaRow({
+    path: video.relative_path, preview: video.preview_path, youtubeId: video.short_youtube_id, emptyLabel: 'Short',
+    title: video.title || video.relative_path.split('/').pop(),
+    detail: [chan(video.channel_name), 'Short'].filter(Boolean).join(' · '),
+    status, actions,
+  });
+  item.classList.add('is-short');
+  const mini = item.querySelector('.mini');
+  if (video.short_youtube_id && mini) {
+    const link = el('a', 'mini-link');
+    link.href = `https://youtube.com/shorts/${video.short_youtube_id}`;
+    link.target = '_blank';
+    link.title = 'Voir le Short sur YouTube';
+    mini.replaceWith(link);
+    link.append(mini);
+  }
+  item.dataset.ytKinds = 'short';
+  item.dataset.ytFailed = !video.short_youtube_id && video.short_error ? '1' : '';
   return item;
 }
 
@@ -1125,9 +1147,9 @@ async function renderFolder() {
   showChannels = new Set([...data.videos, ...data.sent].map((v) => v.channel_key)).size > 1;
   for (const [key, own] of Object.entries(config.channels)) autoVisibility.set(key, own.visibility);
   const order = (v) => (v.schedule_at && v.schedule_at > Date.now() ? v.schedule_at : v.auto_ok ? Date.now() : Infinity);
-  $('videos').replaceChildren(...[...data.videos].sort((a, b) => order(a) - order(b)).map(videoItem));
+  const shortsWaiting = data.sent.filter((v) => v.youtube_id && v.vertical_path && !v.short_youtube_id).map(shortItem);
+  $('videos').replaceChildren(...[...data.videos].sort((a, b) => order(a) - order(b)).map(videoItem), ...shortsWaiting);
   queueMicrotask(applyJob);
-  $('no-videos').hidden = data.videos.length > 0;
   const excluded = data.excluded || [];
   $('excluded-box').hidden = !excluded.length;
   $('excluded-title').textContent = `Retirées, jamais publiées (${excluded.length})`;
@@ -1186,7 +1208,9 @@ function facebookItem(video, page, as = 'video') {
 // one, otherwise the video itself, horizontal or not) and the videos of the
 // posts folder.
 // X: YouTube videos and Facebook posts published since X was ticked, and the rest on request.
-function renderX() {
+let xConfig = null;
+async function renderX() {
+  xConfig = await settings();
   const items = [];
   for (const v of (lastScan && lastScan.sent) || []) {
     if (!v.youtube_id) continue;
@@ -1200,13 +1224,17 @@ function renderX() {
       detail: [POST_TYPES[p.type] || 'Post', chan(p.channel_name)].filter(Boolean).join(' · '),
       done: p.x_statut === 'publie', error: p.x_error, date: p.published_at });
   }
+  // What X sends by itself: what is published since X was ticked.
+  const since = (xConfig && xConfig.xSince) || Date.now();
+  for (const it of items) it.auto = (Date.parse(it.date) || it.date || 0) >= since;
   const xCard = (it) => {
     let item;
     const actions = [];
     let status;
     if (it.done) status = pill('ok', 'Publié sur X.');
     else {
-      status = it.error ? pill('warn', `Échec : ${it.error}`) : pill('neutral', 'Prêt pour X.');
+      status = it.error ? pill('warn', `Échec : ${it.error}`)
+        : it.auto ? pill('ok', 'Part tout seul sur X.') : pill('neutral', 'Publié avant d’avoir coché X : clique « Publier ».');
       const go = button(it.error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
         { type: it.kind === 'video' ? 'x' : 'xPost', path: it.path }, 'Publication sur X en cours…'));
       go.dataset.publish = '1';
@@ -1345,9 +1373,10 @@ async function renderFacebook(data) {
 // selection is required here: the folder and its manifest identify each
 // publication.
 async function renderOnYoutube(data, config) {
-  $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0)).map(sentItem));
-  $('sent-title').textContent = `Déjà publiées (${data.sent.length})`;
-  $('sent-box').hidden = !data.sent.length;
+  // The long video and its Short: two rows, one under the other.
+  $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
+    .flatMap((v) => (v.short_youtube_id ? [sentItem(v), shortItem(v)] : [sentItem(v)])));
+  applyYtFilter();
   applyJob();
   if (!data.sent.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';
 }
