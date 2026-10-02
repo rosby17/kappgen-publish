@@ -161,7 +161,7 @@
     return true;
   }
 
-  async function publish({ groups = [] } = {}) {
+  async function publish({ groups = [], groupCount = 0 } = {}) {
     // The Reel composer has one or two "Next" screens before "Publish",
     // and the file must be fully sent (100 %) before each of them.
     keepQuiet(true);
@@ -175,16 +175,16 @@
     }
     const finalButton = /^(publish|publier|share now|share|partager maintenant|partager|publier maintenant|post)$/i;
     let button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 15 * 60000, 'le bouton Publier');
-    let picked = [];
-    if (groups.length) {
-      picked = await tickGroupsInComposer(groups).catch(() => []);
+    let picked = { groups: [], extra: [] };
+    if (groups.length || groupCount) {
+      picked = await tickGroupsInComposer(groups, groupCount).catch(() => ({ groups: [], extra: [] }));
       button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 60000, 'le bouton Publier');
     }
     silence();
     click(button);
     await sleep(3000);
     keepQuiet(false);
-    return { groups: picked };
+    return picked;
   }
 
   // Opens the "Create post" composer of the Page (text, with or without photo).
@@ -209,10 +209,10 @@
   // timeout: how long Facebook may keep the button grey (a video uploads first).
   // groups: names of groups to tick in the composer's own « share to groups »
   // option before « Publier » (Facebook takes 9 at most); returns the ticked ones.
-  async function sendPost({ timeout = 90000, groups = [] } = {}) {
+  async function sendPost({ timeout = 90000, groups = [], groupCount = 0 } = {}) {
     const dialog = composer();
     let groupsTried = false;
-    let picked = [];
+    let picked = { groups: [], extra: [] };
     const final = /^(post|publier|publish|share now|share|partager maintenant|partager|publier maintenant)$/i;
     const isFinal = (node) => labelsOf(node).some((label) => final.test(label));
     // « Suivant » first when Facebook shows it (it stays grey while the text
@@ -228,9 +228,9 @@
       }, timeout, 'le bouton Suivant / Publier actif (texte ou vidéo pas encore pris en compte)');
       silence();
       let target = button;
-      if (isFinal(button) && groups.length && !groupsTried) {
+      if (isFinal(button) && (groups.length || groupCount) && !groupsTried) {
         groupsTried = true;
-        picked = await tickGroupsInComposer(groups).catch(() => []);
+        picked = await tickGroupsInComposer(groups, groupCount).catch(() => ({ groups: [], extra: [] }));
         target = await waitFor(() => findButton(final, { needEnabled: true }), timeout, 'le bouton Publier');
       }
       click(target);
@@ -261,7 +261,7 @@
     const late = inWindow();
     if (late) { click(late); await sleep(1500); }
     keepQuiet(false);
-    return { groups: picked };
+    return picked;
   }
 
 
@@ -338,17 +338,49 @@
 
   // In the Page's composer (last screen, before « Publier »): the option to
   // publish in groups too, its list ticked by name, then back to the composer.
-  async function tickGroupsInComposer(names) {
-    const option = choice(/partager dans (des|un|les) groupes?|publier (aussi )?dans (des|les) groupes|share (to|in) (a )?groups?|post (to|in) groups?|^groupes?$|^groups?$/i, topDialog() || document);
-    if (!option) return [];
+  // On the composer's last screen (after « Suivant »): « Partager dans les
+  // groupes » → the groups of the creator's list found by name, completed at
+  // random among the groups Facebook lists, up to `count` (9 at most).
+  // Returns { groups: names ticked from the list, extra: names ticked at random }.
+  async function tickGroupsInComposer(names, count = names.length) {
+    const want = Math.min(9, Math.max(count || 0, names.length));
+    if (!want) return { groups: [], extra: [] };
+    const OPTION = /partager dans (des|un|les) groupes?|publier (aussi )?dans (des|les) groupes|share (to|in) (a )?groups?|post (to|in) groups?|^groupes?$|^groups?$/i;
+    const option = choice(OPTION, topDialog() || document)
+      || [...(topDialog() || document).querySelectorAll('[role="switch"], [role="checkbox"], label, [tabindex="0"]')]
+        .find((n) => visible(n) && labelsOf(n).some((l) => OPTION.test(l)));
+    if (!option) return { groups: [], extra: [] };
     const before = topDialog();
     click(option);
-    await waitFor(() => { const d = topDialog(); return d && d !== before && d.querySelector('[role="checkbox"], input[type="checkbox"]'); }, 15000, 'la liste des groupes');
-    const { picked } = await pickGroups({ names: names.slice(0, 9) });
+    const list = await waitFor(() => { const d = topDialog(); return d && d !== before && d.querySelector('[role="checkbox"], input[type="checkbox"]') ? d : null; }, 15000, 'la liste des groupes');
+    // Long lists load while scrolling: a few turns to see more groups.
+    for (let i = 0; i < 6; i += 1) {
+      for (const el of list.querySelectorAll('div, ul')) if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = el.scrollHeight;
+      await sleep(500);
+    }
+    const { picked } = names.length ? await pickGroups({ names: names.slice(0, want) }) : { picked: [] };
+    const extra = [];
+    const boxes = () => [...list.querySelectorAll('[role="checkbox"], input[type="checkbox"]')].filter(visible);
+    const ticked = (b) => b.getAttribute('aria-checked') === 'true' || b.checked;
+    const nameOf = (b) => {
+      const row = b.closest('[role="listitem"], [role="option"], label, li') || b.parentElement;
+      return (b.getAttribute('aria-label') || (row ? textOf(row) : '') || '').trim();
+    };
+    const free = boxes().filter((b) => !ticked(b));
+    for (let i = free.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [free[i], free[j]] = [free[j], free[i]];
+    }
+    for (const box of free) {
+      if (boxes().filter(ticked).length >= want) break;
+      click(box);
+      await sleep(350);
+      if (ticked(box)) extra.push(nameOf(box));
+    }
     const save = await waitFor(() => findButton(/^(enregistrer|termin[ée]|ok|valider|confirmer|appliquer|save|done|apply|confirm)$/i, { needEnabled: true }), 10000, 'le bouton pour valider les groupes');
     click(save);
     await sleep(1500);
-    return picked;
+    return { groups: picked, extra };
   }
 
   async function closeDialogs() {

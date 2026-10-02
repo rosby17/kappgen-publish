@@ -531,7 +531,7 @@ async function openFacebookReel(pageUrl) {
 }
 
 // filePath: the file to post (the long video, or its vertical version).
-async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path, { groups = [] } = {}) {
+async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path, { groups = [], groupCount = 0 } = {}) {
   if (!filePath) throw new Error('Aucun fichier vertical associé à cette vidéo.');
   const tabId = await openFacebookReel(pageUrl);
   // The long video is a normal video post ("Photo/vidéo"); only the vertical
@@ -550,7 +550,7 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
     });
     return true;
   }
-  let picked = [];
+  let picked = { groups: [], extra: [] };
   try {
     await whileShown(tabId, async () => {
       await step(tabId, 'openReel');
@@ -562,8 +562,7 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
       // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
       const caption = (video.title || video.description || '').slice(0, 5000);
       await step(tabId, 'fillCaption', { caption });
-      const sent = await step(tabId, 'publish', { groups });
-      picked = (sent && sent.groups) || [];
+      picked = await step(tabId, 'publish', { groups, groupCount });
     });
     return picked;
   } finally {
@@ -1152,18 +1151,26 @@ async function publishFacebookPost(post, { auto = false } = {}) {
   let tabId = null;
   try {
     // Groups ticked in the composer itself, while publishing (9 at most).
+    // While publishing (« Suivant » → « Partager dans les groupes »): the
+    // groups of the list found by name, completed at random among the groups
+    // Facebook offers, up to the number asked (9 at most per publication).
     const plan = await groupsFor(post);
     const names = (await folderSettings()).facebookGroupNames || {};
+    const count = Math.min(SHARE_BATCH, await groupTarget(post, plan));
     const during = plan.filter((url) => names[url] && !(post.groups_shared && post.groups_shared[url] && post.groups_shared[url].statut === 'publie')).slice(0, SHARE_BATCH);
-    const markDuring = (picked) => {
-      const lower = (Array.isArray(picked) ? picked : []).map((n) => n.toLowerCase());
+    const markDuring = (result) => {
+      const picked = Array.isArray(result) ? result : (result && result.groups) || [];
+      const extra = (result && Array.isArray(result.extra)) ? result.extra : [];
+      const lower = picked.map((n) => n.toLowerCase());
       const shared = { ...(post.groups_shared || {}) };
-      for (const url of during) if (lower.includes(names[url].toLowerCase())) shared[url] = { statut: 'publie', published_at: new Date().toISOString(), mode: 'publication' };
+      const at = new Date().toISOString();
+      for (const url of during) if (lower.includes(names[url].toLowerCase())) shared[url] = { statut: 'publie', published_at: at, mode: 'publication' };
+      for (const name of extra) shared[`facebook:${name}`] = { statut: 'publie', published_at: at, mode: 'publication', nom: name };
       post.groups_shared = shared;
     };
     if (post.type === 'reel') {
       markDuring(await publishFacebookReel({ title: '', description: post.text }, post.channel_name, page, post.video_path,
-        { groups: during.map((url) => names[url]) }));
+        { groups: during.map((url) => names[url]), groupCount: count }));
     } else {
       tabId = await openFacebookReel(page);
       await whileShown(tabId, async () => {
@@ -1176,9 +1183,8 @@ async function publishFacebookPost(post, { auto = false } = {}) {
         }
         await setJob({ message: 'Texte…' });
         await step(tabId, 'fillCaption', { caption: post.text });
-        await setJob({ message: during.length ? `Publication sur la Page et dans ${during.length} groupe(s)…` : 'Publication…' });
-        const sent = await step(tabId, 'sendPost', { groups: during.map((url) => names[url]) });
-        markDuring(sent && sent.groups);
+        await setJob({ message: count ? `Publication sur la Page et dans ${count} groupe(s)…` : 'Publication…' });
+        markDuring(await step(tabId, 'sendPost', { groups: during.map((url) => names[url]), groupCount: count }));
       });
       closeStudioTab(tabId); // only a tab opened for this post is closed
     }
@@ -1207,6 +1213,16 @@ function groupUrl(url) {
   const m = facebookWww(String(url || '').trim()).match(/^https:\/\/www\.facebook\.com\/groups\/[^/?#\s]+/i);
   return m ? `${m[0]}/` : null;
 }
+// How many groups a post goes to: its own list, or « groupes par publication »
+// when sharing is on for it (even with no list: Facebook's own list is used).
+async function groupTarget(post, plan) {
+  if (post.groups === false) return 0;
+  if (Array.isArray(post.groups)) return plan.length;
+  const settings = await folderSettings();
+  if (!settings.facebookGroupsOn && post.groups !== true) return 0;
+  return Math.max(plan.length, Math.min(MAX_GROUPS, Math.max(1, Number(settings.facebookGroupsPerPost) || 9)));
+}
+
 // A post's groups: its own list ("groupes" in publication.json), otherwise,
 // when sharing is switched on, N groups drawn at random from the creator's
 // list (N = « groupes par publication »), once: the draw is written into the
@@ -1330,8 +1346,12 @@ async function shareAllAtOnce(post, urls) {
 async function shareInGroups(post) {
   const groups = await groupsFor(post);
   const done = { ...(post.groups_shared || {}) };
-  let todo = groups.filter((url) => !(done[url] && done[url].statut === 'publie'));
-  let ok = groups.length - todo.length;
+  const already = Object.values(done).filter((g) => g.statut === 'publie').length;
+  const target = Math.max(groups.length, await groupTarget(post, groups));
+  // Only what is still missing (groups ticked while publishing count, even
+  // the ones Facebook offered that are not in the list).
+  let todo = groups.filter((url) => !(done[url] && done[url].statut === 'publie')).slice(0, Math.max(0, target - already));
+  let ok = already;
   let bad = 0;
   // By packs of 9 (25 groups = 3 shares), as long as Facebook offers the boxes.
   for (let pack = 0; todo.length > 1 && pack < Math.ceil(MAX_GROUPS / SHARE_BATCH); pack += 1) {
@@ -1385,7 +1405,7 @@ async function shareInGroups(post) {
     }
     await folder('markPost', { path: post.path, patch: { groupes_partages: done } }).catch(() => {});
   }
-  return { ok, bad, total: groups.length };
+  return { ok, bad, total: Math.max(target, ok + bad) };
 }
 
 // Next post whose time has come (one per pass, so posts stay spread out).
@@ -1466,6 +1486,8 @@ async function autoPass() {
   const settings = await folderSettings();
   const access = await folder('access').catch(() => ({ state: 'none' }));
   if (access.state === 'prompt') await askAccess().catch(() => {});
+  // No folder chosen yet: nothing to reopen, the panel's first step says what to do.
+  if (access.state === 'none') { await autoState('nofolder'); return; }
   if (access.state !== 'granted') {
     // Chrome asks again for folder access after some restarts — re-granting
     // an existing handle needs a real click (requestPermission can't be

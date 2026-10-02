@@ -748,8 +748,9 @@ async function renderGroups() {
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
   const per = Math.min(config.facebookGroupsPerPost || 9, groups.length);
   const state = $('fb-groups-state');
-  state.className = `pill ${config.facebookGroupsOn && groups.length ? 'ok' : 'neutral'}`;
-  state.textContent = config.facebookGroupsOn && groups.length ? `${per} par post sur ${groups.length}` : 'Désactivé';
+  state.className = `pill ${config.facebookGroupsOn ? 'ok' : 'neutral'}`;
+  state.textContent = !config.facebookGroupsOn ? 'Désactivé'
+    : groups.length ? `${per} par post sur ${groups.length}` : `${Math.min(config.facebookGroupsPerPost || 9, 9)} par post`;
 }
 async function saveGroups() {
   const lines = $('fb-groups').value.split(/\s+/).filter(Boolean);
@@ -758,7 +759,7 @@ async function saveGroups() {
   const current = await settings();
   current.facebookGroups = valid;
   current.facebookGroupsPerPost = Math.min(25, Math.max(1, Number($('fb-groups-per').value) || 9));
-  current.facebookGroupsOn = $('fb-groups-on').checked && valid.length > 0;
+  current.facebookGroupsOn = $('fb-groups-on').checked; // no list needed: Facebook's own list is used
   await chrome.storage.local.set({ folder: current });
   $('fb-groups').value = valid.join('\n');
   const saved = $('fb-groups-saved');
@@ -791,17 +792,13 @@ async function findGroups() {
 $('fb-groups-find').addEventListener('click', async () => { if (await findGroups()) saveGroups(); });
 $('fb-groups-save').addEventListener('click', saveGroups);
 $('fb-groups-per').addEventListener('change', saveGroups);
-// Ticked with no group yet: all the groups of the account are loaded first.
-$('fb-groups-on').addEventListener('change', async () => {
-  if ($('fb-groups-on').checked && !$('fb-groups').value.trim()) await findGroups();
-  saveGroups();
-});
+$('fb-groups-on').addEventListener('change', saveGroups);
 
 // null when no group list is set (no per-post button then).
 let groupsDefault = null;
 async function renderPosts() {
   const groupConfig = await settings();
-  groupsDefault = (groupConfig.facebookGroups || []).length ? !!groupConfig.facebookGroupsOn : null;
+  groupsDefault = !!groupConfig.facebookGroupsOn;
   renderGroups().catch(() => {});
   renderSetup().catch(() => {});
   const access = await renderFbAccess();
@@ -1567,6 +1564,8 @@ async function renderAutoStatus() {
   if (paused) {
     box.hidden = true;
     return;
+  } else if (autoStatus && autoStatus.state === 'nofolder') {
+    tone = 'warn'; text = 'Publication automatique en attente : choisis d’abord le dossier de tes vidéos (Réglages).';
   } else if (!lastAutoTick) {
     text = 'Publication automatique : démarrage…';
   } else if (autoStatus && autoStatus.state === 'subscription') {
@@ -1588,7 +1587,18 @@ async function renderAutoStatus() {
 // (and the posts folder if there is one), straight from the click.
 $('auto-resume').addEventListener('click', async () => {
   const main = rootHandle || await KappDossier.loadRoot();
-  if (main) await main.requestPermission({ mode: 'readwrite' }).catch(() => {});
+  if (!main) {
+    // No folder remembered: choose it (Réglages, first card).
+    $('paused').hidden = true;
+    $('setup-folder').click();
+    return;
+  }
+  const state = await main.requestPermission({ mode: 'readwrite' }).catch(() => 'denied');
+  if (state !== 'granted') {
+    $('auto-resume').textContent = 'Accès refusé : clique de nouveau puis « Autoriser à chaque visite »';
+    setTimeout(() => { $('auto-resume').textContent = 'Reprendre les publications'; }, 6000);
+    return;
+  }
   const fb = fbRootHandle || await KappDossier.loadFbRoot().catch(() => null);
   if (fb && await fb.queryPermission({ mode: 'readwrite' }).catch(() => 'granted') !== 'granted') {
     await fb.requestPermission({ mode: 'readwrite' }).catch(() => {});
