@@ -52,6 +52,7 @@ const ICON_PATHS = {
   link: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
   short: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="m10.5 9.5 4 2.5-4 2.5z"/>',
   check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/>',
+  dots: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>',
 };
 function icon(name) {
@@ -413,7 +414,11 @@ function videoItem(video) {
     path: video.relative_path, preview: video.preview_path, title: video.title,
     details: [chan(video.channel_name), [size(video.size_bytes), video.thumbnail_path ? 'miniature' : 'sans miniature',
       video.tags.length ? `${video.tags.length} mots-clés` : null].filter(Boolean).join(' · ')],
-    status, actions: [drop, already, plan, go],
+    status, actions: [go, moreMenu([
+      entryOf(plan, video.schedule_at ? 'Changer l’heure de publication' : 'Programmer', 'clock'),
+      entryOf(already, 'Déjà publiée (déjà sur YouTube)', 'check'),
+      entryOf(drop, 'Ne pas publier', 'trash', { danger: true }),
+    ])],
   });
   if (video.thumbnail_warning && !video.last_error) item.querySelector('.info').append(pill('warn', video.thumbnail_warning));
   item.dataset.ytKinds = 'video';
@@ -620,26 +625,66 @@ function sentItem(video) {
   return item;
 }
 
+// « ⋮ » : the secondary actions of a row (Déjà publié, Retirer, Changer
+// l'heure…) in a small menu, written out in full; only « Publier » stays on
+// the row. entries: { label, icon, run, danger }.
+function closeMenus(except) {
+  for (const m of document.querySelectorAll('.more-menu')) if (m !== except) m.hidden = true;
+}
+document.addEventListener('click', () => closeMenus());
+function moreMenu(entries = []) {
+  const wrap = el('div', 'more');
+  const menu = el('div', 'more-menu');
+  menu.hidden = true;
+  const open = el('button', 'btn ghost icon-btn icon-only more-btn');
+  open.type = 'button';
+  open.append(icon('dots'));
+  open.title = 'Autres actions';
+  open.setAttribute('aria-label', 'Autres actions');
+  open.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeMenus(menu);
+    menu.hidden = !menu.hidden;
+  });
+  wrap.add = (entry) => {
+    if (!entry) return;
+    const row = el('button', `more-item${entry.danger ? ' danger' : ''}`);
+    row.type = 'button';
+    if (entry.icon) row.append(icon(entry.icon));
+    row.append(el('span', null, entry.label));
+    if (entry.title) row.title = entry.title;
+    row.addEventListener('click', (event) => {
+      event.stopPropagation();
+      menu.hidden = true;
+      entry.run();
+    });
+    menu.append(row);
+  };
+  entries.forEach(wrap.add);
+  wrap.append(open, menu);
+  return wrap;
+}
+// A button built elsewhere (time picker, action) offered in the menu.
+const entryOf = (node, label, iconName, extra = {}) => ({ label, icon: iconName, run: () => node.click(), title: node.title, ...extra });
+
 // « Déjà publié » on a failed row: the creator published it by hand. It is
 // marked as published on that network, so it is neither sent again nor shown
 // as a failure (nothing else changes).
 const nowIso = () => new Date().toISOString();
 function alreadyDone(getItem, mark) {
-  const node = button('', 'btn ghost icon-btn icon-only', async () => {
-    node.disabled = true;
-    try {
-      await mark();
-      getItem().say('ok', 'Marqué comme déjà publié.');
-      setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
-    } catch (error) {
-      node.disabled = false;
-      getItem().say('warn', String((error && error.message) || error));
-    }
-  });
-  node.append(icon('check'));
-  node.title = 'Déjà publié : tu l’as publié à la main, le marquer comme publié sans le renvoyer.';
-  node.setAttribute('aria-label', 'Déjà publié');
-  return node;
+  return {
+    label: 'Déjà publié (fait à la main)', icon: 'check',
+    title: 'Tu l’as publié à la main : le marquer comme publié, sans le renvoyer.',
+    run: async () => {
+      try {
+        await mark();
+        getItem().say('ok', 'Marqué comme déjà publié.');
+        setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
+      } catch (error) {
+        getItem().say('warn', String((error && error.message) || error));
+      }
+    },
+  };
 }
 const markVideoManual = (path, data) => KappDossier.mark(path, 'manual', data);
 const markPostManual = (path, net) => (net === 'facebook'
@@ -651,22 +696,20 @@ const markPostManual = (path, net) => (net === 'facebook'
 const RETIRED = 'retire';
 const realId = (id) => (id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null);
 function retireButton(getItem, mark) {
-  const node = button('', 'btn ghost icon-btn icon-only danger', async () => {
-    if (!confirm('Retirer cette publication ? Elle ne partira pas et ne s’affichera plus (aucun fichier n’est supprimé).')) return;
-    node.disabled = true;
-    try {
-      await mark();
-      getItem().say('ok', 'Retirée : elle ne partira pas.');
-      setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
-    } catch (error) {
-      node.disabled = false;
-      getItem().say('warn', String((error && error.message) || error));
-    }
-  });
-  node.append(icon('trash'));
-  node.title = 'Retirer : cette publication ne partira pas et disparaît de la liste (le fichier reste dans le dossier).';
-  node.setAttribute('aria-label', 'Retirer');
-  return node;
+  return {
+    label: 'Retirer (ne pas publier)', icon: 'trash', danger: true,
+    title: 'Cette publication ne partira pas et disparaît de la liste (le fichier reste dans le dossier).',
+    run: async () => {
+      if (!confirm('Retirer cette publication ? Elle ne partira pas et ne s’affichera plus (aucun fichier n’est supprimé).')) return;
+      try {
+        await mark();
+        getItem().say('ok', 'Retirée : elle ne partira pas.');
+        setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
+      } catch (error) {
+        getItem().say('warn', String((error && error.message) || error));
+      }
+    },
+  };
 }
 const retirePost = (path, net) => (net === 'facebook'
   ? KappDossier.markPost(path, { statut: RETIRED, retire_le: nowIso() })
@@ -693,8 +736,8 @@ function shortItem(video) {
     go.title = video.short_error ? 'Renvoyer le Short sur YouTube' : 'Publier le Short sur YouTube';
     go.dataset.publish = '1';
     actions.push(go);
-    actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: 'manuel' })),
-      retireButton(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: RETIRED })));
+    actions.push(moreMenu([alreadyDone(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: 'manuel' })),
+      retireButton(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: RETIRED }))]));
   }
   item = mediaRow({
     path: video.relative_path, emptyLabel: 'Short',
@@ -950,9 +993,9 @@ function postRow(post) {
     const go = button(post.statut === 'echec' ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
       { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
     go.dataset.publish = '1';
-    acts.append(change, go);
-    acts.append(alreadyDone(() => item, () => markPostManual(post.path, 'facebook')),
-      retireButton(() => item, () => retirePost(post.path, 'facebook')));
+    acts.append(go);
+    acts.append(moreMenu([entryOf(change, 'Changer l’heure', 'clock'), alreadyDone(() => item, () => markPostManual(post.path, 'facebook')),
+      retireButton(() => item, () => retirePost(post.path, 'facebook'))]));
   }
   item.append(when, mini, what, acts);
   item.say = (kind, text) => live.replaceChildren(pill(kind, text));
@@ -1370,8 +1413,8 @@ function facebookItem(video, page, as = 'video') {
     publish.dataset.publish = '1';
     actions.push(publish);
     const field = reel ? 'facebookReelAt' : 'facebookPublishedAt';
-    actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path, { [field]: nowIso() })),
-      retireButton(() => item, () => markVideoManual(video.relative_path, { [field]: RETIRED })));
+    actions.push(moreMenu([alreadyDone(() => item, () => markVideoManual(video.relative_path, { [field]: nowIso() })),
+      retireButton(() => item, () => markVideoManual(video.relative_path, { [field]: RETIRED }))]));
   }
   item = mediaRow({
     path: video.relative_path, preview: video.preview_path, youtubeId: reel ? (realId(video.short_youtube_id) || video.youtube_id) : video.youtube_id,
@@ -1444,10 +1487,10 @@ async function renderShare(net) {
         { type: it.kind === 'video' ? k.video : k.post, path: it.path }, `Publication sur ${k.name} en cours…`));
       go.dataset.publish = '1';
       actions.push(go);
-      actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+      actions.push(moreMenu([alreadyDone(() => item, () => (it.kind === 'video'
         ? markVideoManual(it.path, { [`${net}PublishedAt`]: nowIso() }) : markPostManual(it.path, net))),
       retireButton(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { [`${net}PublishedAt`]: RETIRED }) : retirePost(it.path, net))));
+        ? markVideoManual(it.path, { [`${net}PublishedAt`]: RETIRED }) : retirePost(it.path, net)))]));
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, emptyLabel: it.kind === 'video' ? 'Vidéo' : 'Post', title: it.title, detail: it.detail, status, actions });
     return item;
@@ -1491,16 +1534,18 @@ function renderTikTok() {
         { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
       go.dataset.publish = '1';
       actions.push(go);
-      actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+      actions.push(moreMenu([alreadyDone(() => item, () => (it.kind === 'video'
         ? markVideoManual(it.path, { tiktokPublishedAt: nowIso() }) : markPostManual(it.path, 'tiktok'))),
       retireButton(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { tiktokPublishedAt: RETIRED }) : retirePost(it.path, 'tiktok'))));
+        ? markVideoManual(it.path, { tiktokPublishedAt: RETIRED }) : retirePost(it.path, 'tiktok')))]));
       // The long version stays possible, as an option.
       if (it.kind === 'video' && it.vertical) {
         const long = button('Version longue', 'btn ghost', () => act(item, long,
           { type: 'tiktok', path: it.path, long: true }, 'Version longue vers TikTok en cours…'));
         long.dataset.publish = '1';
-        actions.unshift(long);
+        const menuNode = actions.find((a) => a.classList && a.classList.contains('more'));
+        if (menuNode) menuNode.add(entryOf(long, 'Publier la version longue', 'short'));
+        else actions.push(long);
       }
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
@@ -1546,10 +1591,10 @@ function renderInstagram() {
         { type: it.kind === 'video' ? 'instagram' : 'instagramPost', path: it.path }, 'Publication sur Instagram en cours… (Instagram s’ouvre)'));
       go.dataset.publish = '1';
       actions.push(go);
-      actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+      actions.push(moreMenu([alreadyDone(() => item, () => (it.kind === 'video'
         ? markVideoManual(it.path, { instagramPublishedAt: nowIso() }) : markPostManual(it.path, 'instagram'))),
       retireButton(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { instagramPublishedAt: RETIRED }) : retirePost(it.path, 'instagram'))));
+        ? markVideoManual(it.path, { instagramPublishedAt: RETIRED }) : retirePost(it.path, 'instagram')))]));
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
     return item;
