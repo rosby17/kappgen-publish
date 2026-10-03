@@ -617,3 +617,9 @@ li.row.media .row-extra .input-group input { height: 30px; font-size: 12px; }
 li.row.media .row-extra .input-group .btn { height: 30px; }
 li.row.media .acts.below { grid-column: 1 / -1; justify-content: flex-end; }
 li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+
+/* « Déjà publié » / « Retirer » : icônes seules, pour laisser la place au titre. */
+.btn.icon-only { padding: 0 6px; min-width: 0; gap: 0; }
+.btn.icon-only .ico { width: 14px; height: 14px; }
+li.row .acts .btn.icon-only { padding: 0 6px; }
+.btn.icon-only.danger:hover { color: var(--danger); border-color: var(--danger); }

@@ -51,6 +51,8 @@ const ICON_PATHS = {
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   link: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
   short: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="m10.5 9.5 4 2.5-4 2.5z"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/>',
+  trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>',
 };
 function icon(name) {
   const span = el('span', 'ico-wrap');
@@ -623,7 +625,7 @@ function sentItem(video) {
 // as a failure (nothing else changes).
 const nowIso = () => new Date().toISOString();
 function alreadyDone(getItem, mark) {
-  const node = button('Déjà publié', 'btn ghost', async () => {
+  const node = button('', 'btn ghost icon-btn icon-only', async () => {
     node.disabled = true;
     try {
       await mark();
@@ -634,7 +636,9 @@ function alreadyDone(getItem, mark) {
       getItem().say('warn', String((error && error.message) || error));
     }
   });
-  node.title = 'Tu l’as publié à la main : le marquer comme publié, sans le renvoyer.';
+  node.append(icon('check'));
+  node.title = 'Déjà publié : tu l’as publié à la main, le marquer comme publié sans le renvoyer.';
+  node.setAttribute('aria-label', 'Déjà publié');
   return node;
 }
 const markVideoManual = (path, data) => KappDossier.mark(path, 'manual', data);
@@ -647,7 +651,7 @@ const markPostManual = (path, net) => (net === 'facebook'
 const RETIRED = 'retire';
 const realId = (id) => (id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null);
 function retireButton(getItem, mark) {
-  const node = button('Retirer', 'btn ghost', async () => {
+  const node = button('', 'btn ghost icon-btn icon-only danger', async () => {
     if (!confirm('Retirer cette publication ? Elle ne partira pas et ne s’affichera plus (aucun fichier n’est supprimé).')) return;
     node.disabled = true;
     try {
@@ -659,7 +663,9 @@ function retireButton(getItem, mark) {
       getItem().say('warn', String((error && error.message) || error));
     }
   });
-  node.title = 'Empêcher cette publication de partir et la retirer de la liste (le fichier reste dans le dossier).';
+  node.append(icon('trash'));
+  node.title = 'Retirer : cette publication ne partira pas et disparaît de la liste (le fichier reste dans le dossier).';
+  node.setAttribute('aria-label', 'Retirer');
   return node;
 }
 const retirePost = (path, net) => (net === 'facebook'
