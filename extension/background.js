@@ -976,7 +976,8 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
     job = { source, videoId, tabId, visibility, auto, stage: 'filling',
       video: video && { title: video.title, description: video.description, tags: video.tags,
         channel_name: video.channel_name, channel_key: video.channel_key, relative_path: video.relative_path,
-        hash: video.hash, vertical_path: video.vertical_path } };
+        hash: video.hash, vertical_path: video.vertical_path, comment: video.comment || null },
+      scheduleAt, commentDelay: source === 'folder' ? Number(ownOf(await folderSettings(), video).commentDelay) : NaN };
     await chrome.storage.local.set({ pending: job });
     await whileShown(tabId, async () => {
       await step(tabId, 'waitForFilePicker');
@@ -1059,7 +1060,7 @@ async function earlyLink(tabId, timeout = 60000) {
 // until the transfer is over (closing it would cancel the transfer).
 let linkedYoutubeId = null; // set once the video has a YouTube link
 async function finishUpload(job) {
-  const { source, videoId, tabId, visibility, video } = job;
+  const { source, videoId, tabId, visibility, video, scheduleAt } = job;
   let { youtubeId } = job;
   if (job.stage !== 'saved') {
     const linkDeadline = Date.now() + 10 * 60 * 1000;
@@ -1179,6 +1180,13 @@ async function finishUpload(job) {
   await setJob({ running: false, done: true, error: null, youtubeUrl: `https://youtu.be/${youtubeId}`,
     ...(socialWarning ? { warning: socialWarning } : {}), message: `Vidéo envoyée sur YouTube.${socialMessage}` });
   await remember({ title: video.title, channel: video.channel_name, youtubeId, visibility, at: Date.now() });
+  // The video's pinned comment, once it is public (at its scheduled time, or
+  // a few minutes after the upload); never on a private video.
+  if (source === 'folder' && video.comment && visibility !== 'PRIVATE') {
+    const delay = Number.isFinite(job.commentDelay) ? job.commentDelay : COMMENT_DELAY_MIN + 1;
+    await queueComment({ id: `yt:${video.relative_path}`, network: 'youtube', path: video.relative_path, youtubeId, text: video.comment, pin: true,
+      title: video.title, channel: video.channel_name, due: Math.max(Date.now(), scheduleAt || 0) + delay * 60000 }).catch(() => {});
+  }
   return youtubeId;
 }
 
@@ -1771,6 +1779,13 @@ async function publishFacebookPost(post, { auto = false } = {}) {
     await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null,
       groupes_erreur: post.groups_error || null,
       ...(Object.keys(post.groups_shared || {}).length ? { groupes_partages: post.groups_shared } : {}) } });
+    // The comment that goes with the post, a few minutes after it.
+    if (post.comment && post.comment_statut !== 'publie') {
+      const delay = post.comment_delay != null ? post.comment_delay : COMMENT_DELAY_MIN;
+      await queueComment({ id: `fb:${post.path}`, network: 'facebook', path: post.path, page, snippet: post.text,
+        text: post.comment, title: post.text.split('\n')[0].slice(0, 80), channel: post.channel_name, due: Date.now() + delay * 60000 }).catch(() => {});
+      await folder('markPost', { path: post.path, patch: { commentaire_statut: 'en_attente', commentaire_erreur: null } }).catch(() => {});
+    }
     // The groups not ticked while publishing (more than 9, or no option): right after.
     let shared = null;
     let shareWarning = null;
@@ -2246,6 +2261,96 @@ async function exportState(etat) {
   await chrome.storage.session.set({ lastExport: { etat, at: Date.now() } });
 }
 
+// ------------------------------------------------------ scheduled comments
+
+// The comment that goes with a post or a video, posted some minutes after it
+// is out (Facebook: under the post on the Page; YouTube: under the video,
+// pinned). Kept in the browser's storage so it survives a restart; a pass of
+// autoPass() takes the ones whose time has come, one at a time.
+const COMMENT_DELAY_MIN = 2;
+const COMMENT_TRIES = 4;
+const commentQueue = async () => (await chrome.storage.local.get('commentQueue')).commentQueue || [];
+const saveCommentQueue = (queue) => chrome.storage.local.set({ commentQueue: queue });
+async function queueComment(item) {
+  if (!item.text || !String(item.text).trim()) return;
+  const queue = (await commentQueue()).filter((c) => c.id !== item.id);
+  queue.push({ tries: 0, ...item, text: String(item.text).trim().slice(0, 8000) });
+  await saveCommentQueue(queue);
+  chrome.alarms.create('comment', { when: Math.max(item.due, Date.now() + 5000) });
+}
+async function markComment(item, ok, error) {
+  const at = new Date().toISOString();
+  if (item.network === 'facebook') {
+    await folder('markPost', { path: item.path, patch: ok
+      ? { commentaire_statut: 'publie', commentaire_publie_a: at, commentaire_erreur: null }
+      : { commentaire_statut: error.verify ? 'a_verifier' : 'echec', commentaire_erreur: error.message } }).catch(() => {});
+  } else {
+    await folder('mark', { path: item.path, status: 'published', data: ok ? { commentAt: at } : { commentError: error.message } }).catch(() => {});
+  }
+}
+async function postFacebookComment(item) {
+  const tabId = await openFacebookReel(item.page, { reuse: false });
+  try {
+    return await whileShown(tabId, () => step(tabId, 'commentPost', { snippet: item.snippet, comment: item.text }, 'facebook.js'));
+  } finally {
+    await step(tabId, 'cleanup', {}, 'facebook.js').catch(() => {});
+    await closeStudioTab(tabId);
+  }
+}
+async function postYoutubeComment(item) {
+  const tab = await chrome.tabs.create({ url: `https://www.youtube.com/watch?v=${encodeURIComponent(item.youtubeId)}`, active: false });
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  try {
+    const start = Date.now();
+    while (Date.now() - start < 60000) {
+      ensureNotCancelled();
+      const current = await chrome.tabs.get(tab.id);
+      if (/accounts\.google\.com/.test(current.url || '')) throw new Error('[FINAL] Connecte-toi d’abord à YouTube dans ce navigateur.');
+      if (current.status === 'complete') break;
+      await sleep(700);
+    }
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['youtube-watch.js'] });
+    return await whileShown(tab.id, () => stepIn(tab.id, '__kappgenWatch', 'commentVideo', { comment: item.text, pin: item.pin !== false }));
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    workTabId = null;
+  }
+}
+// One due comment per pass. True when one was handled (or tried).
+async function commentNext() {
+  const now = Date.now();
+  const item = (await commentQueue()).find((c) => c.due <= now);
+  if (!item) return false;
+  await chrome.storage.session.set({ job: { running: true, source: item.network, kind: 'comment', path: item.path, auto: true,
+    title: item.title || 'Commentaire', channel: item.channel || '', message: `Commentaire sous le post ${item.network === 'facebook' ? 'Facebook' : 'YouTube'}…`, startedAt: now } });
+  const remove = async () => saveCommentQueue((await commentQueue()).filter((c) => c.id !== item.id));
+  try {
+    const result = item.network === 'facebook' ? await postFacebookComment(item) : await postYoutubeComment(item);
+    await remove();
+    await markComment(item, true);
+    const note = result && result.otherChannel ? ' Attention : posté depuis une autre chaîne que celle de la vidéo ?' : '';
+    await setJob({ running: false, done: true, error: null, message: `Commentaire publié.${note}`, ...(note ? { warning: note.trim() } : {}) });
+  } catch (error) {
+    const raw = String((error && error.message) || error);
+    const message = friendly(error).replace(/^\[(FINAL|A_VERIFIER)\]\s*/, '');
+    const verify = /\[A_VERIFIER\]/.test(raw);
+    const last = verify || /\[FINAL\]/.test(raw) || item.tries + 1 >= COMMENT_TRIES || /annul/i.test(message);
+    if (last) {
+      await remove();
+      await markComment(item, false, { message, verify });
+      await setJob({ running: false, done: false, error: `Commentaire non publié : ${message}`, message: `Commentaire non publié : ${message}` });
+    } else {
+      // Not out yet (video still processing, page slow…): again a little later.
+      const queue = await commentQueue();
+      const kept = queue.find((c) => c.id === item.id);
+      if (kept) { kept.tries += 1; kept.due = Date.now() + 10 * 60000 * kept.tries; await saveCommentQueue(queue); }
+      await setJob({ running: false, done: true, error: null, warning: `Commentaire pas encore publié (${message}) : nouvel essai dans quelques minutes.`, message: 'Commentaire reporté.' });
+    }
+  }
+  return true;
+}
+
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
   // « Pause » in the panel: nothing goes out on its own until « Reprendre ».
@@ -2300,6 +2405,9 @@ async function autoPass() {
   const { videos, sent } = await folderQueue();
   const own = await ownFolders();
   const passAt = Date.now();
+  // A comment whose time has come goes under its post/video first.
+  const commentAt = Date.now();
+  if (await commentNext()) { await chainIfDone(commentAt); return; }
   // What is already out somewhere goes on to the other networks first: one
   // publication on all its networks, then the next one.
   if (await spreadNext(settings, sent, own)) { await chainIfDone(passAt); return; }
@@ -2444,7 +2552,7 @@ async function selfUpdate() {
 ensureAlarms().catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'heartbeat') heartbeat();
-  if (alarm.name === 'auto' || alarm.name === 'due') autoTick().catch(() => {});
+  if (alarm.name === 'auto' || alarm.name === 'due' || alarm.name === 'comment') autoTick().catch(() => {});
 });
 // Clicking the icon opens the side panel: everything happens there.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

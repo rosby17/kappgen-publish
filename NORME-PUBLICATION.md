@@ -20,6 +20,8 @@ Une vidéo rangée selon cette norme peut être publiée par KappGen vers YouTub
 - Quand publier (panneau, onglet Vidéos) : dès que c'est prêt (par défaut) ou à heures fixes. Chaque vidéo peut aussi être programmée à la main (« Programmer ») ou envoyée tout de suite (« Publier maintenant »).
 - Facebook (onglet Facebook) : un seul lien de page ; un dossier à part pour les Reels et posts avec la même règle (un dossier = un post, texte publié tel quel). La date et l’heure viennent de `publication.json` ou du nom `AAAA-MM-JJ-HHMM-sujet` ; sans horaire, le post est prêt immédiatement.
 
+- Commentaire programmé : le texte à poster sous la publication une fois sortie. Facebook : champ `commentaire` de `publication.json` ou fichier `commentaire.txt` dans le dossier du post (délai en minutes : `commentaire_delai`, 2 par défaut ; état écrit dans `commentaire_statut`). YouTube : la section « Commentaire épinglé » de la fiche de la vidéo, posté et épinglé quand la vidéo est publique (à l’heure programmée si elle l’est), délai réglable par chaîne avec `commentDelay` (minutes).
+
 Le format détaillé ci-dessous reste compris (fiche `publication.md` avec `## Titre`, `FACEBOOK/A-PUBLIER`, `reglages-publication.json`).
 
 ## 1. Arborescence

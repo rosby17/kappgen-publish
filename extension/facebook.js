@@ -687,6 +687,66 @@
     return { groups: picked, extra };
   }
 
+  // ------------------------------------------------ comment under a post
+  // On the Page (or group) feed: the post is found by the start of its text,
+  // the comment typed in its own box, then sent. A comment already there
+  // (same start) is never posted twice. After « Envoyer », a comment that
+  // cannot be confirmed is reported as « à vérifier », never retried.
+  async function commentPost({ snippet, comment }) {
+    const wanted = snippetOf(snippet);
+    if (!wanted) throw new Error('Facebook : le post n’a pas de texte pour être retrouvé dans le fil. Commente-le à la main.');
+    if (!comment) return { commented: false };
+    const start = snippetOf(comment).slice(0, 40);
+    const findArticle = () => matchingArticles(wanted)[0] || null;
+    let article = null;
+    const end = Date.now() + 60000;
+    while (Date.now() < end && !article) {
+      article = findArticle();
+      if (!article) { window.scrollBy(0, 700); await sleep(1200); }
+    }
+    if (!article) throw new Error('Facebook : la publication est introuvable sur la Page (pas encore affichée ?).');
+    article.scrollIntoView({ block: 'center' });
+    await sleep(800);
+    const boxOf = () => [...article.querySelectorAll('[contenteditable="true"][role="textbox"]')]
+      .filter((n) => visible(n) && /comment|commentaire/i.test(n.getAttribute('aria-label') || ''))[0] || null;
+    const posted = () => [...article.querySelectorAll('[role="article"], ul li, div[dir="auto"]')]
+      .some((n) => !n.isContentEditable && !n.closest('[contenteditable="true"]') && n !== article && snippetOf(textOf(n)).includes(start) && textOf(n).length < 2000);
+    if (posted()) return { commented: true, already: true };
+    let box = boxOf();
+    if (!box) {
+      const open = [...article.querySelectorAll(buttons)].find((n) => visible(n) && labelsOf(n).some((l) => /^(commenter|comment|écrire un commentaire|write a comment)/i.test(l)));
+      if (open) { click(open); await sleep(1500); }
+      box = await waitFor(boxOf, 15000, 'la zone de commentaire du post');
+    }
+    box.scrollIntoView({ block: 'center' });
+    box.click();
+    box.focus();
+    await sleep(400);
+    document.execCommand('insertText', false, comment);
+    for (let i = 0; i < 8 && !snippetOf(textOf(box)).includes(start.slice(0, 20)); i += 1) await sleep(250);
+    if (!snippetOf(textOf(box)).includes(start.slice(0, 20))) {
+      box.focus();
+      const data = new DataTransfer();
+      data.setData('text/plain', comment);
+      box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+      await sleep(1200);
+    }
+    if (!snippetOf(textOf(box)).includes(start.slice(0, 20))) throw new Error('Facebook : le commentaire n’a pas pu être écrit dans la zone de commentaire.');
+    await sleep(600);
+    // Send: the arrow button next to the box when Facebook shows one, otherwise Enter.
+    const form = box.closest('form') || box.parentElement.parentElement.parentElement;
+    const send = form && [...form.querySelectorAll(buttons)].find((n) => visible(n) && enabled(n) && labelsOf(n).some((l) => /^(commenter|comment|publier le commentaire|post comment|envoyer|send)$/i.test(l)));
+    if (send) click(send);
+    else for (const type of ['keydown', 'keypress', 'keyup']) box.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    // From here on, never sent again: the comment is either seen or « à vérifier ».
+    const until = Date.now() + 25000;
+    while (Date.now() < until) {
+      if (posted()) return { commented: true };
+      await sleep(800);
+    }
+    throw new Error('[A_VERIFIER] Facebook n’a pas confirmé le commentaire : regarde sous le post avant de relancer.');
+  }
+
   async function closeDialogs() {
     for (let i = 0; i < 3 && topDialog(); i += 1) {
       const target = document.activeElement || document.body;
@@ -697,5 +757,5 @@
   }
 
   window.__kappgen = { version: VERSION, openReel, openPost, receiveFile, fillCaption, publish, sendPost, verifyPublication,
-    cleanup: () => keepQuiet(false), openShareToGroups, pickGroups, confirmShare, closeDialogs, tickGroupsInComposer };
+    cleanup: () => keepQuiet(false), commentPost, openShareToGroups, pickGroups, confirmShare, closeDialogs, tickGroupsInComposer };
 })();

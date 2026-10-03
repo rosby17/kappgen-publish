@@ -864,6 +864,8 @@ const KappDossier = (() => {
         if (data.tiktokError) record.tiktokError = data.tiktokError;
         if (data.instagramPublishedAt) { record.instagramPublishedAt = data.instagramPublishedAt; delete record.instagramError; }
         if (data.instagramError) record.instagramError = data.instagramError;
+        if (data.commentAt) { record.commentAt = data.commentAt; delete record.commentError; }
+        if (data.commentError) record.commentError = data.commentError;
       }
       if (status === 'failed') record.error = data.error || 'Erreur inconnue';
       state[relativePath] = record;
@@ -1041,7 +1043,7 @@ const KappDossier = (() => {
       if (!files.some((f) => IMAGE_EXT.test(f) || VIDEO_EXT.test(f) || /\.(txt|md)$/i.test(f) || f === 'publication.json')) continue;
       const path = dirInfo.path;
       // The text: texte*.txt, or any short .txt / .md of the folder, as written.
-      const texts = files.filter((f) => /\.(txt|md)$/i.test(f) && f !== MARKER_FILE && !NOT_A_SHEET.test(norm(stem(f))))
+      const texts = files.filter((f) => /\.(txt|md)$/i.test(f) && f !== MARKER_FILE && !NOT_A_SHEET.test(norm(stem(f))) && !/^commentaires?\b/.test(norm(stem(f))))
         .sort((x, y) => Number(!/^texte/i.test(x)) - Number(!/^texte/i.test(y)) || x.localeCompare(y));
       if (info.texte != null && (typeof info.texte !== 'string' || !files.includes(info.texte) || !/\.(txt|md)$/i.test(info.texte))) {
         invalidate('Le champ texte doit désigner un fichier .txt ou .md présent dans le dossier.');
@@ -1052,6 +1054,16 @@ const KappDossier = (() => {
         const file = await (await postDir.getFileHandle(textName)).getFile();
         if (file.size <= 64 * 1024) text = (await file.text()).trim();
         else invalidate(`Le texte ${textName} dépasse 64 Ko.`);
+      }
+      // The comment posted under the post once it is out: "commentaire" in
+      // publication.json, or a commentaire*.txt / .md file of the folder.
+      let comment = typeof info.commentaire === 'string' ? info.commentaire.trim() : '';
+      if (!comment) {
+        const commentName = files.filter((f) => /\.(txt|md)$/i.test(f) && /^commentaires?\b/.test(norm(stem(f)))).sort()[0];
+        if (commentName) {
+          const file = await (await postDir.getFileHandle(commentName)).getFile();
+          if (file.size <= 8 * 1024) comment = (await file.text()).trim();
+        }
       }
       if (info.image != null && (typeof info.image !== 'string' || !files.includes(info.image) || !IMAGE_EXT.test(info.image))) {
         invalidate('Le champ image doit désigner une image présente dans le dossier.');
@@ -1122,6 +1134,10 @@ const KappDossier = (() => {
         page,
         type: video ? 'reel' : image ? 'photo' : 'texte',
         text: text.slice(0, 63000),
+        comment: comment.slice(0, 8000) || null,
+        comment_delay: info.commentaire_delai != null && Number.isFinite(Number(info.commentaire_delai)) ? Math.min(1440, Math.max(0, Number(info.commentaire_delai))) : null,
+        comment_statut: info.commentaire_statut || null,
+        comment_error: info.commentaire_erreur || null,
         image_path: image ? `${path}/${image}` : null,
         video_path: video ? `${path}/${video}` : null,
         network: net,
