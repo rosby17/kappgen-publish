@@ -13,8 +13,8 @@
     <div class="brand">
       <h1>KappGen Publish</h1>
       <div class="brand-sub">
-        <span id="version" class="version" title="Version installée"></span>
-        <a id="update-pill" class="update-pill" href="https://app.kappgen.com/extension#maj" target="_blank" rel="noopener noreferrer" hidden></a>
+        <span id="version" class="version" title="Version installée (cliquer pour mettre à jour)" style="cursor: pointer;"></span>
+        <button id="update-pill" class="update-pill" type="button" title="Cliquer pour mettre à jour" hidden></button>
       </div>
     </div>
     <button id="plan-pill" class="plan-pill" hidden title="Mon abonnement"></button>
@@ -327,6 +327,17 @@
   </div>
 
   <div id="tab-settings" class="tab" hidden>
+    <h3 class="set-group">Version & Mise à jour</h3>
+    <section class="card" id="set-version">
+      <div class="field-head">
+        <h2>Mise à jour de l'extension</h2>
+        <span id="settings-version-tag" class="pill ok"></span>
+      </div>
+      <p class="small muted">Met à jour KappGen Publish en 1 clic sans ouvrir le Terminal.</p>
+      <button type="button" id="btn-open-update-settings" class="btn secondary wide">
+        🔄 Rechercher / Installer la mise à jour
+      </button>
+    </section>
     <h3 class="set-group">Dossiers</h3>
     <section class="card" id="set-folder">
       <h2>Dossier principal</h2>
@@ -555,5 +566,46 @@ Ingrédients : …</pre>
   <script src="lib/schedule.js"></script>
   <script src="lib/dossier.js"></script>
   <script src="sidepanel.js"></script>
+
+  <!-- Modal Mise à jour de l'extension -->
+  <div id="update-modal" class="modal" hidden>
+    <div class="modal-box update-modal-box">
+      <div class="modal-head">
+        <h2>🔄 Mise à jour de KappGen Publish</h2>
+        <button type="button" id="update-modal-close" class="modal-close" aria-label="Fermer">✕</button>
+      </div>
+
+      <div class="update-info-card">
+        <div class="update-ver-comparison">
+          <div class="ver-col">
+            <span class="muted small">Installée</span>
+            <strong id="update-cur-ver"></strong>
+          </div>
+          <div class="ver-arrow">➔</div>
+          <div class="ver-col">
+            <span class="muted small">Sur GitHub</span>
+            <strong id="update-latest-ver" class="highlight"></strong>
+          </div>
+        </div>
+        <p id="update-status-msg" class="small muted align-center" style="margin-top: 6px;"></p>
+      </div>
+
+      <div class="update-actions" style="display: grid; gap: 10px; margin-top: 8px;">
+        <button type="button" id="btn-update-auto" class="btn primary wide">
+          ⚡ Mettre à jour en 1 clic
+        </button>
+        <p class="small muted align-center" style="margin: -4px 0 2px; font-size: 11px;">
+          Télécharge et remplace les fichiers dans ton dossier <code>KappGen-Publish</code>.
+        </p>
+
+        <button type="button" id="btn-copy-command" class="btn secondary wide">
+          📋 Copier la commande Terminal / PowerShell
+        </button>
+        <p id="copy-toast" class="small ok align-center" hidden style="margin: 0; font-size: 11.5px;">
+          ✓ Commande copiée ! Ouvre le Terminal et colle (Cmd+V).
+        </p>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

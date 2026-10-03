@@ -689,3 +689,17 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .theme-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; border: 1px solid var(--border); }
 .theme-seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
 .theme-seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
+
+/* ------------------------------------------- modal de mise à jour (1.20.10) */
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.modal-close { background: none; border: 0; color: var(--muted); font-size: 18px; font-weight: 700; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.modal-close:hover { color: var(--text); background: rgba(var(--ink), 0.1); }
+.update-info-card { padding: 12px; border-radius: 10px; background: rgba(var(--shade), 0.25); border: 1px solid var(--border); }
+.update-ver-comparison { display: flex; align-items: center; justify-content: space-around; text-align: center; }
+.ver-col { display: flex; flex-direction: column; gap: 2px; }
+.ver-arrow { font-size: 16px; color: var(--muted); }
+.highlight { color: var(--ok); }
+.highlight.newer { color: var(--warn); }
+.align-center { text-align: center; }
+.update-pill { cursor: pointer; border: 1px solid rgba(var(--warn-rgb), 0.45); background: rgba(var(--warn-rgb), 0.14); color: var(--warn); font-family: inherit; }
+.update-pill:hover { opacity: 0.85; filter: brightness(1.1); }

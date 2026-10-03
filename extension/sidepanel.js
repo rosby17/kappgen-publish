@@ -2449,17 +2449,202 @@ const newerVersion = (a, b) => {
   for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
   return false;
 };
+let cachedLatestRelease = null;
+
+async function fetchLatestTagFromGitHub() {
+  if (cachedLatestRelease) return cachedLatestRelease;
+  try {
+    const res = await fetch('https://api.github.com/repos/rosby17/kappgen-publish/releases/latest', {
+      headers: { Accept: 'application/vnd.github+json' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.tag_name && /^v[0-9]/.test(data.tag_name)) {
+        cachedLatestRelease = data.tag_name.replace(/^v/, '');
+        return cachedLatestRelease;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 function renderVersion(releaseCheck) {
   const current = chrome.runtime.getManifest().version;
   $('version').textContent = `v${current}`;
-  const latest = releaseCheck && releaseCheck.latest;
+  if ($('settings-version-tag')) $('settings-version-tag').textContent = `v${current}`;
+  const latest = (releaseCheck && releaseCheck.latest) || cachedLatestRelease;
   const pill = $('update-pill');
-  pill.hidden = !(latest && newerVersion(latest, current));
-  if (!pill.hidden) {
-    pill.textContent = `Mise à jour ${latest}`;
-    pill.title = `Ce profil Chrome a encore la version ${current}, la ${latest} est sortie. Relance la commande d’installation : elle met à jour tous tes profils. Si ce profil reste en retard, regarde d’où il charge l’extension (chrome://extensions → Détails → « Chargée depuis »).`;
+  if (pill) {
+    pill.hidden = !(latest && newerVersion(latest, current));
+    if (!pill.hidden) {
+      pill.textContent = `Mise à jour v${latest}`;
+      pill.title = `Version v${latest} disponible. Cliquer pour mettre à jour en 1 clic.`;
+    }
   }
 }
+
+function openUpdateModal() {
+  const current = chrome.runtime.getManifest().version;
+  const modal = $('update-modal');
+  if (!modal) return;
+  modal.hidden = false;
+  if ($('update-cur-ver')) $('update-cur-ver').textContent = `v${current}`;
+  if ($('update-latest-ver')) {
+    $('update-latest-ver').textContent = 'Vérification...';
+    $('update-latest-ver').className = 'highlight';
+  }
+  if ($('update-status-msg')) $('update-status-msg').textContent = 'Recherche de la dernière version sur GitHub...';
+  if ($('copy-toast')) $('copy-toast').hidden = true;
+
+  fetchLatestTagFromGitHub().then((latestTag) => {
+    const newest = latestTag || current;
+    if ($('update-latest-ver')) $('update-latest-ver').textContent = `v${newest}`;
+    if (newerVersion(newest, current)) {
+      if ($('update-latest-ver')) $('update-latest-ver').className = 'highlight newer';
+      if ($('update-status-msg')) $('update-status-msg').textContent = `Une nouvelle version (v${newest}) est disponible !`;
+      renderVersion({ latest: newest });
+    } else {
+      if ($('update-latest-ver')) $('update-latest-ver').className = 'highlight';
+      if ($('update-status-msg')) $('update-status-msg').textContent = `Ton extension est déjà à jour (v${current}).`;
+    }
+  });
+}
+
+function closeUpdateModal() {
+  const modal = $('update-modal');
+  if (modal) modal.hidden = true;
+}
+
+$('update-modal-close')?.addEventListener('click', closeUpdateModal);
+$('version')?.addEventListener('click', openUpdateModal);
+$('update-pill')?.addEventListener('click', openUpdateModal);
+$('btn-open-update-settings')?.addEventListener('click', openUpdateModal);
+
+$('btn-copy-command')?.addEventListener('click', () => {
+  const isWin = /win/i.test(navigator.platform || navigator.userAgent);
+  const cmd = isWin
+    ? `$repo = 'rosby17/kappgen-publish'; $tag = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ Accept = 'application/vnd.github+json' } -UseBasicParsing).tag_name; $zipUrl = "https://github.com/$repo/releases/download/$tag/kappgen-publish.zip"; irm https://app.kappgen.com/extension/install.ps1 | iex`
+    : `curl -fsSL https://app.kappgen.com/extension/install.sh | bash`;
+
+  navigator.clipboard.writeText(cmd).then(() => {
+    const toast = $('copy-toast');
+    if (toast) toast.hidden = false;
+  }).catch(() => {});
+});
+
+async function unzipToDirectoryHandle(zipArrayBuffer, dirHandle) {
+  const view = new DataView(zipArrayBuffer);
+  let offset = 0;
+  const len = zipArrayBuffer.byteLength;
+  const uint8 = new Uint8Array(zipArrayBuffer);
+
+  while (offset < len - 30) {
+    const sig = view.getUint32(offset, true);
+    if (sig !== 0x04034b50) break;
+
+    const compMethod = view.getUint16(offset + 8, true);
+    const compSize = view.getUint32(offset + 18, true);
+    const nameLen = view.getUint16(offset + 26, true);
+    const extraLen = view.getUint16(offset + 28, true);
+    const nameBytes = uint8.subarray(offset + 30, offset + 30 + nameLen);
+    const name = new TextDecoder().decode(nameBytes);
+    const dataOffset = offset + 30 + nameLen + extraLen;
+    const compData = uint8.subarray(dataOffset, dataOffset + compSize);
+
+    let uncompData;
+    if (compMethod === 0) {
+      uncompData = compData;
+    } else if (compMethod === 8) {
+      try {
+        const ds = new DecompressStream('deflate-raw');
+        const writer = ds.writable.getWriter();
+        writer.write(compData);
+        writer.close();
+        const reader = ds.readable.getReader();
+        const chunks = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        let total = 0;
+        for (const c of chunks) total += c.length;
+        uncompData = new Uint8Array(total);
+        let pos = 0;
+        for (const c of chunks) { uncompData.set(c, pos); pos += c.length; }
+      } catch (e) {
+        console.error('Decompress error:', name, e);
+        offset = dataOffset + compSize;
+        continue;
+      }
+    } else {
+      offset = dataOffset + compSize;
+      continue;
+    }
+
+    if (!name.endsWith('/') && name.length > 0) {
+      const parts = name.replace(/^[/\\]+/, '').split(/[/\\]+/).filter(Boolean);
+      let currDir = dirHandle;
+      for (let i = 0; i < parts.length - 1; i++) {
+        currDir = await currDir.getDirectoryHandle(parts[i], { create: true });
+      }
+      const filename = parts[parts.length - 1];
+      const fileHandle = await currDir.getFileHandle(filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(uncompData);
+      await writable.close();
+    }
+
+    offset = dataOffset + compSize;
+  }
+}
+
+$('btn-update-auto')?.addEventListener('click', async () => {
+  const btn = $('btn-update-auto');
+  const msg = $('update-status-msg');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Téléchargement de la dernière version...';
+  if (msg) msg.textContent = 'Téléchargement de l’archive depuis GitHub...';
+
+  try {
+    const latestTag = await fetchLatestTagFromGitHub();
+    const zipUrl = latestTag
+      ? `https://github.com/rosby17/kappgen-publish/releases/download/v${latestTag}/kappgen-publish.zip`
+      : `https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip`;
+
+    const res = await fetch(zipUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const zipArrayBuffer = await res.arrayBuffer();
+
+    if (msg) msg.textContent = 'Sélectionne ton dossier KappGen-Publish...';
+    btn.textContent = '📂 Sélection du dossier...';
+
+    let dirHandle;
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    } catch (e) {
+      throw new Error('Sélection du dossier annulée.');
+    }
+
+    btn.textContent = '⚙️ Remplacement des fichiers...';
+    if (msg) msg.textContent = 'Mise à jour des fichiers en cours...';
+
+    await unzipToDirectoryHandle(zipArrayBuffer, dirHandle);
+
+    btn.textContent = '✓ Mis à jour ! Redémarrage...';
+    if (msg) msg.textContent = 'Extension mise à jour ! Redémarrage de Chrome...';
+
+    setTimeout(() => {
+      chrome.runtime.reload();
+    }, 1000);
+
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = originalText;
+    if (msg) msg.textContent = `❌ Erreur : ${err.message || err}`;
+  }
+});
 chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.releaseCheck) renderVersion(changes.releaseCheck.newValue);
