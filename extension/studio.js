@@ -114,7 +114,11 @@
   }
 
   async function adSuitabilityStep(mode) {
-    const none = findByText(S('adCheckbox'), X('adNone'));
+    let none = findByText(S('adCheckbox'), X('adNone'));
+    if (!none) {
+      const checkboxes = [...document.querySelectorAll(S('adCheckbox'))].filter(visible);
+      none = checkboxes.find((c) => /none of the above|aucun|ci-dessus|ningun|nenhuma|keine der/i.test(textOf(c) || textOf(c.parentElement) || textOf(c.closest('ytcp-checkbox-lit, ytcp-checkbox, tp-yt-paper-checkbox') || ''))) || null;
+    }
     if (!none) return false;
     if (mode !== 'on') {
       throw new Error('YouTube Studio demande le questionnaire « Adéquation publicitaire » : termine-le dans l’onglet Studio resté ouvert.');
