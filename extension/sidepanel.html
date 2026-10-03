@@ -348,6 +348,14 @@
       <ul id="net-folders" class="net-folders"></ul>
       <p id="net-folders-status" class="status error" role="alert" hidden></p>
     </section>
+    <h3 class="set-group">Publication automatique</h3>
+    <section class="card" id="set-catchup">
+      <div class="set-row">
+        <span class="set-text"><strong>Rythme du rattrapage</strong><small>Minutes entre deux posts en retard (Chrome fermé, ordinateur en veille…). Vide = automatique.</small></span>
+        <span class="stepper"><button type="button" id="catchup-less" aria-label="Moins">−</button><input id="catchup-min" type="number" min="0" max="120" placeholder="Auto" aria-label="Minutes entre deux posts en retard"><button type="button" id="catchup-plus" aria-label="Plus">+</button></span>
+      </div>
+      <p id="catchup-help" class="small muted"></p>
+    </section>
     <h3 class="set-group">Réseaux et destination</h3>
     <section class="card">
       <div class="field-head"><h2>Réseaux utilisés</h2></div>

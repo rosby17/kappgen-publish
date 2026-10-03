@@ -2016,10 +2016,18 @@ async function shareInGroups(post) {
 
 // Next post whose time has come. On time, it goes at its time. When posts
 // are late (Chrome closed, computer asleep…), they never go out all at once:
-// they leave one by one, twice as fast as the usual spacing between posts
-// (2 min 30 at least), until the delay is caught up, then the normal rhythm.
+// they leave one by one until the delay is caught up, then the normal rhythm.
+// Spacing: the one chosen in Réglages → « Rythme du rattrapage » (1 to 120 min),
+// otherwise automatic: twice as fast as the usual spacing (2 min 30 at least).
 const ON_TIME_MS = 10 * 60000;
-function catchUpGap(posts) {
+const CATCH_UP_MINUTES_MAX = 120;
+const chosenCatchUpMs = (settings) => {
+  const minutes = Math.round(Number(settings && settings.catchUpMinutes));
+  return minutes >= 1 ? Math.min(CATCH_UP_MINUTES_MAX, minutes) * 60000 : 0;
+};
+function catchUpGap(posts, settings) {
+  const chosen = chosenCatchUpMs(settings);
+  if (chosen) return chosen;
   const times = posts.map((p) => p.due_at).filter(Boolean).sort((a, b) => a - b);
   const gaps = [];
   for (let i = 1; i < times.length; i += 1) {
@@ -2039,7 +2047,7 @@ async function nextDuePost() {
   const now = Date.now();
   const late = ready.length > 1 || (ready[0].due_at && now - ready[0].due_at > ON_TIME_MS);
   if (late) {
-    const gap = catchUpGap(posts);
+    const gap = catchUpGap(posts, await folderSettings());
     const { lastAutoPostAt } = await chrome.storage.local.get('lastAutoPostAt');
     const next = (lastAutoPostAt || 0) + gap;
     await chrome.storage.local.set({ catchUp: { count: ready.length, gap, next: Math.max(now, next) } });
@@ -2096,6 +2104,23 @@ async function planNextDue() {
   if (Number.isFinite(next)) await chrome.alarms.create('due', { when: next + 5000 });
   else await chrome.alarms.clear('due');
 }
+
+// « Rythme du rattrapage » changed in Réglages: the next late post moves at once
+// (the wake-up already planned could be up to 30 min away).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.folder) return;
+  const before = chosenCatchUpMs(changes.folder.oldValue);
+  const after = chosenCatchUpMs(changes.folder.newValue);
+  if (before === after) return;
+  (async () => {
+    const { catchUp, lastAutoPostAt } = await chrome.storage.local.get(['catchUp', 'lastAutoPostAt']);
+    if (catchUp) {
+      const gap = after || catchUp.gap;
+      await chrome.storage.local.set({ catchUp: { ...catchUp, gap, next: Math.max(Date.now(), (lastAutoPostAt || 0) + gap) } });
+    }
+    await planNextDue();
+  })().catch(() => {});
+});
 
 async function autoTick() {
   try {

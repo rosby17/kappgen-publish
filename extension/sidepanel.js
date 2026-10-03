@@ -1250,6 +1250,37 @@ function groupsSaid(text, warn = false) {
   clearTimeout(groupsSaid.timer);
   groupsSaid.timer = setTimeout(() => { saved.hidden = true; }, 5000);
 }
+// Réglages → « Rythme du rattrapage » : minutes entre deux posts en retard (vide ou 0 = automatique).
+let catchUpChosenMs = 0;
+const CATCH_UP_STEPS = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+function catchUpLabel(minutes) {
+  return minutes ? `Un post toutes les ${minutes} min tant qu’il y a du retard.` : 'Automatique : deux fois plus vite que l’écart habituel entre tes posts (2 min 30 au moins, 30 min au plus).';
+}
+async function renderCatchUp() {
+  const minutes = Math.round(Number((await settings()).catchUpMinutes)) || 0;
+  catchUpChosenMs = minutes * 60000;
+  if (document.activeElement !== $('catchup-min')) $('catchup-min').value = minutes ? String(minutes) : '';
+  $('catchup-help').textContent = catchUpLabel(minutes);
+}
+async function saveCatchUp(value) {
+  const raw = String(value ?? $('catchup-min').value).trim();
+  const minutes = raw === '' ? 0 : Math.min(120, Math.max(0, Math.round(Number(raw)) || 0));
+  const current = await settings();
+  if (minutes) current.catchUpMinutes = minutes; else delete current.catchUpMinutes;
+  await chrome.storage.local.set({ folder: current });
+  await renderCatchUp();
+}
+$('catchup-min').addEventListener('change', () => saveCatchUp());
+for (const [id, step] of [['catchup-less', -1], ['catchup-plus', 1]]) {
+  $(id).addEventListener('click', () => {
+    const now = Math.round(Number($('catchup-min').value)) || 0;
+    const i = CATCH_UP_STEPS.findIndex((m) => m >= now);
+    const index = i === -1 ? CATCH_UP_STEPS.length - 1 : (CATCH_UP_STEPS[i] === now ? i + step : (step > 0 ? i : i - 1));
+    saveCatchUp(CATCH_UP_STEPS[Math.min(CATCH_UP_STEPS.length - 1, Math.max(0, index))]);
+  });
+}
+renderCatchUp().catch(() => {});
+
 async function saveGroups() {
   const current = await settings();
   current.facebookGroups = [...new Set(groupList.map(groupLink).filter(Boolean))].slice(0, 500);
@@ -1317,7 +1348,7 @@ function estimateLate(posts, catchUp) {
   const gaps = [];
   for (let i = 1; i < times.length; i += 1) { const g = times[i] - times[i - 1]; if (g > 0 && g <= 86400000) gaps.push(g); }
   gaps.sort((a, b) => a - b);
-  const gap = (catchUp && catchUp.gap) || Math.min(1800000, Math.max(150000, (gaps.length ? gaps[Math.floor(gaps.length / 2)] : 1800000) / 2));
+  const gap = (catchUp && catchUp.gap) || catchUpChosenMs || Math.min(1800000, Math.max(150000, (gaps.length ? gaps[Math.floor(gaps.length / 2)] : 1800000) / 2));
   const start = Math.max(now, (catchUp && catchUp.next) || now);
   late.forEach((p, i) => map.set(p.path, start + i * gap));
   return map;
