@@ -293,6 +293,7 @@
       // Details → Video elements → Checks → Visibility. "Next" stays
       // disabled while Studio is busy (checks, processing): wait for it.
       const start = Date.now();
+      let stuck = 0;
       while (Date.now() - start < 90000) {
         const radio = document.querySelector(S('visibilityRadio', { name }));
         if (visible(radio)) {
@@ -302,9 +303,21 @@
           return true;
         }
         if (await monetizationStep(monetization) || await adSuitabilityStep(monetization)) continue;
+        // Studio's info bubbles (« Learn more / Dismiss ») sit over the dialog
+        // and keep it on « Details »: close them (never the dialog itself).
+        const bubble = [...document.querySelectorAll('ytcp-uploads-dialog button, ytcp-uploads-dialog ytcp-button, ytcp-uploads-dialog [role="button"], tp-yt-paper-dialog button, tp-yt-paper-dialog [role="button"]')]
+          .find((b) => visible(b) && !b.closest('#close-button, ytcp-uploads-dialog-close-button')
+            && (b.id === 'action-2' || /^(dismiss|ignorer|got it|j'ai compris|compris|no thanks|non merci)$/i.test((b.textContent || '').trim())));
+        if (bubble) { click(bubble); await sleep(800); continue; }
         const next = document.querySelector(S('nextButton'));
         const enabled = next && visible(next) && !next.hasAttribute('disabled') && next.getAttribute('aria-disabled') !== 'true';
-        if (enabled) click(next);
+        if (enabled) { click(next); stuck = 0; }
+        else if ((stuck += 1) === 20) {
+          // Still on « Details » after ~15 s: the « not made for kids » choice
+          // is what Studio most often waits for — tick it again.
+          const kids = document.querySelector(S('notForKids'));
+          if (kids && visible(kids)) click(kids);
+        }
         await sleep(enabled ? 1500 : 700);
       }
       throw new Error('YouTube Studio : étape « Visibilité » introuvable.' + whatIsShown());

@@ -656,16 +656,34 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
     return true;
   }
   let picked = { groups: [], extra: [] };
+  // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
+  const caption = (video.title || video.description || '').slice(0, 5000);
+  const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`);
   try {
     await whileShown(tabId, async () => {
+      // The vertical video through the Page's own composer (« Partagez une
+      // idée… », like photo posts): Facebook makes a vertical video of a Page
+      // a Reel by itself. The old « Créer un Reel » way clicked the Page's
+      // « Reels » tab instead on pages that have one (Americas Kickoff, 03/10).
+      let composerReady = false;
+      try {
+        await step(tabId, 'openPost', { photo: true });
+        await step(tabId, 'receiveFile', { kind: 'video', path: filePath, src });
+        composerReady = true;
+      } catch (error) {
+        await step(tabId, 'closeDialogs').catch(() => {});
+      }
+      if (composerReady) {
+        await setJob({ message: `Envoi du Reel sur Facebook (${channelName || 'page sélectionnée'})…` });
+        await sleep(3000);
+        await step(tabId, 'fillCaption', { caption });
+        picked = await postStep(tabId, 'sendPost', { timeout: 15 * 60000, groups, groupCount });
+        return;
+      }
+      // Fallback: the Reel composer of pages that offer « Créer un Reel ».
       await step(tabId, 'openReel');
-      await step(tabId, 'receiveFile', {
-        src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`),
-        path: filePath,
-      });
+      await step(tabId, 'receiveFile', { src, path: filePath });
       await setJob({ message: `Préparation de la publication Facebook (${channelName || 'page sélectionnée'})…` });
-      // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
-      const caption = (video.title || video.description || '').slice(0, 5000);
       await step(tabId, 'fillCaption', { caption });
       picked = await postStep(tabId, 'publish', { groups, groupCount });
     });
