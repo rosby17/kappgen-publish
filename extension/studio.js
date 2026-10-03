@@ -13,7 +13,11 @@
 
   const S = (key, vars) => window.KappRecipe.sel('studio', key, vars);
   const X = (key) => window.KappRecipe.re('studio', key);
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // In a background tab Chrome slows timers down (down to one tick a minute):
+  // the pause then goes through the extension's service worker, never slowed.
+  const sleep = (ms) => (document.hidden
+    ? chrome.runtime.sendMessage({ type: 'pageSleep', ms }).catch(() => new Promise((resolve) => setTimeout(resolve, ms)))
+    : new Promise((resolve) => setTimeout(resolve, ms)));
 
   const visible = (el) => !!el && el.getClientRects().length > 0 && !el.closest('[hidden]');
 
@@ -300,7 +304,7 @@
       // disabled while Studio is busy (checks, processing): wait for it.
       const start = Date.now();
       let stuck = 0;
-      while (Date.now() - start < 90000) {
+      while (Date.now() - start < 180000) {
         const radio = document.querySelector(S('visibilityRadio', { name }));
         if (visible(radio)) {
           if (schedule) return scheduleFor(scheduleAt);

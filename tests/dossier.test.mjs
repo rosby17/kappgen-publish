@@ -369,3 +369,15 @@ test('a YouTube video, its Short and its Reel go into the history with their lin
   ]);
   assert.ok(added.every((e) => e.path === path && e.title));
 });
+
+test('a YouTube draft enters the history only once the upload is finished', async () => {
+  const { KappDossier, added } = libraryWithHistory();
+  const disk = new MemoryDirectory('VIDEOS');
+  project(disk.dir('CHAINE'), 'Episode', 'episode.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+  const path = 'CHAINE/Episode/episode.mp4';
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk', draft: true });
+  assert.equal(added.length, 0);
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk' });
+  assert.deepEqual(added.map((e) => [e.net, e.kind, e.url]), [['youtube', 'video', 'https://youtu.be/abcdefghijk']]);
+});

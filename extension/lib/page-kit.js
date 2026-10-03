@@ -8,7 +8,11 @@
   if (window.KappKit && window.KappKit.version === VERSION) return;
   const S = (key) => window.KappRecipe.sel('kit', key);
   const X = (key) => window.KappRecipe.re('kit', key);
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // In a background tab Chrome slows timers down (down to one tick a minute):
+  // the pause then goes through the extension's service worker, never slowed.
+  const sleep = (ms) => (document.hidden
+    ? chrome.runtime.sendMessage({ type: 'pageSleep', ms }).catch(() => new Promise((resolve) => setTimeout(resolve, ms)))
+    : new Promise((resolve) => setTimeout(resolve, ms)));
   const visible = (node) => !!node && node.getClientRects().length > 0 && !node.closest('[hidden]');
   const textOf = (node) => (node.textContent || '').replace(/\s+/g, ' ').trim();
   const labelsOf = (node) => [textOf(node), (node.getAttribute('aria-label') || '').trim(), (node.getAttribute('data-e2e') || '').trim()].filter(Boolean);

@@ -9,7 +9,11 @@
   if (!globalThis.KappFacebookFlow) throw new Error('KappGen : règles de publication Facebook indisponibles.');
   const { PUBLISH_BUTTON, GROUPS_DONE_BUTTON, SUCCESS_NOTICE, DRAFT_NOTICE, GROUP_PICKER_TITLE,
     FORBIDDEN_GROUP_CONTROL, MAX_GROUPS, groupLimit, isPromotionUrl } = globalThis.KappFacebookFlow;
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // In a background tab Chrome slows timers down (down to one tick a minute):
+  // the pause then goes through the extension's service worker, never slowed.
+  const sleep = (ms) => (document.hidden
+    ? chrome.runtime.sendMessage({ type: 'pageSleep', ms }).catch(() => new Promise((resolve) => setTimeout(resolve, ms)))
+    : new Promise((resolve) => setTimeout(resolve, ms)));
   const visible = (node) => !!node && node.getClientRects().length > 0 && !node.closest('[hidden]');
   const textOf = (node) => (node.textContent || '').replace(/\s+/g, ' ').trim();
   // What a button says: its visible text, or its accessible name (icons).

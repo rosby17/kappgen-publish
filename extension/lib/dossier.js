@@ -729,7 +729,11 @@ const KappDossier = (() => {
   async function recordVideo(relativePath, videoDir, videoName, before, after, manual) {
     const h = history();
     if (!h || !after) return;
-    const gained = VIDEO_MARKS.filter(([key]) => after[key] && after[key] !== (before || {})[key]);
+    // A YouTube draft (link known before the upload is finished) is not a
+    // publication yet: it enters the history once the upload is done.
+    const gained = VIDEO_MARKS.filter(([key]) => after[key] && (after[key] !== (before || {})[key]
+      || (key === 'youtubeId' && before && before.draft && !after.draft)))
+      .filter(([key]) => !(key === 'youtubeId' && after.draft));
     if (!gained.length) return;
     const info = scanInfo.get(relativePath) || {};
     let thumbFile = null;
@@ -838,6 +842,8 @@ const KappDossier = (() => {
           Object.assign(record, { youtubeId: data.youtubeId, youtubePublishedAt: firstPublishedAt,
             publishedAt: firstPublishedAt, visibility: data.visibility || null,
             channel: data.channel || null, appliedHash: data.hash || null });
+          // Link known at the start of the upload, before Visibility: a draft.
+          if (data.draft) record.draft = true; else delete record.draft;
         } else if (record.youtubeId && !record.youtubePublishedAt && record.publishedAt) {
           // Lazy migration of records written by versions before 1.19.
           record.youtubePublishedAt = record.publishedAt;

@@ -2481,6 +2481,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     folderMark: () => folder('mark', { path: message.path, status: message.status }),
     channelVideos: () => channelVideos(message.channelId),
     facebookPosts: () => postsList(),
+    // Pause asked by a page script (Studio, Facebook, X…) while its tab is in
+    // the background: Chrome slows a hidden tab's own timers down to one tick
+    // a minute, the service worker's are not slowed down.
+    pageSleep: async () => { await sleep(Math.max(0, Math.min(Number(message.ms) || 0, 30000))); return true; },
     findGroups: async () => ({ groups: await findMyGroups() }),
     referrals: () => api('/referrals/me'),
     claimReferral: () => api('/referrals/claim', { method: 'POST', body: JSON.stringify({ code: message.code }) }),
