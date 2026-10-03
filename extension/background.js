@@ -1476,6 +1476,8 @@ async function publishFacebookPost(post, { auto = false } = {}) {
       for (const url of during) if (lower.includes(names[url].toLowerCase())) shared[url] = { statut: 'publie', published_at: at, mode: 'publication' };
       for (const name of extra) shared[`facebook:${name}`] = { statut: 'publie', published_at: at, mode: 'publication', nom: name };
       post.groups_shared = shared;
+      // Groups were asked but none could be ticked: say why (publication.json + panel).
+      post.groups_error = count > 0 && !picked.length && !extra.length ? ((result && result.error) || 'aucun groupe coché') : null;
     };
     if (post.type === 'reel') {
       markDuring(await publishFacebookReel({ title: '', description: post.text }, post.channel_name, page, post.video_path,
@@ -1498,10 +1500,12 @@ async function publishFacebookPost(post, { auto = false } = {}) {
       closeStudioTab(tabId); // only a tab opened for this post is closed
     }
     await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null,
+      groupes_erreur: post.groups_error || null,
       ...(Object.keys(post.groups_shared || {}).length ? { groupes_partages: post.groups_shared } : {}) } });
     // The groups not ticked while publishing (more than 9, or no option): right after.
     const shared = await shareInGroups(post).catch(() => null);
-    await setJob({ running: false, done: true, error: null, message: `Post publié sur Facebook${groupsText(shared)}.` });
+    const groupsWarning = post.groups_error && !groupsText(shared) ? ` — groupes non partagés : ${post.groups_error}` : '';
+    await setJob({ running: false, done: true, error: null, message: `Post publié sur Facebook${groupsText(shared)}${groupsWarning}.` });
   } catch (error) {
     const message = friendly(error);
     await folder('markPost', { path: post.path, patch: { statut: 'echec', erreur: message } }).catch(() => {});

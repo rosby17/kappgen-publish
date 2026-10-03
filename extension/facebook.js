@@ -193,7 +193,7 @@
     let button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 15 * 60000, 'le bouton Publier');
     let picked = { groups: [], extra: [] };
     if (groups.length || groupCount) {
-      picked = await tickGroupsInComposer(groups, groupCount).catch(() => ({ groups: [], extra: [] }));
+      picked = await tickGroupsInComposer(groups, groupCount).catch((e) => ({ groups: [], extra: [], error: String((e && e.message) || e) }));
       button = await waitFor(() => !uploading() && findButton(finalButton, { needEnabled: true }), 60000, 'le bouton Publier');
     }
     silence();
@@ -247,7 +247,7 @@
       let target = button;
       if (isFinal(button) && (groups.length || groupCount) && !groupsTried) {
         groupsTried = true;
-        picked = await tickGroupsInComposer(groups, groupCount).catch(() => ({ groups: [], extra: [] }));
+        picked = await tickGroupsInComposer(groups, groupCount).catch((e) => ({ groups: [], extra: [], error: String((e && e.message) || e) }));
         target = await waitFor(() => findButton(final, { needEnabled: true }), timeout, 'le bouton Publier');
       }
       if (isFinal(target)) markClicked();
@@ -382,12 +382,22 @@
         || findHeading(OPTION, root);
     };
     const option = await waitFor(findOption, 8000, 'l’option « Partager dans des groupes »').catch(() => null);
-    if (!option) return { groups: [], extra: [] };
-    click(option);
+    if (!option) return { groups: [], extra: [], error: 'option « Partager dans des groupes » introuvable dans la fenêtre de publication' };
     // Facebook garde souvent la même boîte de dialogue (même nœud DOM) et ne
     // change que son contenu : on ne peut pas attendre « une autre boîte »,
     // seulement l'apparition des cases à cocher (absentes de l'écran précédent).
-    const list = await waitFor(() => { const d = topDialog(); return d && d.querySelector(S('checkbox')) ? d : null; }, 15000, 'la liste des groupes');
+    const hasList = () => { const d = topDialog(); return d && d.querySelector(S('checkbox')) ? d : null; };
+    // The row « Partager dans des groupes › » reacts on the whole row, not
+    // always on its title: the row itself first, then the title and its parents.
+    const row = option.closest('[role="button"], [role="link"], [role="menuitem"], [role="listitem"], a, [tabindex="0"]');
+    const targets = [...new Set([row, option, option.parentElement, option.parentElement && option.parentElement.parentElement].filter(Boolean))];
+    let list = null;
+    for (const target of targets) {
+      click(target);
+      list = await waitFor(hasList, 6000, 'la liste des groupes').catch(() => null);
+      if (list) break;
+    }
+    if (!list) return { groups: [], extra: [], error: 'la liste des groupes ne s’ouvre pas au clic sur « Partager dans des groupes »' };
     // Long lists load while scrolling: a few turns to see more groups.
     for (let i = 0; i < 6; i += 1) {
       for (const el of list.querySelectorAll(S('scrollables'))) if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = el.scrollHeight;
