@@ -122,12 +122,23 @@
     for (const root of [...document.querySelectorAll('[role="dialog"]')].filter(visible)) {
       const label = labelNode(BOOST_ROW, root);
       if (!label) continue;
-      // Only the toggle of that very row, a few levels up at most: never a
-      // neighbouring switch (« Ajouter une mention IA »…).
+      // Only the toggle of that very row: climb from the label while the block
+      // still holds only that row (its title + one-line description). The
+      // « Paramètres de la publication » screen nests the switch deeper than
+      // the old composer did. Stop as soon as the block also holds another row
+      // (text too long) or more than one switch (« Ajouter une mention IA »…):
+      // never pick a neighbouring control.
       let row = label;
-      for (let up = 0; up < 6 && row && row !== root; up += 1) {
-        const toggle = row.querySelector('[role="switch"], input[type="checkbox"]');
-        if (toggle) return { label, toggle };
+      for (let up = 0; up < 14 && row && row !== root; up += 1) {
+        if (textOf(row).length > 260) break;
+        const toggles = [...row.querySelectorAll('[role="switch"], input[type="checkbox"], [aria-checked]')];
+        const distinct = toggles.filter((node) => !toggles.some((other) => other !== node && other.contains(node)));
+        if (distinct.length > 1) break;
+        if (distinct.length === 1) {
+          // A checkbox wrapped in a labelled switch: read the element that carries the state.
+          const toggle = distinct[0].querySelector('input[type="checkbox"], [role="switch"], [aria-checked]') || distinct[0];
+          return { label, toggle };
+        }
         row = row.parentElement;
       }
       return { label, toggle: null };
