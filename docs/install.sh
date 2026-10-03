@@ -244,7 +244,8 @@ echo ""
 if [ ${#UPDATED[@]} -gt 0 ]; then
   echo "  ✓ MIS À JOUR dans ${#UPDATED[@]} profil(s) Chrome :"
   for n in "${UPDATED[@]}"; do echo "      - $n"; done
-  echo "    Rien d'autre à faire : KappGen Publish s'y recharge tout seul d'ici une minute."
+  echo "    KappGen Publish s'y recharge tout seul d'ici une minute, ou à la fin de la"
+  echo "    publication en cours. Pour tout de suite : quitte Chrome (Cmd + Q) et rouvre-le."
   echo ""
 fi
 
