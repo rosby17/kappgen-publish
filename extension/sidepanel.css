@@ -703,3 +703,21 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .align-center { text-align: center; }
 .update-pill { cursor: pointer; border: 1px solid rgba(var(--warn-rgb), 0.45); background: rgba(var(--warn-rgb), 0.14); color: var(--warn); font-family: inherit; }
 .update-pill:hover { opacity: 0.85; filter: brightness(1.1); }
+
+/* ------------------------------------------- bandeau de mise à jour (1.20.12) */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 6px;
+  border-radius: 10px;
+  background: rgba(var(--warn-rgb, 255, 170, 0), 0.15);
+  border: 1px solid rgba(var(--warn-rgb, 255, 170, 0), 0.5);
+  color: var(--text);
+}
+.update-banner-icon { font-size: 20px; flex: none; }
+.update-banner-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.update-banner-text strong { font-size: 13px; color: var(--warn); line-height: 1.2; }
+.update-banner-text .small { font-size: 11.5px; opacity: 0.9; }
+.small-btn { padding: 6px 12px; font-size: 12px; font-weight: 700; white-space: nowrap; flex: none; cursor: pointer; }

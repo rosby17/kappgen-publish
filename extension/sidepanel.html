@@ -40,6 +40,18 @@
       </div>
     </div>
   </header>
+  <!-- Bandeau d'avertissement quand une nouvelle version est disponible -->
+  <div id="update-banner" class="update-banner" hidden>
+    <div class="update-banner-icon">🚀</div>
+    <div class="update-banner-text">
+      <strong>Mise à jour v<span id="banner-version"></span> disponible</strong>
+      <span class="small muted">Une nouvelle version est prête sur GitHub.</span>
+    </div>
+    <button type="button" id="banner-update-btn" class="btn primary small-btn">
+      ⚡ Mettre à jour
+    </button>
+  </div>
+
 
   <section id="account" class="card">
     <form id="login" class="login" hidden>

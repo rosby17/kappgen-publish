@@ -2472,13 +2472,24 @@ function renderVersion(releaseCheck) {
   const current = chrome.runtime.getManifest().version;
   $('version').textContent = `v${current}`;
   if ($('settings-version-tag')) $('settings-version-tag').textContent = `v${current}`;
+
   const latest = (releaseCheck && releaseCheck.latest) || cachedLatestRelease;
+  const hasNewer = latest && newerVersion(latest, current);
+
   const pill = $('update-pill');
   if (pill) {
-    pill.hidden = !(latest && newerVersion(latest, current));
-    if (!pill.hidden) {
+    pill.hidden = !hasNewer;
+    if (hasNewer) {
       pill.textContent = `Mise à jour v${latest}`;
       pill.title = `Version v${latest} disponible. Cliquer pour mettre à jour en 1 clic.`;
+    }
+  }
+
+  const banner = $('update-banner');
+  if (banner) {
+    banner.hidden = !hasNewer;
+    if (hasNewer && $('banner-version')) {
+      $('banner-version').textContent = latest;
     }
   }
 }
@@ -2519,6 +2530,7 @@ $('update-modal-close')?.addEventListener('click', closeUpdateModal);
 $('version')?.addEventListener('click', openUpdateModal);
 $('update-pill')?.addEventListener('click', openUpdateModal);
 $('btn-open-update-settings')?.addEventListener('click', openUpdateModal);
+$('banner-update-btn')?.addEventListener('click', triggerAutoUpdate);
 
 $('btn-copy-command')?.addEventListener('click', () => {
   const isWin = /win/i.test(navigator.platform || navigator.userAgent);
@@ -2625,7 +2637,7 @@ async function loadExtHandle() {
   } catch (e) { return null; }
 }
 
-$('btn-update-auto')?.addEventListener('click', async () => {
+async function triggerAutoUpdate() {
   const btn = $('btn-update-auto');
   const msg = $('update-status-msg');
   const originalText = btn.textContent;
@@ -2678,11 +2690,15 @@ $('btn-update-auto')?.addEventListener('click', async () => {
     }, 1000);
 
   } catch (err) {
-    btn.disabled = false;
-    btn.textContent = originalText;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
     if (msg) msg.textContent = `❌ Erreur : ${err.message || err}`;
   }
-});
+}
+
+$('btn-update-auto')?.addEventListener('click', triggerAutoUpdate);
 chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.releaseCheck) renderVersion(changes.releaseCheck.newValue);
