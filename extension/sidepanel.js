@@ -2084,7 +2084,6 @@ async function renderAccount() {
   $('account').hidden = !!user; // the login card only when signed out
   $('login').hidden = !!user;
   if (!user) { $('main').hidden = true; $('paywall').hidden = true; watchLogin(); }
-  $('server').hidden = !!user; // the local-server setting only matters before signing in
   if (!user) {
     const error = $('login-error');
     error.hidden = !reply || reply.ok;
@@ -2287,33 +2286,6 @@ $('job-clear').addEventListener('click', async () => {
   renderJob(null);
 });
 
-function normalizedServerUrl(value) {
-  if (!String(value || '').trim()) return null;
-  let url;
-  try { url = new URL(value); } catch { return null; }
-  const local = ['localhost', '127.0.0.1'].includes(url.hostname) && url.protocol === 'http:';
-  const official = ['api.kappgen.com', 'app.kappgen.com'].includes(url.hostname) && url.protocol === 'https:';
-  if ((!local && !official) || url.username || url.password || (official && url.port && url.port !== '443')) return null;
-  url.pathname = url.pathname.replace(/\/+$/, '');
-  url.search = '';
-  url.hash = '';
-  return url.toString().replace(/\/$/, '');
-}
-
-$('save-url').addEventListener('click', async () => {
-  const input = $('app-url');
-  const value = normalizedServerUrl(input.value);
-  if (input.value.trim() && !value) {
-    input.setCustomValidity('Utilise https://app.kappgen.com ou un serveur local http://localhost…');
-    input.reportValidity();
-    return;
-  }
-  input.setCustomValidity('');
-  await chrome.storage.local.set({ appUrl: value });
-  start();
-});
-$('app-url').addEventListener('input', () => $('app-url').setCustomValidity(''));
-
 // Version next to the logo, and a notice when a newer one is out on GitHub
 // (the zip install cannot update itself: the link explains how).
 const newerVersion = (a, b) => {
@@ -2494,8 +2466,6 @@ function start() {
 }
 
 async function startOnce() {
-  const { appUrl } = await chrome.storage.local.get('appUrl');
-  $('app-url').value = appUrl || '';
   if (!(await renderAccount())) { watchLogin(); return; }
   if (!(await renderSubscription({ fresh: true }))) return;
   const { job } = await chrome.storage.session.get('job');
