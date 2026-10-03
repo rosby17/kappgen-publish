@@ -969,7 +969,7 @@ const KappDossier = (() => {
       // A network's own post keeps its state under the network's name. Every
       // stored state is checked even while the Facebook view is being built:
       // a typo such as "publiee" must not silently suppress a destination.
-      const allowedStates = new Set(['a_publier', 'en_cours', 'publie', 'echec']);
+      const allowedStates = new Set(['a_publier', 'en_cours', 'publie', 'echec', 'a_verifier']);
       const validateNetworkState = (state, label) => {
         if (!state || typeof state !== 'object' || Array.isArray(state)) {
           invalidate(`Le champ ${label} doit contenir un objet JSON.`);

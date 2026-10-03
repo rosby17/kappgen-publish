@@ -261,7 +261,7 @@ async function injectScripts(tabId, files) {
   // Facebook is autonomous, but publishing still requires a valid account.
   if (files.length === 1 && files[0] === 'facebook.js') {
     await requireAccess();
-    await chrome.scripting.executeScript({ target: { tabId }, files });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/facebook-flow.js', ...files] });
     return;
   }
   const recipe = await publishRecipe();
@@ -466,7 +466,7 @@ async function stepIn(tabId, namespace, name, args) {
 async function postStep(tabId, name, args) {
   try { await chrome.scripting.executeScript({ target: { tabId }, func: () => sessionStorage.removeItem('kappgenPublishAttempt') }); } catch { /* checked below */ }
   try {
-    return await step(tabId, name, args);
+    return await step(tabId, name, args, 'facebook.js');
   } catch (error) {
     if (!/impossible\.$/.test(String(error.message))) throw error;
     await sleep(4000);
@@ -474,17 +474,17 @@ async function postStep(tabId, name, args) {
       func: () => { try { return JSON.parse(sessionStorage.getItem('kappgenPublishAttempt') || 'null'); } catch { return null; } } }).catch(() => [{}]);
     if (result && result.at && Date.now() - result.at < 30 * 60000) {
       await injectScripts(tabId, ['facebook.js']);
-      return step(tabId, 'verifyPublication', { expectedText: args && args.expectedText, timeout: 120000 });
+      return step(tabId, 'verifyPublication', { expectedText: args && args.expectedText, timeout: 120000 }, 'facebook.js');
     }
     throw error;
   }
 }
 
-async function step(tabId, name, args) {
+async function step(tabId, name, args, recoveryScript = 'studio.js') {
   ensureNotCancelled();
-  // Studio sometimes reloads the page under the script (after a thumbnail, a
-  // redirect...): window.__kappgen is then gone. Inject the script again and
-  // retry the step once instead of failing with « reading '...' of undefined ».
+  // Studio and Facebook sometimes reload the page under their helper script:
+  // window.__kappgen is then gone. Reinject the helper for the current site
+  // and retry once instead of accidentally loading the Studio helper on Facebook.
   const run = async () => {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId },
@@ -503,7 +503,7 @@ async function step(tabId, name, args) {
   let result = await run();
   if (result && result.missing) {
     await sleep(4000); // let the reloaded page settle
-    await injectScripts(tabId, ['studio.js']);
+    await injectScripts(tabId, [recoveryScript]);
     result = await run();
   }
   if (!result || !result.ok) throw new Error((result && !result.missing && result.error) || `Étape « ${name} » impossible.`);
@@ -814,13 +814,13 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
     // version is a Reel.
     if (filePath === video.relative_path) {
       await whileShown(tabId, async () => {
-        await step(tabId, 'openPost', { photo: true });
+        await step(tabId, 'openPost', { photo: true }, 'facebook.js');
         await setJob({ message: 'Envoi de la vidéo sur Facebook…' });
         await step(tabId, 'receiveFile', { kind: 'video', path: filePath,
-          src: await bridgeSource(tabId, filePath) });
+          src: await bridgeSource(tabId, filePath) }, 'facebook.js');
         await sleep(3000);
         const caption = (video.title || '').slice(0, 500);
-        await step(tabId, 'fillCaption', { caption });
+        await step(tabId, 'fillCaption', { caption }, 'facebook.js');
         await setJob({ message: 'Envoi de la vidéo à Facebook, puis publication (peut prendre plusieurs minutes)…' });
         // expectedText: what was actually written, so the page script can
         // recognise the new post in the feed and confirm the publication.
@@ -831,21 +831,21 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
     }
     let picked = { groups: [], extra: [] };
     await whileShown(tabId, async () => {
-      await step(tabId, 'openReel');
+      await step(tabId, 'openReel', {}, 'facebook.js');
       await step(tabId, 'receiveFile', {
         src: await bridgeSource(tabId, filePath),
         path: filePath,
-      });
+      }, 'facebook.js');
       await setJob({ message: `Préparation de la publication Facebook (${channelName || 'page sélectionnée'})…` });
       // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
       const caption = (video.title || video.description || '').slice(0, 5000);
-      await step(tabId, 'fillCaption', { caption });
+      await step(tabId, 'fillCaption', { caption }, 'facebook.js');
       picked = await postStep(tabId, 'publish', { groups, groupCount, expectedText: caption });
     });
     complete = true;
     return picked;
   } finally {
-    await step(tabId, 'cleanup').catch(() => {});
+    await step(tabId, 'cleanup', {}, 'facebook.js').catch(() => {});
     if (complete) await closeStudioTab(tabId);
   }
 }
@@ -1721,7 +1721,10 @@ async function publishFacebookPost(post, { auto = false } = {}) {
     let groupWarning = null;
     const markDuring = (result) => {
       const picked = Array.isArray(result) ? result : (result && result.groups) || [];
-      const extra = (result && Array.isArray(result.extra)) ? result.extra : [];
+      const extra = (result && Array.isArray(result.extra)) ? result.extra
+        .map((name) => String(name || '').trim())
+        .filter((name) => name && !/^(activ[ée]|d[ée]sactiv[ée]|on|off|checked|unchecked)$/i.test(name)
+          && !/booster|boost(?:er)? post|mention ia|ai label|contenu ia|story|audience|planification|scheduling|canal|channel/i.test(name)) : [];
       if (result && result.warning) groupWarning = result.warning;
       const lower = picked.map((n) => n.toLowerCase());
       const shared = { ...(post.groups_shared || {}) };
@@ -1736,15 +1739,15 @@ async function publishFacebookPost(post, { auto = false } = {}) {
     } else {
       tabId = await openFacebookReel(page, { reuse: !auto });
       await whileShown(tabId, async () => {
-        await step(tabId, 'openPost', { photo: post.type === 'photo' });
+        await step(tabId, 'openPost', { photo: post.type === 'photo' }, 'facebook.js');
         if (post.image_path) {
           await setJob({ message: 'Photo…' });
           await step(tabId, 'receiveFile', { kind: 'image', path: post.image_path,
-            src: await bridgeSource(tabId, post.image_path) });
+            src: await bridgeSource(tabId, post.image_path) }, 'facebook.js');
           await sleep(2500);
         }
         await setJob({ message: 'Texte…' });
-        await step(tabId, 'fillCaption', { caption: post.text });
+        await step(tabId, 'fillCaption', { caption: post.text }, 'facebook.js');
         await setJob({ message: count ? `Publication sur la Page et dans ${count} groupe(s)…` : 'Publication…' });
         markDuring(await postStep(tabId, 'sendPost', { groups: during.map((url) => names[url]), groupCount: count, expectedText: post.text }));
       });
@@ -1767,7 +1770,11 @@ async function publishFacebookPost(post, { auto = false } = {}) {
       message: `Post publié sur Facebook${groupsText(shared)}.${groupSuffix}` });
   } catch (error) {
     const message = friendly(error);
-    await folder('markPost', { path: post.path, patch: { statut: 'echec', erreur: message } }).catch(() => {});
+    // Once « Publier » may have been clicked, an Ad Center redirect or missing
+    // confirmation is ambiguous: never offer a blind retry that could duplicate
+    // a post already present on the Page.
+    const uncertain = /parcours publicitaire|n[’']a pas confirm[ée] la publication|v[ée]rifie la Page et les brouillons/i.test(message);
+    await folder('markPost', { path: post.path, patch: { statut: uncertain ? 'a_verifier' : 'echec', erreur: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1899,21 +1906,21 @@ async function shareAllAtOnce(post, urls) {
   let confirmed = false;
   try {
     return await whileShown(tabId, async () => {
-      const share = await step(tabId, 'openShareToGroups', { snippet });
-      if (share.mode !== 'multi') { await step(tabId, 'closeDialogs').catch(() => {}); return []; }
-      const { picked } = await step(tabId, 'pickGroups', { names: wanted.map((url) => names[url]) });
-      if (!picked.length) { await step(tabId, 'closeDialogs').catch(() => {}); return []; }
+      const share = await step(tabId, 'openShareToGroups', { snippet }, 'facebook.js');
+      if (share.mode !== 'multi') { await step(tabId, 'closeDialogs', {}, 'facebook.js').catch(() => {}); return []; }
+      const { picked } = await step(tabId, 'pickGroups', { names: wanted.map((url) => names[url]) }, 'facebook.js');
+      if (!picked.length) { await step(tabId, 'closeDialogs', {}, 'facebook.js').catch(() => {}); return []; }
       confirmed = true; // from here, never shared again one by one (no double post)
-      await step(tabId, 'confirmShare', { caption: '' });
+      await step(tabId, 'confirmShare', { caption: '' }, 'facebook.js');
       const lower = picked.map((n) => n.toLowerCase());
       return wanted.filter((url) => lower.includes(names[url].toLowerCase()));
     });
   } catch (error) {
     if (confirmed) throw error;
-    await step(tabId, 'closeDialogs').catch(() => {});
+    await step(tabId, 'closeDialogs', {}, 'facebook.js').catch(() => {});
     return [];
   } finally {
-    await step(tabId, 'cleanup').catch(() => {});
+    await step(tabId, 'cleanup', {}, 'facebook.js').catch(() => {});
     await closeStudioTab(tabId);
   }
 }
@@ -1966,13 +1973,13 @@ async function shareInGroups(post) {
       const name = String(tab.title || '').replace(/\s*[|·-]\s*Facebook\s*$/i, '').replace(/^\(\d+\)\s*/, '').trim();
       if (name && !/^facebook$/i.test(name)) await rememberGroupNames({ [url]: name }).catch(() => {});
       await whileShown(tabId, async () => {
-        await step(tabId, 'openPost', { photo: !!media });
+        await step(tabId, 'openPost', { photo: !!media }, 'facebook.js');
         if (media) {
           await step(tabId, 'receiveFile', { kind: post.video_path ? 'video' : 'image', path: media,
-            src: await bridgeSource(tabId, media) });
+            src: await bridgeSource(tabId, media) }, 'facebook.js');
           await sleep(post.video_path ? 3000 : 2500);
         }
-        await step(tabId, 'fillCaption', { caption: post.text });
+        await step(tabId, 'fillCaption', { caption: post.text }, 'facebook.js');
         await postStep(tabId, 'sendPost', { timeout: post.video_path ? 15 * 60000 : 90000, expectedText: post.text });
       });
       done[url] = { statut: 'publie', published_at: new Date().toISOString() };
@@ -1982,7 +1989,7 @@ async function shareInGroups(post) {
       bad += 1;
     } finally {
       if (tabId) {
-        await step(tabId, 'cleanup').catch(() => {});
+        await step(tabId, 'cleanup', {}, 'facebook.js').catch(() => {});
         await closeStudioTab(tabId);
       }
     }

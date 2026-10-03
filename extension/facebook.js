@@ -6,6 +6,9 @@
   // A reused tab may hold the script of an older version: replace it.
   const VERSION = chrome.runtime.getManifest().version;
   if (window.__kappgen && window.__kappgen.version === VERSION) return;
+  if (!globalThis.KappFacebookFlow) throw new Error('KappGen : règles de publication Facebook indisponibles.');
+  const { PUBLISH_BUTTON, GROUPS_DONE_BUTTON, SUCCESS_NOTICE, DRAFT_NOTICE, GROUP_PICKER_TITLE,
+    FORBIDDEN_GROUP_CONTROL, MAX_GROUPS, groupLimit, isPromotionUrl } = globalThis.KappFacebookFlow;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const visible = (node) => !!node && node.getClientRects().length > 0 && !node.closest('[hidden]');
   const textOf = (node) => (node.textContent || '').replace(/\s+/g, ' ').trim();
@@ -93,15 +96,11 @@
   // composer is not sufficient: « Enregistrer » closes it too, but creates a
   // draft.  The attempt snapshot survives a Facebook reload and lets the
   // service worker verify that a new matching item appeared in the feed.
-  const PUBLISH_BUTTON = /^(publier|publish|post|publier maintenant|publish now)$/i;
-  const GROUPS_DONE_BUTTON = /^(termin[ée]|done)$/i;
-  const SUCCESS_NOTICE = /(?:publication|post).*(?:publi[ée]e?|published|en cours de publication|being published)|(?:publi[ée]e?|published).*(?:publication|post)/i;
-  const DRAFT_NOTICE = /(?:enregistr[ée]|saved).*(?:brouillon|draft)|(?:brouillon|draft).*(?:enregistr[ée]|saved)/i;
   const snippetOf = (value) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80).toLowerCase();
   const matchingArticles = (snippet) => !snippet ? [] : [...document.querySelectorAll('[role="article"], [aria-posinset]')]
     .filter(visible).filter((node) => textOf(node).toLowerCase().includes(snippet));
-  const liveNotice = (pattern) => [...document.querySelectorAll('[role="alert"], [role="status"], [aria-live="assertive"], [aria-live="polite"]')]
-    .filter(visible).find((node) => pattern.test(textOf(node)));
+  const liveNotices = (pattern) => [...document.querySelectorAll('[role="alert"], [role="status"], [aria-live="assertive"], [aria-live="polite"]')]
+    .filter(visible).map(textOf).filter((text) => text && text.length <= 500 && pattern.test(text));
   // « Booster la publication » is a PAID action, and Facebook now arrives with
   // it already switched on for some Pages: publishing then leaves the Page for
   // the ad centre. It is switched back off before every « Publier », never on.
@@ -115,7 +114,7 @@
     }
     return null;
   };
-  const switchOffBoost = () => {
+  const boostControl = () => {
     for (const root of [...document.querySelectorAll('[role="dialog"]')].filter(visible)) {
       const label = labelNode(BOOST_ROW, root);
       if (!label) continue;
@@ -124,15 +123,32 @@
       let row = label;
       for (let up = 0; up < 6 && row && row !== root; up += 1) {
         const toggle = row.querySelector('[role="switch"], input[type="checkbox"]');
-        if (toggle) {
-          const on = toggle.getAttribute('aria-checked') === 'true' || toggle.checked;
-          if (on) click(toggle);
-          return on; // true only when it really had to be switched off
-        }
+        if (toggle) return { label, toggle };
         row = row.parentElement;
       }
+      return { label, toggle: null };
     }
-    return false;
+    return null;
+  };
+  const toggleState = (toggle) => {
+    const aria = toggle && (toggle.getAttribute('aria-checked') || toggle.getAttribute('aria-pressed') || toggle.dataset.state);
+    if (aria != null) return /^(true|on|checked)$/i.test(aria);
+    if (toggle && typeof toggle.checked === 'boolean') return toggle.checked;
+    return null;
+  };
+  const ensureBoostOff = async () => {
+    const control = boostControl();
+    if (!control) return false; // this composer does not offer paid promotion
+    if (!control.toggle) throw new Error('Facebook : le réglage « Booster la publication » est illisible. Publication arrêtée pour éviter une publicité payante.');
+    const state = toggleState(control.toggle);
+    if (state == null) throw new Error('Facebook : état du bouton « Booster la publication » inconnu. Publication arrêtée par sécurité.');
+    if (!state) return false;
+    click(control.toggle);
+    await waitFor(() => {
+      const current = boostControl();
+      return current && current.toggle && toggleState(current.toggle) === false;
+    }, 10000, 'la désactivation de « Booster la publication »');
+    return true;
   };
   // Really reachable by a click, i.e. nothing covering it. Facebook keeps the
   // screen you came from in the page (just moved out of sight), so "is it
@@ -157,9 +173,11 @@
     }
     return null;
   };
-  const beginPublishAttempt = (expectedText) => {
-    const attempt = { at: Date.now(), snippet: snippetOf(expectedText) };
+  const beginPublishAttempt = (expectedText, picked = {}) => {
+    const attempt = { at: Date.now(), snippet: snippetOf(expectedText),
+      groups: Array.isArray(picked.groups) ? picked.groups : [], extra: Array.isArray(picked.extra) ? picked.extra : [] };
     attempt.before = matchingArticles(attempt.snippet).length;
+    attempt.successBefore = liveNotices(SUCCESS_NOTICE);
     try { sessionStorage.setItem('kappgenPublishAttempt', JSON.stringify(attempt)); } catch { /* private mode */ }
     return attempt;
   };
@@ -172,17 +190,33 @@
   };
   async function verifyPublication({ expectedText = '', timeout = 90000 } = {}) {
     const attempt = savedAttempt(expectedText);
+    const confirmed = async (proof) => {
+      // Meta can acknowledge the post, then redirect to its paid Ad Center a
+      // few seconds later. Keep watching before allowing publication.json to
+      // be marked as published.
+      const stableUntil = Date.now() + 10000;
+      while (Date.now() < stableUntil) {
+        if (isPromotionUrl(location.href)) {
+          throw new Error('Facebook a ouvert le parcours publicitaire « Booster ». Ferme-le sans accepter : KappGen n’a pas validé cette publication.');
+        }
+        await sleep(500);
+      }
+      return { confirmed: true, proof, groups: attempt.groups || [], extra: attempt.extra || [] };
+    };
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      if (liveNotice(DRAFT_NOTICE)) {
+      if (isPromotionUrl(location.href)) {
+        throw new Error('Facebook a ouvert le parcours publicitaire « Booster ». Ferme-le sans accepter : KappGen n’a pas validé cette publication.');
+      }
+      if (liveNotices(DRAFT_NOTICE).length) {
         throw new Error('Facebook a enregistré un brouillon au lieu de publier. Le post reste à vérifier et n’est pas marqué comme publié.');
       }
-      // Never any groups/extra here: the caller spreads this over the groups
-      // actually ticked, and empty lists would erase them — the post would
-      // then be shared in those same groups a second time, one by one.
-      if (liveNotice(SUCCESS_NOTICE)) return { confirmed: true, proof: 'facebook_notice' };
+      const oldNotices = new Set(attempt.successBefore || []);
+      if (liveNotices(SUCCESS_NOTICE).some((text) => !oldNotices.has(text))) {
+        return confirmed('facebook_notice');
+      }
       if (attempt.snippet && matchingArticles(attempt.snippet).length > Number(attempt.before || 0)) {
-        return { confirmed: true, proof: 'new_feed_post' };
+        return confirmed('new_feed_post');
       }
       await sleep(750);
     }
@@ -329,11 +363,11 @@
       button = await waitFor(() => !uploading() && publishButtonInDialog(), 60000, 'le bouton Publier après « Terminé »');
     }
     silence();
-    if (switchOffBoost()) {
+    if (await ensureBoostOff()) {
       await sleep(500);
       button = await waitFor(() => publishButtonInDialog(), 15000, 'le bouton Publier');
     }
-    beginPublishAttempt(expectedText);
+    beginPublishAttempt(expectedText, picked);
     click(button);
     const confirmation = await verifyPublication({ expectedText, timeout: 120000 });
     keepQuiet(false);
@@ -386,11 +420,11 @@
         target = await waitFor(() => publishButtonInDialog(), timeout, 'le bouton Publier après « Terminé »');
       }
       if (isFinal(target)) {
-        if (switchOffBoost()) {
+        if (await ensureBoostOff()) {
           await sleep(500);
           target = await waitFor(() => publishButtonInDialog(), timeout, 'le bouton Publier');
         }
-        beginPublishAttempt(expectedText);
+        beginPublishAttempt(expectedText, picked);
       }
       click(target);
       await sleep(2500);
@@ -430,6 +464,23 @@
   const CHOICES = 'button, [role="button"], [role="menuitem"], [role="option"], [role="listitem"], [role="radio"], a';
   const choice = (pattern, root = document) => [...root.querySelectorAll(CHOICES)]
     .find((node) => visible(node) && labelsOf(node).some((label) => pattern.test(label)));
+  const groupRowOf = (box, root) => {
+    const semantic = box.closest('[role="listitem"], [role="option"], label, li');
+    if (semantic && (!root || root.contains(semantic))) return semantic;
+    let row = box.parentElement;
+    for (let depth = 0; row && row !== root && depth < 6; depth += 1, row = row.parentElement) {
+      const text = textOf(row);
+      if (text && text.length < 500) return row;
+    }
+    return null;
+  };
+  const groupBoxes = (root) => [...root.querySelectorAll('[role="checkbox"], input[type="checkbox"]')]
+    .filter((box) => {
+      if (!visible(box) || !onTop(box) || box.matches('[role="switch"]') || box.closest('[role="switch"]')) return false;
+      const row = groupRowOf(box, root);
+      const label = [box.getAttribute('aria-label') || '', row ? textOf(row) : ''].join(' ').trim();
+      return !!label && !FORBIDDEN_GROUP_CONTROL.test(label) && !/^(activ[ée]|d[ée]sactiv[ée]|on|off|checked|unchecked)$/i.test(label);
+    });
 
   // On the Page: the post (found by the start of its text) → « Partager » →
   // « Groupe ». mode "multi" when the window has a box to tick per group.
@@ -468,8 +519,8 @@
     for (const name of names) {
       await setSearch(name);
       const lower = name.toLowerCase();
-      const box = [...dialog.querySelectorAll('[role="checkbox"], input[type="checkbox"]')].find((node) => {
-        const row = node.closest('[role="listitem"], [role="option"], label, li') || node.parentElement;
+      const box = groupBoxes(dialog).find((node) => {
+        const row = groupRowOf(node, dialog);
         return row && (textOf(row).toLowerCase().includes(lower) || (node.getAttribute('aria-label') || '').toLowerCase().includes(lower));
       });
       if (!box) { missing.push(name); continue; }
@@ -485,15 +536,20 @@
   // The window's « Publier » / « Partager » (an optional text first).
   async function confirmShare({ caption }) {
     const dialog = topDialog();
+    if (!dialog) throw new Error('Facebook : fenêtre de partage introuvable.');
     if (caption) {
       const field = dialog && [...dialog.querySelectorAll('[contenteditable="true"], textarea')].find(visible);
       if (field) { field.focus(); document.execCommand('insertText', false, caption); await sleep(500); }
     }
-    const button = await waitFor(() => findButton(/^(publier|partager|post|share|publish|partager maintenant|share now|envoyer|send)$/i, { needEnabled: true }),
+    const button = await waitFor(() => byText(/^(publier|partager|post|share|publish|partager maintenant|share now|envoyer|send)$/i,
+      { needEnabled: true, root: dialog }),
       30000, 'le bouton « Publier » du partage');
     click(button);
     const start = Date.now();
     while (Date.now() - start < 60000 && dialog && document.contains(dialog) && visible(dialog)) await sleep(1000);
+    if (document.contains(dialog) && visible(dialog)) {
+      throw new Error('Facebook n’a pas confirmé le partage dans les groupes. Vérifie l’onglet avant de recommencer.');
+    }
     return true;
   }
 
@@ -504,7 +560,7 @@
   // random among the groups Facebook lists, up to `count` (9 at most).
   // Returns { groups: names ticked from the list, extra: names ticked at random }.
   async function tickGroupsInComposer(names, count = names.length) {
-    const want = Math.min(9, Math.max(count || 0, names.length));
+    const want = groupLimit(count, names.length);
     if (!want) return { groups: [], extra: [] };
     const OPTION = /partager dans (des|un|les) groupes?|publier (aussi )?dans (des|les) groupes|share (to|in) (a )?groups?|post (to|in) groups?|^groupes?$|^groups?$/i;
     // Last resort: the row's heading itself, whatever plain element holds it
@@ -553,12 +609,12 @@
       return { groups: [], extra: [], warning: 'Facebook n’a pas proposé le partage dans les groupes pour ce type de publication.' };
     }
     click(option);
-    // Facebook garde souvent la même boîte de dialogue (même nœud DOM) et ne
-    // change que son contenu : on ne peut pas attendre « une autre boîte »,
-    // seulement l'apparition des cases à cocher — et pas forcément dans la
-    // dernière boîte visible (topDialog()), donc on regarde dans toutes.
+    // Do not accept just any checkbox: the settings screen also contains the
+    // paid « Booster la publication » switch. The group picker must explicitly
+    // say « Sélectionnez des groupes » and contain real checkbox rows.
     const list = await waitFor(() => [...document.querySelectorAll('[role="dialog"]')].filter(visible)
-      .find((d) => d.querySelector('[role="checkbox"], input[type="checkbox"]')) || null, 15000, 'la liste des groupes');
+      .find((d) => { const title = labelNode(GROUP_PICKER_TITLE, d); return title && onTop(title) && groupBoxes(d).length; }) || null,
+    30000, 'la vraie liste « Sélectionnez des groupes »');
     // Long lists load while scrolling: a few turns to see more groups.
     for (let i = 0; i < 6; i += 1) {
       for (const el of list.querySelectorAll('div, ul')) if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = el.scrollHeight;
@@ -566,11 +622,12 @@
     }
     const { picked } = names.length ? await pickGroups({ names: names.slice(0, want), root: list }) : { picked: [] };
     const extra = [];
-    const boxes = () => [...list.querySelectorAll('[role="checkbox"], input[type="checkbox"]')].filter(visible);
+    const boxes = () => groupBoxes(list);
     const ticked = (b) => b.getAttribute('aria-checked') === 'true' || b.checked;
     const nameOf = (b) => {
-      const row = b.closest('[role="listitem"], [role="option"], label, li') || b.parentElement;
-      return (b.getAttribute('aria-label') || (row ? textOf(row) : '') || '').trim();
+      const row = groupRowOf(b, list);
+      return (b.getAttribute('aria-label') || (row ? textOf(row) : '') || '')
+        .replace(/\s*(?:votre derni[èe]re visite|your last visit).*$/i, '').trim();
     };
     const free = boxes().filter((b) => !ticked(b));
     for (let i = free.length - 1; i > 0; i -= 1) {
@@ -592,12 +649,12 @@
       selected = boxes().filter(ticked);
     }
     if (!selected.length) throw new Error('Facebook : aucun groupe n’a pu être sélectionné. La publication n’a pas été lancée.');
-    if (selected.length > want || selected.length > 9) throw new Error('Facebook : impossible de limiter la sélection à 9 groupes. La publication est arrêtée par sécurité.');
+    if (selected.length > want || selected.length > MAX_GROUPS) throw new Error('Facebook : impossible de limiter la sélection à 9 groupes. La publication est arrêtée par sécurité.');
 
     // Critical distinction: « Terminé » validates the group choices, whereas
     // « Enregistrer » on the settings screen creates a draft.  Search only in
     // the group dialog and never accept « Enregistrer » / “Save” here.
-    const done = await waitFor(() => byText(GROUPS_DONE_BUTTON, { needEnabled: true, root: list }),
+    const done = await waitFor(() => { const button = byText(GROUPS_DONE_BUTTON, { needEnabled: true, root: list }); return button && onTop(button); },
       15000, 'le bouton « Terminé » de la sélection des groupes');
     click(done);
     // Back on the settings screen when « Publier » is reachable by a click.

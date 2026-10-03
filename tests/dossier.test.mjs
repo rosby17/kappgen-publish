@@ -302,3 +302,20 @@ test('invalid cross-network state blocks the shared post instead of hiding a des
   assert.equal(item.ready, false);
   assert.match(item.configuration_error, /Statut invalide pour x/);
 });
+
+test('an uncertain Facebook submission stays blocked pending human verification', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  const facebook = new MemoryDirectory('FACEBOOK');
+  const post = facebook.dir('publication-test');
+  post.file('texte.txt', 'Texte à vérifier');
+  post.file('publication.json', JSON.stringify({ statut: 'a_verifier', erreur: 'Facebook a ouvert le parcours publicitaire.' }));
+  KappDossier._setTestRoot(disk);
+  KappDossier._setTestFbRoot(facebook);
+
+  const [item] = await KappDossier.facebookPosts({ now: Date.now(), net: 'facebook' });
+  assert.equal(item.configuration_error, null);
+  assert.equal(item.statut, 'a_verifier');
+  assert.equal(item.ready, false);
+  assert.match(item.error, /parcours publicitaire/);
+});

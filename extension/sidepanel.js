@@ -944,7 +944,8 @@ for (const id of ['yt-times']) {
 
 // ------------------------------------------------------ Facebook posts
 
-const POST_STATES = { a_publier: 'prévu', en_cours: 'en cours', publie: 'publié', echec: 'échec', configuration_invalide: 'configuration invalide' };
+const POST_STATES = { a_publier: 'prévu', en_cours: 'en cours', publie: 'publié', echec: 'échec',
+  a_verifier: 'à vérifier', configuration_invalide: 'configuration invalide' };
 const POST_TYPES = { photo: 'Photo', texte: 'Texte', reel: 'Réel' };
 
 let lastScan = null;  // last scan of the videos folder
@@ -990,6 +991,7 @@ function postRow(post) {
     en_cours: pill('busy', 'Publication en cours…'),
     publie: pill('ok', 'Publié'),
     echec: pill('warn', post.error || 'Échec de la publication.'),
+    a_verifier: pill('warn', post.error || 'Vérifie sur Facebook avant toute nouvelle tentative.'),
     configuration_invalide: pill('warn', post.configuration_error || 'Corrige publication.json.'),
   };
   live.append(states[post.statut] || pill('neutral', post.statut));
@@ -1006,6 +1008,21 @@ function postRow(post) {
     const again = button('Repartager', 'btn ghost', () => act(item, again, { type: 'shareGroups', path: post.path }, 'Partage dans les groupes en cours…'));
     again.dataset.publish = '1';
     acts.append(again);
+  }
+  if (post.statut === 'a_verifier') {
+    const accept = button('Confirmer publié', 'btn ghost', async () => {
+      if (!confirm('As-tu vérifié que ce post est bien visible sur la Page Facebook ?\n\nConfirmer évite de le publier une seconde fois.')) return;
+      accept.disabled = true;
+      await KappDossier.markPost(post.path, { statut: 'publie', published_at: post.published_at || new Date().toISOString(), erreur: null });
+      renderPosts();
+    });
+    const unlock = button('Autoriser un renvoi', 'btn ghost', async () => {
+      if (!confirm('As-tu vérifié la Page ET les brouillons Facebook et confirmé que le post est absent ?\n\nIl faudra encore cliquer « Réessayer » avant tout nouvel envoi.')) return;
+      unlock.disabled = true;
+      await KappDossier.markPost(post.path, { statut: 'echec', erreur: 'Publication vérifiée comme absente : nouvel envoi autorisé manuellement.' });
+      renderPosts();
+    });
+    acts.append(accept, unlock);
   }
   if (post.statut === 'a_publier' || post.statut === 'echec') {
     const change = timeButton(() => item, post.due_at, async (at) => {
@@ -1055,8 +1072,9 @@ function dayGroups(list, timeOf, scope, { openToday = false, openFirst = false }
     box.open = openDays.has(id) || ((openToday && key === today) || (openFirst && index === 0)) && !openDays.has(`${id}:closed`);
     const summary = el('summary');
     const failed = posts.filter((p) => p.statut === 'echec').length;
+    const verify = posts.filter((p) => p.statut === 'a_verifier').length;
     const invalid = posts.filter((p) => p.configuration_error).length;
-    summary.append(el('span', 'day-name', dayLabel(key)), el('span', 'day-count', `${posts.length} post${posts.length > 1 ? 's' : ''}${failed ? ` · ${failed} en échec` : ''}${invalid ? ` · ${invalid} à corriger` : ''}`));
+    summary.append(el('span', 'day-name', dayLabel(key)), el('span', 'day-count', `${posts.length} post${posts.length > 1 ? 's' : ''}${verify ? ` · ${verify} à vérifier` : ''}${failed ? ` · ${failed} en échec` : ''}${invalid ? ` · ${invalid} à corriger` : ''}`));
     const list = el('ul', 'rows');
     const fill = () => { if (!list.childElementCount) list.replaceChildren(...posts.map(postRow)); };
     if (box.open) fill();
@@ -1249,13 +1267,14 @@ async function renderPostsOnce() {
   const { catchUp } = await chrome.storage.local.get('catchUp');
   lateEta = estimateLate(posts, catchUp);
   const failedCount = posts.filter((p) => p.statut === 'echec').length;
+  const verifyCount = posts.filter((p) => p.statut === 'a_verifier').length;
   const invalidCount = posts.filter((p) => p.configuration_error).length;
   $('fb-retry-all').hidden = !failedCount;
   $('fb-retry-all').textContent = `Réessayer les ${failedCount} post(s) en échec`;
   const config = await settings();
   const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl) || config.facebookPageUrl;
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
-  const rank = { en_cours: 0, echec: 1, a_publier: 2 };
+  const rank = { en_cours: 0, a_verifier: 1, echec: 2, a_publier: 3 };
   const toCome = posts.filter((p) => p.statut !== 'publie')
     .sort((a, b) => (rank[a.statut] ?? 3) - (rank[b.statut] ?? 3) || (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
   const done = posts.filter((p) => p.statut === 'publie')
@@ -1265,7 +1284,8 @@ async function renderPostsOnce() {
   else {
     summary.className = 'muted small';
     summary.textContent = !posts.length ? (access.state === 'granted' ? 'Aucun post dans ce dossier.' : '')
-      : `${toCome.length} à venir · ${done.length} publié(s)` + (invalidCount ? ` · ${invalidCount} configuration(s) à corriger` : '')
+      : `${toCome.length} à venir · ${done.length} publié(s)` + (verifyCount ? ` · ${verifyCount} à vérifier sur Facebook` : '')
+        + (invalidCount ? ` · ${invalidCount} configuration(s) à corriger` : '')
         + (missingPage ? ' · lien de la page manquant (en haut)' : '');
   }
   const shown = (p) => !postFilter || (postFilter === 'echec' ? p.statut === 'echec' : p.type === postFilter);
