@@ -1182,9 +1182,13 @@ async function finishUpload(job) {
   await remember({ title: video.title, channel: video.channel_name, youtubeId, visibility, at: Date.now() });
   // The video's pinned comment, once it is public (at its scheduled time, or
   // a few minutes after the upload); never on a private video.
-  if (source === 'folder' && video.comment && visibility !== 'PRIVATE') {
+  const wantsComment = (await folderSettings()).youtubeComment === true;
+  const { pinBlocked } = await chrome.storage.local.get('pinBlocked');
+  const blockedAt = (pinBlocked || {})[video.channel_key || ''];
+  const blocked = blockedAt && Date.now() - blockedAt < 30 * 24 * 3600 * 1000;
+  if (source === 'folder' && wantsComment && !blocked && video.comment && visibility !== 'PRIVATE') {
     const delay = Number.isFinite(job.commentDelay) ? job.commentDelay : COMMENT_DELAY_MIN + 1;
-    await queueComment({ id: `yt:${video.relative_path}`, network: 'youtube', path: video.relative_path, youtubeId, text: video.comment, pin: true,
+    await queueComment({ id: `yt:${video.relative_path}`, network: 'youtube', path: video.relative_path, youtubeId, text: video.comment, pin: true, channelKey: video.channel_key,
       title: video.title, channel: video.channel_name, due: Math.max(Date.now(), scheduleAt || 0) + delay * 60000 }).catch(() => {});
   }
   return youtubeId;
@@ -1780,7 +1784,7 @@ async function publishFacebookPost(post, { auto = false } = {}) {
       groupes_erreur: post.groups_error || null,
       ...(Object.keys(post.groups_shared || {}).length ? { groupes_partages: post.groups_shared } : {}) } });
     // The comment that goes with the post, a few minutes after it.
-    if (post.comment && post.comment_statut !== 'publie') {
+    if ((await folderSettings()).facebookComment === true && post.comment && post.comment_statut !== 'publie') {
       const delay = post.comment_delay != null ? post.comment_delay : COMMENT_DELAY_MIN;
       await queueComment({ id: `fb:${post.path}`, network: 'facebook', path: post.path, page, snippet: post.text,
         text: post.comment, title: post.text.split('\n')[0].slice(0, 80), channel: post.channel_name, due: Date.now() + delay * 60000 }).catch(() => {});
@@ -2328,6 +2332,16 @@ async function commentNext() {
   try {
     const result = item.network === 'facebook' ? await postFacebookComment(item) : await postYoutubeComment(item);
     await remove();
+    if (result && result.pinUnavailable) {
+      // The channel cannot pin yet: no comment, and none is tried again for a while.
+      const { pinBlocked } = await chrome.storage.local.get('pinBlocked');
+      await chrome.storage.local.set({ pinBlocked: { ...(pinBlocked || {}), [item.channelKey || '']: Date.now() } });
+      const why = result.deleted ? 'commentaire retiré' : 'commentaire à retirer à la main';
+      await markComment(item, false, { message: `Épinglage indisponible sur cette chaîne (critères YouTube non atteints) : ${why}, rien n’est posté.` });
+      await setJob({ running: false, done: true, error: null, message: 'Commentaire ignoré : cette chaîne ne peut pas encore épingler.',
+        warning: result.deleted ? '' : 'Le commentaire est resté sous la vidéo : retire-le à la main.' });
+      return true;
+    }
     await markComment(item, true);
     const note = result && result.otherChannel ? ' Attention : posté depuis une autre chaîne que celle de la vidéo ?' : '';
     await setJob({ running: false, done: true, error: null, message: `Commentaire publié.${note}`, ...(note ? { warning: note.trim() } : {}) });
@@ -2476,7 +2490,28 @@ const newer = (a, b) => {
   for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
   return false;
 };
-async function checkNewRelease({ maxAge = 6 * 3600 * 1000 } = {}) {
+// A newer release is installed by itself through the helper of the computer
+// (the one behind « Mettre à jour »): new files on disk, then selfUpdate()
+// restarts the extension as soon as no publication is running. Without the
+// helper, or if it fails, the notification asking for a click stays.
+// Off with autoUpdate === false in the browser's storage.
+async function autoInstall(version) {
+  const { autoUpdate, autoInstallTry } = await chrome.storage.local.get(['autoUpdate', 'autoInstallTry']);
+  if (autoUpdate === false) return false;
+  if (autoInstallTry && autoInstallTry.version === version && Date.now() - autoInstallTry.at < 3600 * 1000) return autoInstallTry.ok === true;
+  const { job } = await chrome.storage.session.get('job');
+  if (job && job.running) return true; // later: nothing is installed in the middle of a publication
+  let ok = false;
+  try {
+    const answer = await chrome.runtime.sendNativeMessage('com.kappgen.publish', { action: 'update' });
+    ok = !!(answer && answer.ok);
+  } catch { /* no helper: the notification takes over */ }
+  await chrome.storage.local.set({ autoInstallTry: { version, at: Date.now(), ok } });
+  if (ok) selfUpdate().catch(() => {});
+  return ok;
+}
+
+async function checkNewRelease({ maxAge = 30 * 60 * 1000 } = {}) {
   const { releaseCheck } = await chrome.storage.local.get('releaseCheck');
   const current = chrome.runtime.getManifest().version;
   let latest = releaseCheck && releaseCheck.latest;
@@ -2487,6 +2522,7 @@ async function checkNewRelease({ maxAge = 6 * 3600 * 1000 } = {}) {
     await chrome.storage.local.set({ releaseCheck: { at: Date.now(), latest, notified: releaseCheck && releaseCheck.notified } });
   }
   if (!latest || !newer(latest, current)) return;
+  if (await autoInstall(latest)) return;
   const { releaseCheck: saved } = await chrome.storage.local.get('releaseCheck');
   if (saved.notified === latest) return;
   await chrome.storage.local.set({ releaseCheck: { ...saved, notified: latest } });

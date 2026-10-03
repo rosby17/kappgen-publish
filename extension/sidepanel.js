@@ -995,6 +995,7 @@ async function renderPublishSettings() {
   for (const radio of document.querySelectorAll('input[name="yt-when"]')) radio.checked = radio.value === when;
   $('yt-times-row').hidden = when !== 'times';
   $('yt-times').value = config.times || '';
+  $('yt-comment').checked = config.youtubeComment === true;
 }
 
 async function saveSetting(patch) {
@@ -1309,6 +1310,7 @@ async function renderGroups() {
   $('fb-groups-on').checked = !!config.facebookGroupsOn;
   $('fb-groups-more').hidden = !config.facebookGroupsOn; // the rest only once ticked
   $('fb-from-yt').checked = config.facebookFromYoutube !== false;
+  $('fb-comment').checked = config.facebookComment === true;
   $('fb-group-list').replaceChildren(...groupList.map((link) => {
     const item = el('li', 'group-chip');
     const a = el('a', null, groupName(link));
@@ -1412,6 +1414,17 @@ $('fb-from-yt').addEventListener('change', async () => {
   if ($('fb-from-yt').checked) current.facebookFromYoutubeSince = Date.now();
   await chrome.storage.local.set({ folder: current });
   send({ type: 'autoNow' });
+});
+// The comment under each post / the pinned comment under each video: off until ticked.
+$('fb-comment').addEventListener('change', async () => {
+  const current = await settings();
+  current.facebookComment = $('fb-comment').checked;
+  await chrome.storage.local.set({ folder: current });
+});
+$('yt-comment').addEventListener('change', async () => {
+  const current = await settings();
+  current.youtubeComment = $('yt-comment').checked;
+  await chrome.storage.local.set({ folder: current });
 });
 $('fb-groups-per').addEventListener('change', saveGroups);
 for (const [id, step] of [['fb-groups-less', -1], ['fb-groups-plus', 1]]) {

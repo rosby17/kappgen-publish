@@ -82,21 +82,40 @@
     const owner = ownerHref();
     const otherChannel = !!(authorHref && owner && !authorHref.includes(owner.replace(/^\/+/, '').split('/').pop()) && !owner.includes(authorHref.replace(/^\/+/, '').split('/').pop()));
     let pinned = false;
+    let pinUnavailable = false;
+    let deleted = false;
     if (pin) {
       try {
         const menu = thread.querySelector('#action-menu button, #action-menu yt-icon-button');
         if (!menu) throw new Error('menu');
         menu.click();
-        const item = await waitFor(() => [...document.querySelectorAll('ytd-menu-service-item-renderer, tp-yt-paper-item')]
-          .find((n) => visible(n) && /^(épingler|pin)/i.test(textOf(n))), 6000, 'l’option « Épingler »', 300);
-        item.click();
-        const confirm = await waitFor(() => document.querySelector('yt-confirm-dialog-renderer #confirm-button button, yt-confirm-dialog-renderer #confirm-button'), 6000, 'la confirmation', 300);
-        confirm.click();
-        await sleep(1500);
-        pinned = true;
+        const items = () => [...document.querySelectorAll('ytd-menu-service-item-renderer')].filter(visible);
+        await waitFor(() => items().length, 6000, 'le menu du commentaire', 300);
+        const item = items().find((n) => /^(épingler|pin)/i.test(textOf(n)));
+        if (!item) {
+          // This channel cannot pin comments (criteria not reached): the
+          // comment is withdrawn, it is only wanted pinned.
+          pinUnavailable = true;
+          const remove = items().find((n) => /^(supprimer|delete|remove)/i.test(textOf(n)));
+          if (remove) {
+            remove.click();
+            const ok = await waitFor(() => document.querySelector('yt-confirm-dialog-renderer #confirm-button button, yt-confirm-dialog-renderer #confirm-button'), 6000, 'la confirmation', 300);
+            ok.click();
+            await sleep(1500);
+            deleted = !mine();
+          } else {
+            document.body.click();
+          }
+        } else {
+          item.click();
+          const confirm = await waitFor(() => document.querySelector('yt-confirm-dialog-renderer #confirm-button button, yt-confirm-dialog-renderer #confirm-button'), 6000, 'la confirmation', 300);
+          confirm.click();
+          await sleep(1500);
+          pinned = true;
+        }
       } catch { /* the comment is posted; pinning can be done by hand */ }
     }
-    return { commented: true, pinned, otherChannel };
+    return { commented: !deleted, pinned, otherChannel, pinUnavailable, deleted };
   }
 
   window.__kappgenWatch = { version: VERSION, commentVideo };
