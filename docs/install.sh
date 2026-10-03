@@ -9,7 +9,16 @@
 #    profil après l'autre. Chrome interdit d'ajouter une extension sans un
 #    clic de l'utilisateur : 3 clics par nouveau profil.
 set -e
-ZIP_URL="https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip"
+REPO="rosby17/kappgen-publish"
+# Dernière version demandée à l'API GitHub (toujours à jour). Le lien
+# « releases/latest/download » est mis en cache plusieurs minutes et peut encore
+# servir la version précédente juste après une publication : seulement en secours.
+TAG=$(curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+  | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1 || true)
+case "$TAG" in
+  v[0-9]*) ZIP_URL="https://github.com/$REPO/releases/download/$TAG/kappgen-publish.zip" ;;
+  *) ZIP_URL="https://github.com/$REPO/releases/latest/download/kappgen-publish.zip" ;;
+esac
 SHA_URL="$ZIP_URL.sha256"
 DIR="$HOME/KappGen-Publish"
 CHROME_DATA="$HOME/Library/Application Support/Google/Chrome"

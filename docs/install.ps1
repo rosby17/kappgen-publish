@@ -9,7 +9,14 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$zipUrl = 'https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip'
+$repo = 'rosby17/kappgen-publish'
+# Dernière version demandée à l'API GitHub (toujours à jour). Le lien « releases/latest/download »
+# est mis en cache plusieurs minutes après une publication : il ne sert qu'en secours.
+$zipUrl = "https://github.com/$repo/releases/latest/download/kappgen-publish.zip"
+try {
+  $tag = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ Accept = 'application/vnd.github+json' } -UseBasicParsing).tag_name
+  if ($tag -match '^v[0-9]') { $zipUrl = "https://github.com/$repo/releases/download/$tag/kappgen-publish.zip" }
+} catch { }
 $shaUrl = $zipUrl + '.sha256'
 $dir = Join-Path $env:USERPROFILE 'KappGen-Publish'
 
