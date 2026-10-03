@@ -1101,7 +1101,7 @@ const KappDossier = (() => {
   }
 
   return { NETS, POST_NETS, saveRoot, loadRoot, access, folders, saveNetRoot, loadNetRoot, clearNetRoot,
-    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost,
+    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost, exportState,
     _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testNets.facebook = h; },
     _setTestNetRoot: (net, h) => { testNets[net] = h; } };
 })();

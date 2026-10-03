@@ -1595,86 +1595,6 @@ async function publishLinkedinPost(postPath, { auto = false } = {}) {
   }
 }
 
-// ---------------------------------------------------------------- LinkedIn
-
-// LinkedIn's « Commencer un post » window, in the LinkedIn tab already open if there is one.
-const LINKEDIN_COMPOSE = 'https://www.linkedin.com/feed/?shareActive=true';
-async function openLinkedin() {
-  const tab = await reuseOrOpen(linkedinTabToReuse, LINKEDIN_COMPOSE);
-  const start = Date.now();
-  let asked = false;
-  while (Date.now() - start < 90000) {
-    const current = await chrome.tabs.get(tab.id);
-    const url = current.url || current.pendingUrl || '';
-    if (/\/(login|signup|checkpoint|authwall|uas\/login)/.test(url)) throw new Error('Connecte-toi d’abord à LinkedIn dans ce navigateur, puis relance.');
-    if (url.startsWith('https://www.linkedin.com/') && current.status === 'complete') {
-      if (!asked && !/shareActive=true/.test(url)) {
-        asked = true;
-        await chrome.tabs.update(tab.id, { url: LINKEDIN_COMPOSE });
-        await sleep(2500);
-        continue;
-      }
-      await sleep(1500);
-      await injectScripts(tab.id, ['lib/page-kit.js', 'linkedin.js']);
-      return tab.id;
-    }
-    await sleep(700);
-  }
-  throw new Error('LinkedIn ne s’est pas ouvert.');
-}
-
-async function sendToLinkedin({ text, mediaPath, title, channel, path }) {
-  await chrome.storage.session.set({ job: { running: true, source: 'linkedin', kind: 'linkedin', path, title, channel, message: 'Ouverture de LinkedIn…', startedAt: Date.now() } });
-  const tabId = await openLinkedin();
-  await whileShown(tabId, async () => {
-    await stepIn(tabId, '__kappgenLinkedin', 'openComposer');
-    await setJob({ message: 'Texte du post…' });
-    await stepIn(tabId, '__kappgenLinkedin', 'writePost', { text });
-    if (mediaPath) {
-      await setJob({ message: 'Envoi du média à LinkedIn…' });
-      await stepIn(tabId, '__kappgenLinkedin', 'addMedia', { path: mediaPath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(mediaPath)}`) });
-    }
-    await setJob({ message: 'Publication sur LinkedIn…' });
-    await stepIn(tabId, '__kappgenLinkedin', 'send');
-  });
-  closeStudioTab(tabId); // only a tab opened for this post is closed
-}
-
-// A video already on YouTube: its title, description start and link
-// (LinkedIn shows the YouTube preview).
-async function publishLinkedinVideo(relativePath, { auto = false } = {}) {
-  try {
-    const { sent } = await folderQueue();
-    const video = sent.find((item) => item.relative_path === relativePath);
-    if (!video || !video.youtube_id) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
-    const intro = String(video.description || '').split(/\n\s*\n/)[0].slice(0, 600);
-    await sendToLinkedin({ text: [video.title, intro, `https://youtu.be/${video.youtube_id}`].filter(Boolean).join('\n\n'),
-      mediaPath: null, title: video.title, channel: video.channel_name, path: relativePath });
-    await folder('mark', { path: relativePath, status: 'published', data: { linkedinPublishedAt: new Date().toISOString() } });
-    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur LinkedIn.' });
-  } catch (error) {
-    const message = friendly(error);
-    await folder('mark', { path: relativePath, status: 'published', data: { linkedinError: message } }).catch(() => {});
-    await setJob({ running: false, done: false, error: message, message });
-  }
-}
-
-// A post (Facebook's, or LinkedIn's own): its text, and its photo or video.
-async function publishLinkedinPost(postPath, { auto = false } = {}) {
-  const post = await findPost(postPath);
-  try {
-    if (!post) throw new Error('Post introuvable (déplacé ?).');
-    await sendToLinkedin({ text: post.text.slice(0, 3000), mediaPath: post.video_path || post.image_path || null,
-      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath });
-    await folder('markPost', { path: postPath, patch: { linkedin: { statut: 'publie', published_at: new Date().toISOString() } } });
-    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur LinkedIn.' });
-  } catch (error) {
-    const message = friendly(error);
-    await folder('markPost', { path: postPath, patch: { linkedin: { statut: 'echec', erreur: message } } }).catch(() => {});
-    await setJob({ running: false, done: false, error: message, message });
-  }
-}
-
 // ---------------------------------------------------------------- Instagram
 
 // Instagram home, in the Instagram tab already open if there is one.
@@ -2270,6 +2190,22 @@ async function ownPostNext(settings) {
   const send = { x: publishXPost, linkedin: publishLinkedinPost, tiktok: publishTikTokPost, instagram: publishInstagramPost }[post.network];
   await send(post.path, { auto: true });
   return true;
+}
+
+// Bridge with the KappGen software (see lib/dossier.js exportState): state written in the shared folder.
+async function exportState(etat) {
+  const { lastExport } = await chrome.storage.session.get('lastExport');
+  if (lastExport && lastExport.etat === etat && Date.now() - lastExport.at < 4 * 60 * 1000) return;
+  const settings = await folderSettings();
+  const { lastAutoPostAt, lastAutoTick } = await chrome.storage.local.get(['lastAutoPostAt', 'lastAutoTick']);
+  const state = {
+    source: 'KappGen Publish', version: chrome.runtime.getManifest().version, maj: new Date().toISOString(), etat,
+    pause: await isPaused(), reseaux: Object.fromEntries(['youtube', 'facebook', 'tiktok', 'instagram', 'x', 'linkedin'].map((n) => [n, networkOn(settings, n)])),
+    youtube: { visibilite: settings.visibility || 'UNLISTED', programmation: settings.schedule === 'times' ? 'heures' : 'tout-de-suite', heures: settings.times || '' },
+    chaines: settings.channels || {}, dernier_passage: lastAutoTick || null, dernier_post: lastAutoPostAt || null,
+  };
+  await folder('exportState', { state }).catch(() => {});
+  await chrome.storage.session.set({ lastExport: { etat, at: Date.now() } });
 }
 
 async function autoPass() {
