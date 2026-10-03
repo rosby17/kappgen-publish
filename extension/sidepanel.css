@@ -689,8 +689,3 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .theme-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; border: 1px solid var(--border); }
 .theme-seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
 .theme-seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
-
-/* ------------------------------------------------- update pill (1.20.13) */
-.update-pill { cursor: pointer; border: 1px solid rgba(var(--warn-rgb), 0.45); background: rgba(var(--warn-rgb), 0.14); color: var(--warn); font-family: inherit; transition: opacity 0.15s; }
-.update-pill:hover { opacity: 0.85; filter: brightness(1.1); }
-.update-pill:disabled { opacity: 0.6; cursor: wait; }
