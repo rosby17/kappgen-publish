@@ -1260,7 +1260,7 @@ async function renderCatchUp() {
   const minutes = Math.round(Number((await settings()).catchUpMinutes)) || 0;
   catchUpChosenMs = minutes * 60000;
   if (document.activeElement !== $('catchup-min')) $('catchup-min').value = minutes ? String(minutes) : '';
-  $('catchup-help').textContent = catchUpLabel(minutes);
+  $('catchup-row').title = catchUpLabel(minutes);
 }
 async function saveCatchUp(value) {
   const raw = String(value ?? $('catchup-min').value).trim();

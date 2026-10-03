@@ -61,7 +61,6 @@
       <p id="login-error" class="login-error" role="alert" hidden></p>
       <button class="login-submit" type="submit">Continuer</button>
       <p class="login-foot">Pas encore de compte ? <a href="https://app.kappgen.com/inscription" target="_blank" rel="noopener noreferrer">Créer mon compte (7 jours gratuits)</a></p>
-      <p class="login-legal"><a href="https://app.kappgen.com/mentions-legales" target="_blank" rel="noopener noreferrer">Mentions légales</a> · <a href="https://app.kappgen.com/confidentialite" target="_blank" rel="noopener noreferrer">Confidentialité</a> · <a href="https://app.kappgen.com/conditions" target="_blank" rel="noopener noreferrer">Conditions</a></p>
     </form>
   </section>
 
@@ -353,13 +352,11 @@
       <ul id="net-folders" class="net-folders"></ul>
       <p id="net-folders-status" class="status error" role="alert" hidden></p>
     </section>
-    <h3 class="set-group">Publication automatique</h3>
-    <section class="card" id="set-catchup">
-      <div class="set-row">
-        <span class="set-text"><strong>Rythme du rattrapage</strong><small>Minutes entre deux posts en retard (Chrome fermé, ordinateur en veille…). Vide = automatique.</small></span>
-        <span class="stepper"><button type="button" id="catchup-less" aria-label="Moins">−</button><input id="catchup-min" type="number" min="0" max="120" placeholder="Auto" aria-label="Minutes entre deux posts en retard"><button type="button" id="catchup-plus" aria-label="Plus">+</button></span>
+    <section class="card catchup-card" id="set-catchup">
+      <div class="set-row" id="catchup-row">
+        <span class="set-text"><strong>Rattrapage des retards (min)</strong></span>
+        <span class="stepper"><button type="button" id="catchup-less" aria-label="Moins">−</button><input id="catchup-min" type="number" min="0" max="120" placeholder="Auto" aria-label="Minutes entre deux posts en retard (vide = automatique)"><button type="button" id="catchup-plus" aria-label="Plus">+</button></span>
       </div>
-      <p id="catchup-help" class="small muted"></p>
     </section>
     <h3 class="set-group">Réseaux et destination</h3>
     <section class="card">
@@ -554,7 +551,7 @@ Ingrédients : …</pre>
 
   </div>
 
-  <footer class="panel-foot"><a href="https://kappgen.com/" target="_blank" rel="noopener noreferrer"><img src="logo.png" alt="" width="14" height="14">kappgen.com</a><a href="https://app.kappgen.com/extension" target="_blank" rel="noopener noreferrer">Guide</a></footer>
+  <footer class="panel-foot"><a href="https://kappgen.com/" target="_blank" rel="noopener noreferrer"><img src="logo.png" alt="" width="14" height="14">kappgen.com</a><a href="https://app.kappgen.com/extension" target="_blank" rel="noopener noreferrer">Guide</a><span class="foot-legal"><a href="https://app.kappgen.com/mentions-legales" target="_blank" rel="noopener noreferrer">Mentions légales</a><a href="https://app.kappgen.com/confidentialite" target="_blank" rel="noopener noreferrer">Confidentialité</a><a href="https://app.kappgen.com/conditions" target="_blank" rel="noopener noreferrer">Conditions</a></span></footer>
 
   <script src="lib/fiches.js"></script>
   <script src="lib/schedule.js"></script>

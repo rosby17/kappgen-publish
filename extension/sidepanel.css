@@ -695,7 +695,12 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
    the content above it; longer content pushes it further down. */
 body { display: flex; flex-direction: column; }
 body > * { flex: none; }
-.panel-foot { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: auto; padding: 40px 0 6px; font-size: 12px; }
+.panel-foot { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 16px; margin-top: auto; padding: 40px 0 6px; font-size: 12px; }
+.panel-foot .foot-legal { flex-basis: 100%; display: flex; justify-content: center; gap: 12px; font-size: 11px; }
+.panel-foot .foot-legal a { font-weight: 400; }
+.catchup-card { padding-top: 6px; padding-bottom: 6px; }
+.catchup-card .set-row { border-top: 0; }
+.catchup-card .set-text strong { white-space: normal; }
 .panel-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted, var(--text)); font-weight: 500; }
 .panel-foot img { border-radius: 3px; }
 
