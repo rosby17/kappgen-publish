@@ -631,16 +631,16 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 [data-theme="clair"] .theme-toggle .sun { display: none; }
 [data-theme="clair"] .theme-toggle .moon { display: block; }
 .theme-toggle + .profile { margin-left: 0; }
-[data-theme="clair"] .card, [data-theme="clair"] li.row, [data-theme="clair"] li.item { box-shadow: 0 1px 2px #1b1a180a, 0 1px 3px #1b1a1808; }
-[data-theme="clair"] .tabs { background: #efefec; }
-[data-theme="clair"] .profile-menu, [data-theme="clair"] .modal-box, [data-theme="clair"] .dt-box { box-shadow: 0 12px 40px #1b1a1826; }
+[data-theme="clair"] .card, [data-theme="clair"] li.row, [data-theme="clair"] li.item { box-shadow: 0 1px 2px #0e12220a, 0 1px 3px #0e122208; }
+[data-theme="clair"] .tabs { background: #eef1f8; }
+[data-theme="clair"] .profile-menu, [data-theme="clair"] .modal-box, [data-theme="clair"] .dt-box { box-shadow: 0 12px 40px #0e122226; }
 [data-theme="clair"] .plan-pill.urgent, [data-theme="clair"] .update-pill { color: var(--warn); }
 [data-theme="clair"] .short-tag, [data-theme="clair"] .badge-short { color: #fff; }
 
 /* ----------------------- connexion : même page que app.kappgen.com/login */
 #account:has(> .login:not([hidden])) { padding: 0; background: none; border: 0; box-shadow: none; }
 .login { display: grid; gap: 0 !important; padding: 22px 18px 16px; border-radius: 14px; background: var(--login-surface); border: 1px solid var(--border); }
-[data-theme="clair"] .login { box-shadow: 0 1px 2px #1b1a180a, 0 1px 3px #1b1a1808; }
+[data-theme="clair"] .login { box-shadow: 0 1px 2px #0e12220a, 0 1px 3px #0e122208; }
 .login h2 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .login .login-sub { margin: 4px 0 18px; font-size: 13px; color: var(--muted); line-height: 1.45; }
 .google-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 40px; padding: 0 12px;
@@ -651,7 +651,7 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .login label { display: grid; gap: 6px; margin: 0 0 12px; font-size: 13px; font-weight: 500; color: var(--text); }
 .login input { width: 100%; height: 40px; margin: 0; padding: 0 12px; border-radius: 8px; font: inherit; font-size: 14px; font-weight: 400;
   background: var(--login-field); border: 1px solid var(--border); color: var(--text); }
-[data-theme="clair"] .login input { border-color: #d8d6d0; }
+[data-theme="clair"] .login input { border-color: #d3d8e3; }
 .login input:focus { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 0; border-color: var(--accent); }
 .login .login-forgot { margin: -4px 0 14px; text-align: right; font-size: 12.5px; }
 #account .login a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
