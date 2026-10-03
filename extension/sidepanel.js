@@ -2599,6 +2599,32 @@ async function unzipToDirectoryHandle(zipArrayBuffer, dirHandle) {
   }
 }
 
+function getExtDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('kappgen-dossier', 1);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function saveExtHandle(handle) {
+  try {
+    const base = await getExtDb();
+    const tx = base.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(handle, 'ext_handle');
+  } catch (e) {}
+}
+async function loadExtHandle() {
+  try {
+    const base = await getExtDb();
+    return new Promise((resolve) => {
+      const tx = base.transaction('kv', 'readonly');
+      const req = tx.objectStore('kv').get('ext_handle');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) { return null; }
+}
+
 $('btn-update-auto')?.addEventListener('click', async () => {
   const btn = $('btn-update-auto');
   const msg = $('update-status-msg');
@@ -2614,26 +2640,38 @@ $('btn-update-auto')?.addEventListener('click', async () => {
       : `https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip`;
 
     const res = await fetch(zipUrl);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`Impossible de télécharger l'archive (HTTP ${res.status})`);
     const zipArrayBuffer = await res.arrayBuffer();
 
-    if (msg) msg.textContent = 'Sélectionne ton dossier KappGen-Publish...';
-    btn.textContent = '📂 Sélection du dossier...';
+    let dirHandle = await loadExtHandle();
+    if (dirHandle) {
+      try {
+        let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+        if (perm !== 'granted') perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+        if (perm !== 'granted') dirHandle = null;
+      } catch (e) {
+        dirHandle = null;
+      }
+    }
 
-    let dirHandle;
-    try {
-      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-    } catch (e) {
-      throw new Error('Sélection du dossier annulée.');
+    if (!dirHandle) {
+      btn.textContent = '📂 Sélection du dossier KappGen-Publish...';
+      if (msg) msg.textContent = 'Sélectionne le dossier de l’extension (KappGen-Publish) pour autoriser la mise à jour...';
+      try {
+        dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        await saveExtHandle(dirHandle);
+      } catch (e) {
+        throw new Error('Sélection du dossier annulée.');
+      }
     }
 
     btn.textContent = '⚙️ Remplacement des fichiers...';
-    if (msg) msg.textContent = 'Mise à jour des fichiers en cours...';
+    if (msg) msg.textContent = 'Installation des nouveaux fichiers en cours...';
 
     await unzipToDirectoryHandle(zipArrayBuffer, dirHandle);
 
     btn.textContent = '✓ Mis à jour ! Redémarrage...';
-    if (msg) msg.textContent = 'Extension mise à jour ! Redémarrage de Chrome...';
+    if (msg) msg.textContent = 'Extension mise à jour avec succès ! Redémarrage de Chrome...';
 
     setTimeout(() => {
       chrome.runtime.reload();
