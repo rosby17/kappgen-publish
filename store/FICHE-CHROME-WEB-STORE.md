@@ -1,102 +1,107 @@
 # Fiche Chrome Web Store — KappGen Publish
 
-Tout ce qu'il faut copier dans le tableau de bord développeur : https://chrome.google.com/webstore/devconsole
+Ce document prépare les informations à reporter dans le tableau de bord du Chrome Web Store. Vérifie-les à chaque version.
 
-## 0. Avant de commencer (à faire par toi)
-1. Créer le compte développeur Chrome Web Store avec ton compte Google (frais uniques de 5 $).
-2. Renseigner l'adresse e-mail de contact et la vérifier.
-3. « Nouvel élément » → envoyer **`kappgen-uploader.zip`** (le même fichier que la Release GitHub : https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip).
+## Archive
 
-## 1. Fiche du Store
+Envoie uniquement `dist/kappgen-uploader-chrome-web-store.zip`, produite par `./publier-version.sh`. Cette archive ne contient pas la clé utilisée par l’édition manuelle. N’envoie pas `kappgen-uploader.zip` au Store.
 
-**Nom** (repris du manifeste) : `KappGen Publish`
+## Fiche publique
 
-**Résumé** (132 caractères max, repris du manifeste) :
-```
-Publie automatiquement tes vidéos finies sur YouTube (et Facebook) depuis un dossier de ton ordinateur.
-```
+Nom : `KappGen Publish`
 
-**Description** :
-```
-KappGen Publish publie toute seule tes vidéos finies sur YouTube, et sur Facebook si tu le souhaites, à partir d'un dossier de ton ordinateur.
+Résumé :
 
-Range chaque vidéo dans son dossier avec sa fiche (titre, description, mots-clés) et sa miniature : l'extension s'occupe du reste.
-
-• Envoi automatique de chaque nouvelle vidéo prête, chaîne par chaîne
-• Visibilité au choix : non répertoriée, publique, privée ou programmée aux heures que tu fixes
-• Titre, description, mots-clés, miniature et « non conçue pour les enfants » remplis à ta place dans YouTube Studio
-• Mise à jour automatique sur YouTube quand tu modifies la fiche ou la miniature d'une vidéo déjà envoyée
-• Jamais de double envoi : chaque vidéo garde la trace de sa publication
-• Facebook : publication de la vidéo, ou de sa version verticale en Reel, sur la page de ta chaîne
-• Fonctionne avec les vidéos de n'importe quel outil de montage
-
-Tout se passe dans ton propre navigateur, avec tes comptes déjà connectés : l'extension ne voit jamais tes mots de passe et n'envoie tes vidéos qu'à YouTube et Facebook.
-
-Un compte KappGen (gratuit à créer sur app.kappgen.com) est nécessaire.
-Mode d'emploi et règles de rangement : https://github.com/rosby17/kappgen-uploader
+```text
+Publie vidéos et posts sur YouTube, Facebook, Instagram, TikTok, X et LinkedIn depuis un dossier local.
 ```
 
-**Catégorie** : Outils (ou « Productivité » / « Workflow et planification » selon la liste proposée)
-**Langue** : Français
+Description :
 
-**Images** (dossier `store/`) :
-- Icône 128×128 : `icone-128x128.png`
-- Petite vignette promotionnelle 440×280 : `petite-vignette-440x280.png`
-- Grande vignette 1400×560 (facultative) : `grande-vignette-1400x560.png`
-- **Captures d'écran 1280×800 (au moins 1, jusqu'à 5)** : à faire — envoie à Claude 2 ou 3 captures du panneau (onglets Vidéos, YouTube, Chaînes) sans e-mail visible, il les met au bon format.
+```text
+KappGen Publish transforme un dossier de ton ordinateur en file de publication pour tes réseaux sociaux.
 
-**Site web** : `https://github.com/rosby17/kappgen-uploader`
-**Assistance** : `https://github.com/rosby17/kappgen-uploader/issues`
+Range chaque contenu avec son texte, sa miniature ou sa vidéo. L’extension détecte les fichiers prêts, respecte leur horaire et publie avec les comptes déjà connectés dans Chrome.
 
-## 2. Onglet « Pratiques de confidentialité »
+• YouTube : vidéos, Shorts, titre, description, tags, miniature et programmation
+• Facebook : vidéos, Reels et posts texte, photo ou vidéo
+• TikTok et Instagram : vidéos et formats verticaux
+• X et LinkedIn : posts, médias compatibles et relais des vidéos YouTube
+• Un dossier principal ou un dossier propre à chaque réseau
+• Une publication à la fois et suivi local contre les doublons
+• Pause globale et erreurs explicites, sans relance automatique d’un échec
 
-**Objectif unique** :
+Les fichiers déjà présents lors du choix du dossier ne sont pas publiés automatiquement. Un compte KappGen avec un essai ou un abonnement actif est nécessaire. Chrome 116 minimum.
+
+Mode d’emploi : https://github.com/rosby17/kappgen-uploader
 ```
-Publier sur YouTube (et éventuellement Facebook) les vidéos finies que l'utilisateur range dans un dossier de son ordinateur, en remplissant pour lui le formulaire d'envoi de YouTube Studio avec le titre, la description, les mots-clés et la miniature trouvés dans ce dossier.
+
+Catégorie : Productivité.
+
+Langue principale : français.
+
+Site web : `https://github.com/rosby17/kappgen-uploader`
+
+Assistance : `https://github.com/rosby17/kappgen-uploader/issues`
+
+Politique de confidentialité : `https://github.com/rosby17/kappgen-uploader/blob/main/PRIVACY.md`
+
+Assets disponibles dans `store/` : icône 128 × 128, vignette 440 × 280 et vignette 1400 × 560. Les captures du panneau doivent masquer toute adresse e-mail, tout chemin local et tout identifiant de compte.
+
+## Objectif unique
+
+```text
+Préparer, programmer et publier vers les réseaux sociaux choisis par l’utilisateur les vidéos, images et textes placés dans les dossiers locaux qu’il a explicitement autorisés.
 ```
 
-**Justification des autorisations** :
+## Justification des autorisations
 
-| Autorisation | Justification à coller |
+| Autorisation | Justification |
 |---|---|
-| `sidePanel` | Toute l'interface de l'extension (compte, dossier, vidéos, réglages des chaînes) est affichée dans le panneau latéral. |
-| `storage` | Enregistrer localement les réglages de l'utilisateur par chaîne (visibilité, heures, page Facebook) et l'état de l'envoi en cours. |
-| `offscreen` | Lire le dossier de vidéos choisi par l'utilisateur (File System Access) depuis le service worker, qui n'a pas accès à cette API. |
-| `scripting` | Injecter le script qui remplit le formulaire d'envoi de YouTube Studio (titre, description, visibilité) et le formulaire de publication Facebook, uniquement dans les onglets ouverts par l'extension pour une publication demandée par l'utilisateur. |
-| `tabs` | Ouvrir l'onglet YouTube Studio de la chaîne pour l'envoi, suivre son chargement, le refermer à la fin, et garder un onglet épinglé qui maintient l'accès au dossier. |
-| `alarms` | Vérifier toutes les 5 minutes si une nouvelle vidéo prête attend dans le dossier (publication automatique choisie par l'utilisateur). |
-| `notifications` | Prévenir l'utilisateur quand Chrome demande à nouveau l'accès au dossier, pour que la publication automatique ne s'arrête pas sans qu'il le sache. |
-| `debugger` (facultative, demandée seulement au clic) | Uniquement pour les vidéos produites par l'application KappGen locale : transmettre le fichier vidéo à YouTube Studio par son chemin sur le disque, sans le charger en mémoire. Jamais utilisée pour le mode dossier. |
-| Accès aux sites `studio.youtube.com`, `www.youtube.com` | Remplir le formulaire d'envoi de YouTube Studio et lire la liste des vidéos publiques de la chaîne de l'utilisateur. |
-| Accès aux sites `facebook.com` | Publier la vidéo sur la page Facebook de l'utilisateur quand il active cette option. |
-| Accès à `api.kappgen.com`, `app.kappgen.com` | Vérifier la connexion de l'utilisateur à son compte KappGen. |
-| Accès à `localhost` / `127.0.0.1` | Version locale de l'application KappGen installée sur l'ordinateur de l'utilisateur (facultative). |
+| `sidePanel` | Afficher l’interface persistante de configuration, de suivi et de publication. |
+| `storage` | Conserver localement les réglages, l’état des tâches, les autorisations temporaires de fichiers et la continuité hors ligne. |
+| `offscreen` | Accéder, depuis un document d’extension, aux dossiers explicitement choisis avec File System Access, cette API n’étant pas disponible dans le service worker. |
+| `scripting` | Injecter les scripts locaux de l’extension qui remplissent les formulaires des réseaux dans les onglets de publication. |
+| `tabs` | Ouvrir et suivre l’onglet de publication, détecter la connexion requise et fermer les onglets automatiques terminés. |
+| `alarms` | Réveiller périodiquement le service worker pour contrôler les publications arrivées à échéance. |
+| `notifications` | Signaler une mise à jour disponible ou une autorisation de dossier à renouveler. |
+| `debugger` | Pour une vidéo issue de l’application KappGen locale uniquement, remettre à YouTube Studio le fichier désigné par son chemin sans le charger en mémoire. Le code refuse cet usage hors de `localhost`/`127.0.0.1`, s’attache seulement à l’onglet Studio de cette publication et se détache immédiatement ; le mode dossier ne l’utilise pas. Chrome interdit de déclarer cette autorisation comme facultative. |
+| Hôtes KappGen | Authentification, contrôle de l’essai ou de l’abonnement, paiement, parrainage, bilan facultatif et configuration déclarative de publication. |
+| YouTube / YouTube Studio | Lire la page publique de la chaîne et remplir les formulaires de vidéo, Short ou mise à jour. |
+| Facebook | Publier les vidéos, Reels et posts demandés sur une Page ou dans les groupes choisis. |
+| TikTok, Instagram, X et LinkedIn | Remplir le formulaire de publication du réseau sélectionné. |
+| `localhost` / `127.0.0.1` | Autoriser l’édition locale de KappGen, uniquement si l’utilisateur la configure. |
+| `api.github.com` | Lire uniquement la version de la dernière release publique afin d’afficher l’avis de mise à jour. |
 
-**Code distant** : Non, je n'utilise pas de code distant.
+L’autorisation `management` n’est pas demandée. L’extension ne désactive et ne modifie aucune autre extension. L’autorisation `debugger` est strictement limitée à la remise d’un fichier de l’application locale dans l’onglet YouTube Studio concerné ; elle n’est jamais utilisée pour inspecter l’historique, les mots de passe ou les autres onglets.
 
-**Utilisation des données** — cocher :
-- Informations d'authentification (session du compte KappGen)
-- Contenu du site web (fichiers vidéo, miniatures et textes envoyés à YouTube / Facebook)
+## Code distant
 
-Et cocher les trois déclarations : pas de vente à des tiers, pas d'utilisation sans rapport avec l'objectif unique, pas d'utilisation pour la solvabilité ou le prêt.
+Réponse : non.
 
-**URL de la politique de confidentialité** :
+Tous les scripts exécutables sont inclus dans l’archive. L’API KappGen fournit seulement une configuration déclarative : chaînes de sélecteurs CSS et expressions régulières utilisées pour reconnaître des boutons. Cette structure est limitée en taille et profondeur, validée avant stockage et ne contient ni JavaScript, ni WebAssembly, ni URL de script.
+
+## Données à déclarer
+
+- Informations d’authentification : session du compte KappGen utilisée pour le service.
+- Contenu utilisateur : vidéos, images et textes choisis pour publication.
+- Activité de l’utilisateur : réseau, titre, résultat et erreur éventuelle, uniquement lorsque le bilan quotidien facultatif est activé.
+- Informations de paiement : traitées par le prestataire de paiement via le flux KappGen ; l’extension ne stocke pas de numéro de carte.
+
+Déclarations : aucune vente, aucun transfert à des fins publicitaires, aucun usage hors objectif unique, aucun usage de solvabilité.
+
+## Instructions d’examen
+
+Fournis un compte KappGen de test dédié et un petit dossier de démonstration sans donnée personnelle.
+
+```text
+1. Ouvrir l’extension : le panneau latéral apparaît.
+2. Se connecter avec le compte de test communiqué dans le champ confidentiel de l’examen.
+3. Dans Réglages > Dossiers, sélectionner un dossier contenant :
+   DEMO/video.mp4 (> 5 Mo), DEMO/publication.md et DEMO/miniature.jpg.
+4. Le fichier étant antérieur au choix du dossier, utiliser le bouton manuel Publier sur YouTube.
+5. Dans un profil connecté à YouTube Studio, l’extension ouvre Studio et remplit les métadonnées.
+6. Les autres réseaux peuvent être testés après connexion au site correspondant et activation du réseau dans Réglages.
 ```
-https://github.com/rosby17/kappgen-uploader/blob/main/PRIVACY.md
-```
 
-## 3. Instructions pour l'examen (onglet « Distribution » / « Instructions de test »)
-
-Google doit pouvoir se connecter : crée un **compte KappGen de test** (e-mail + mot de passe) et colle-le ici. Ne mets jamais ton compte personnel.
-```
-1. Cliquez sur l'icône de l'extension : le panneau latéral s'ouvre.
-2. Connectez-vous avec le compte de test : <e-mail> / <mot de passe> (section « Ou avec un mot de passe »).
-3. « Choisir le dossier » : choisissez un dossier contenant MA-CHAINE/VIDEO/01-test/ avec une vidéo MP4 (plus de 5 Mo), un fichier publication.md (## Titre ...) et miniature.jpg.
-4. La vidéo apparaît dans l'onglet « Vidéos » ; « Envoyer » ouvre YouTube Studio (il faut être connecté à une chaîne YouTube) et remplit le formulaire d'envoi en non répertorié.
-```
-
-## 4. Visibilité
-- **Non répertoriée** au début (seules les personnes qui ont le lien la voient) : idéal pour tes amis et testeurs.
-- Publique ensuite, quand tout est validé.
-
-Délai d'examen : de quelques jours à 2-3 semaines. Les mises à jour se font en envoyant un nouveau zip (version augmentée) : les utilisateurs du Store les reçoivent automatiquement.
+Ne place jamais les identifiants du compte de test dans ce dépôt.

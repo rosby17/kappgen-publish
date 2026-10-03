@@ -1,0 +1,14 @@
+{
+  "name": "kappgen-publish",
+  "version": "1.19.3",
+  "private": true,
+  "description": "Quality checks for the KappGen Publish Chrome extension",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node scripts/validate.mjs",
+    "check": "npm run validate && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

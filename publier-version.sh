@@ -1,18 +1,62 @@
 #!/bin/bash
-# Crée la Release GitHub de la version indiquée dans extension/manifest.json,
-# avec kappgen-uploader.zip (manifeste à la racine : sert aussi pour le Chrome Web Store).
-# Lien fixe vers la dernière version :
-#   https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip
-set -e
-cd "$(dirname "$0")"
-V=$(python3 -c "import json;print(json.load(open('extension/manifest.json'))['version'])")
-rm -rf dist && mkdir dist
-(cd extension && zip -rqX ../dist/kappgen-uploader.zip . -x ".*" -x "*/.DS_Store")
-# Chrome Web Store: same files, without "key" (the store refuses it and gives its own id).
-rm -rf dist/store && mkdir dist/store && (cd dist/store && unzip -q ../kappgen-uploader.zip \
-  && python3 -c "import json;p='manifest.json';m=json.load(open(p));m.pop('key',None);open(p,'w').write(json.dumps(m,ensure_ascii=False,indent=2)+'\\n')" \
-  && zip -rqX ../kappgen-uploader-chrome-web-store.zip . ) && rm -rf dist/store
-git diff --quiet && git diff --cached --quiet || { echo "Commite d'abord tes changements."; exit 1; }
-git push -q origin HEAD
-gh release create "v$V" dist/kappgen-uploader.zip --title "KappGen Publish $V" --notes "${1:-Version $V}" --latest
-echo "Publiée : https://github.com/rosby17/kappgen-uploader/releases/tag/v$V"
+# Valide, empaquette et publie la version de extension/manifest.json.
+set -euo pipefail
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$ROOT"
+
+if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+  echo "Le dépôt contient des changements non commités. Vérifie-les et commite-les avant de publier." >&2
+  exit 1
+fi
+
+command -v node >/dev/null || { echo "Node.js 20+ est requis." >&2; exit 1; }
+command -v npm >/dev/null || { echo "npm est requis." >&2; exit 1; }
+command -v gh >/dev/null || { echo "GitHub CLI (gh) est requis." >&2; exit 1; }
+command -v zip >/dev/null || { echo "zip est requis." >&2; exit 1; }
+
+VERSION=$(node -p "require('./extension/manifest.json').version")
+PACKAGE_VERSION=$(node -p "require('./package.json').version")
+[ "$VERSION" = "$PACKAGE_VERSION" ] || { echo "Versions différentes : manifest=$VERSION, package=$PACKAGE_VERSION" >&2; exit 1; }
+TAG="v$VERSION"
+
+npm run check
+git fetch --quiet origin
+read -r BEHIND AHEAD <<EOF
+$(git rev-list --left-right --count '@{upstream}...HEAD')
+EOF
+[ "$BEHIND" = "0" ] || { echo "La branche locale a $BEHIND commit(s) de retard sur son upstream." >&2; exit 1; }
+git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "Le tag $TAG existe déjà." >&2; exit 1; }
+[ -z "$(git ls-remote --tags origin "refs/tags/$TAG")" ] || { echo "Le tag distant $TAG existe déjà." >&2; exit 1; }
+gh release view "$TAG" >/dev/null 2>&1 && { echo "La release $TAG existe déjà." >&2; exit 1; }
+
+DIST="$ROOT/dist"
+mkdir -p "$DIST"
+find "$DIST" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+TMP=$(mktemp -d)
+trap 'rm -rf -- "$TMP"' EXIT
+
+(cd extension && zip -rqX "$DIST/kappgen-uploader.zip" . -x ".*" -x "*/.DS_Store")
+unzip -q "$DIST/kappgen-uploader.zip" -d "$TMP/store"
+node -e "const fs=require('fs');const p='$TMP/store/manifest.json';const m=JSON.parse(fs.readFileSync(p));delete m.key;fs.writeFileSync(p,JSON.stringify(m,null,2)+'\\n')"
+(cd "$TMP/store" && zip -rqX "$DIST/kappgen-uploader-chrome-web-store.zip" . -x ".*" -x "*/.DS_Store")
+
+hash_file() {
+  if command -v shasum >/dev/null; then shasum -a 256 "$1"
+  elif command -v sha256sum >/dev/null; then sha256sum "$1"
+  else echo "Aucun outil SHA-256 disponible." >&2; return 1
+  fi
+}
+(cd "$DIST" && hash_file kappgen-uploader.zip > kappgen-uploader.zip.sha256
+  hash_file kappgen-uploader-chrome-web-store.zip > kappgen-uploader-chrome-web-store.zip.sha256)
+
+git push --quiet origin HEAD
+gh release create "$TAG" \
+  "$DIST/kappgen-uploader.zip" \
+  "$DIST/kappgen-uploader.zip.sha256" \
+  "$DIST/kappgen-uploader-chrome-web-store.zip" \
+  "$DIST/kappgen-uploader-chrome-web-store.zip.sha256" \
+  --target "$(git rev-parse HEAD)" --title "KappGen Publish $VERSION" \
+  --notes "${1:-Version $VERSION}" --latest
+
+echo "Publiée : https://github.com/rosby17/kappgen-uploader/releases/tag/$TAG"

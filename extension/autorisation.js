@@ -25,7 +25,7 @@ async function load() {
 async function waiting() {
   const out = [];
   for (const entry of folders) {
-    if (await entry[1].queryPermission({ mode: 'readwrite' }).catch(() => 'granted') !== 'granted') out.push(entry);
+    if (await entry[1].queryPermission({ mode: 'readwrite' }).catch(() => 'denied') !== 'granted') out.push(entry);
   }
   return out;
 }
@@ -46,7 +46,9 @@ const ready = (async () => {
   }
   const left = await waiting();
   if (!left.length) return done();
+  pendingFirst = left[0];
   ask(left[0]);
+  grant.disabled = false;
 })();
 
 grant.addEventListener('click', async () => {
@@ -62,5 +64,10 @@ grant.addEventListener('click', async () => {
   pendingFirst = left[0] || null;
   if (!left.length) done();
   else { ask(left[0]); message.append(' Clique encore « Autoriser ».'); }
+});
+ready.catch((error) => {
+  message.className = 'warn';
+  message.textContent = `Impossible de lire les autorisations : ${error.message || error}`;
+  grant.disabled = true;
 });
 ready.then(async () => { pendingFirst = (await waiting())[0] || null; });

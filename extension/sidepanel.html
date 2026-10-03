@@ -13,7 +13,7 @@
       <h1>KappGen Publish</h1>
       <div class="brand-sub">
         <span id="version" class="version" title="Version installée"></span>
-        <a id="update-pill" class="update-pill" href="https://rosby17.github.io/kappgen-uploader/#maj" target="_blank" rel="noopener" hidden></a>
+        <a id="update-pill" class="update-pill" href="https://rosby17.github.io/kappgen-uploader/#maj" target="_blank" rel="noopener noreferrer" hidden></a>
       </div>
     </div>
     <button id="plan-pill" class="plan-pill" hidden title="Mon abonnement"></button>
@@ -44,8 +44,8 @@
         <input id="login-password" type="password" placeholder="Mot de passe" autocomplete="current-password" required>
         <button class="primary" type="submit">Se connecter</button>
       </details>
-      <p id="login-error" class="warn" hidden></p>
-      <p class="muted">Pas encore de compte ? <a href="https://app.kappgen.com" target="_blank">Créer un compte</a></p>
+      <p id="login-error" class="warn" role="alert" hidden></p>
+      <p class="muted">Pas encore de compte ? <a href="https://app.kappgen.com" target="_blank" rel="noopener noreferrer">Créer un compte</a></p>
     </form>
   </section>
 
@@ -57,7 +57,7 @@
       <li>YouTube : vidéos, Shorts, titre, description et miniature</li>
       <li>Facebook : vidéos, Reels, posts photo et texte</li>
       <li>Programmation à l’heure que tu veux, jamais de doublon</li>
-      <li>TikTok, Instagram et X : tes vidéos et tes posts. LinkedIn arrive</li>
+      <li>TikTok, Instagram, X et LinkedIn : tes vidéos et tes posts</li>
     </ul>
     <p class="pw-account small muted">Compte KappGen : <strong id="pw-account-email"></strong> · <button id="pw-switch" class="link" type="button">Changer de compte</button></p>
     <p class="small muted pw-account-hint">Ton abonnement suit ton compte KappGen : un seul paiement pour tous tes profils Chrome. Déjà abonné avec une autre adresse ? Change de compte.</p>
@@ -107,18 +107,18 @@
 
   <div id="main" hidden>
   <div id="plan-banner" class="plan-banner" hidden></div>
-  <p id="auto-status" class="auto-status" hidden><span class="auto-dot"></span><span id="auto-status-text"></span></p>
+  <p id="auto-status" class="auto-status" role="status" aria-live="polite" hidden><span class="auto-dot"></span><span id="auto-status-text"></span></p>
   <section id="paused" class="card paused-card" hidden>
     <h2>Tes publications sont en pause</h2>
     <p class="small">Chrome a refermé l’accès à ton dossier de vidéos (ça arrive quand Chrome redémarre). Rien ne peut partir tant qu’il est fermé. Un clic suffit :</p>
     <button id="auto-resume" class="btn primary wide">Reprendre les publications</button>
     <p class="small muted">Dans la petite fenêtre de Chrome, choisis <strong>« Autoriser à chaque visite »</strong> : la pause ne reviendra plus.</p>
   </section>
-  <section id="job" class="job" hidden>
+  <section id="job" class="job" role="status" aria-live="polite" aria-atomic="true" hidden>
     <button id="job-clear" class="icon-close" title="Fermer" aria-label="Fermer" hidden>✕</button>
     <strong id="job-title"></strong>
     <p id="job-message"></p>
-    <a id="job-link" class="btn ghost" target="_blank" hidden>Ouvrir sur YouTube</a>
+    <a id="job-link" class="btn ghost" target="_blank" rel="noopener noreferrer" hidden>Ouvrir sur YouTube</a>
     <div class="job-actions">
       <button id="job-unblock" class="btn ghost" hidden>Annuler</button>
     </div>
@@ -131,7 +131,7 @@
     <ol class="setup-steps">
       <li><button type="button" id="setup-folder" data-target="set-folder"><span class="setup-num">1</span><span class="setup-text"><strong>Ton dossier principal</strong><small>Choisis-le, puis « Autoriser à chaque visite »</small></span><span class="setup-state"></span></button></li>
       <li><button type="button" id="setup-fb" data-target="set-net-folders"><span class="setup-num">2</span><span class="setup-text"><strong>Un dossier par réseau</strong><small>Facultatif : sinon le dossier principal sert à tous</small></span><span class="setup-state"></span></button></li>
-      <li><button type="button" id="setup-pages" data-target="set-pages"><span class="setup-num">3</span><span class="setup-text"><strong>Liens de tes pages</strong><small>Ta chaîne YouTube, ta page Facebook…</small></span><span class="setup-state"></span></button></li>
+      <li><button type="button" id="setup-pages" data-target="set-pages"><span class="setup-num">3</span><span class="setup-text"><strong>Ta Page Facebook</strong><small>Nécessaire seulement si Facebook est activé</small></span><span class="setup-state"></span></button></li>
     </ol>
   </section>
 
@@ -141,7 +141,7 @@
     <button data-tab="help" class="tool"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>Aide</button>
   </nav>
 
-  <nav class="tabs">
+  <nav class="tabs" role="tablist" aria-label="Réseaux sociaux">
     <button data-tab="youtube" class="active">YouTube</button>
     <button data-tab="facebook">Facebook</button>
     <button data-tab="tiktok">TikTok</button>
@@ -208,7 +208,7 @@
       <div id="fb-groups-more" class="set-sub" hidden>
         <div class="set-row">
           <span class="set-text"><strong>Groupes par post</strong><small>9 au plus par publication</small></span>
-          <span class="stepper"><button type="button" id="fb-groups-less" aria-label="Moins">−</button><input id="fb-groups-per" type="number" min="1" max="25" value="9" aria-label="Groupes par post"><button type="button" id="fb-groups-plus" aria-label="Plus">+</button></span>
+          <span class="stepper"><button type="button" id="fb-groups-less" aria-label="Moins">−</button><input id="fb-groups-per" type="number" min="1" max="9" value="9" aria-label="Groupes par post"><button type="button" id="fb-groups-plus" aria-label="Plus">+</button></span>
         </div>
         <div class="set-row">
           <span class="set-text"><strong>Groupes préférés <span id="fb-groups-count" class="count-badge">0</span></strong><small>Pris en priorité. Sans eux : tous tes groupes.</small></span>
@@ -324,7 +324,7 @@
         <span class="check">✓</span>
         <button id="pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="folder-name"></strong><span class="chosen-edit">changer</span></button>
       </div>
-      <p id="folder-status" class="status" hidden></p>
+      <p id="folder-status" class="status" role="status" aria-live="polite" hidden></p>
       <div id="folder-actions" class="actions">
         <button id="pick" class="btn primary wide">Choisir le dossier principal</button>
         <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
@@ -335,18 +335,19 @@
       <h2>Dossier de chaque réseau</h2>
       <p class="small muted folder-what">Chaque réseau prend le dossier principal. Choisis-lui un autre dossier pour décider toi-même ce qui y part.</p>
       <ul id="net-folders" class="net-folders"></ul>
-      <p id="net-folders-status" class="status error" hidden></p>
+      <p id="net-folders-status" class="status error" role="alert" hidden></p>
     </section>
-    <h3 class="set-group">Réseaux et pages</h3>
+    <h3 class="set-group">Réseaux et destination</h3>
     <section class="card">
       <div class="field-head"><h2>Réseaux utilisés</h2></div>
       <ul id="networks" class="networks"></ul>
     </section>
     <section class="card" id="set-pages">
-      <div class="field-head"><h2>Tes pages et comptes</h2><span id="pages-state" class="pill warn"></span></div>
+      <div class="field-head"><h2>Destination Facebook</h2><span id="pages-state" class="pill warn"></span></div>
 
       <div id="pages" class="pages"></div>
-      <p id="pages-saved" class="small ok-text" hidden>Liens enregistrés.</p>
+      <p class="small muted">Pour les autres réseaux, KappGen publie sur le compte déjà connecté dans ce profil Chrome.</p>
+      <p id="pages-saved" class="small ok-text" hidden>Lien enregistré.</p>
     </section>
     <h3 class="set-group">Plus</h3>
     <section class="card">
@@ -390,9 +391,9 @@
 
       <section class="help-card">
         <h3>Comment KappGen publie (important)</h3>
-        <p>KappGen Publish <strong>ne passe pas par une API</strong> et ne te demande <strong>aucun mot de passe</strong>. Il publie exactement comme tu le ferais à la main : il ouvre YouTube Studio, Facebook, TikTok ou Instagram <strong>dans ce Chrome</strong>, envoie le fichier, écrit le titre et le texte, puis clique sur « Publier ».</p>
+        <p>KappGen Publish <strong>ne passe pas par l’API des réseaux sociaux</strong> et ne te demande <strong>aucun mot de passe de réseau social</strong>. Il publie exactement comme tu le ferais à la main : il ouvre YouTube Studio, Facebook, TikTok, Instagram, X ou LinkedIn <strong>dans ce Chrome</strong>, envoie le fichier, écrit le titre et le texte, puis clique sur « Publier ».</p>
         <p>Conséquence : <strong>chaque page ou compte doit être ouvert et connecté dans ce même Chrome</strong> (le même profil Chrome que celui où se trouve l’extension). Si tu colles le lien d’une page à laquelle tu n’es pas connecté ici, KappGen ne pourra rien y publier, même si le lien est juste.</p>
-        <p class="muted">Pour vérifier : Réglages → « Tes pages et comptes » → « Ouvrir » à côté de chaque lien. La page doit s’ouvrir en étant connecté (ta photo en haut, le bouton pour publier visible).</p>
+        <p class="muted">Pour vérifier, ouvre chaque réseau dans ce profil Chrome : ta photo et les commandes de publication doivent être visibles. Pour Facebook seulement, colle aussi l’adresse exacte de la Page dans Réglages → « Destination Facebook ».</p>
       </section>
 
       <section class="help-card">
@@ -408,12 +409,13 @@
       </section>
 
       <section class="help-card">
-        <h3>Démarrer en 5 étapes</h3>
+        <h3>Démarrer en 6 étapes</h3>
         <ol class="steps">
           <li><strong>Connecte-toi dans ce Chrome</strong> à chaque compte où tu publies : YouTube, Facebook, TikTok, Instagram…</li>
           <li><strong>Réglages → Dossier des vidéos YouTube</strong> : choisis le dossier où tu ranges tes vidéos longues finies.</li>
           <li><strong>Réglages → Dossier des posts</strong> (facultatif) : choisis le dossier de tes publications courtes (textes, photos, vidéos courtes).</li>
-          <li><strong>Réglages → Tes pages et comptes</strong> : colle le lien de chaque page, puis règle la visibilité YouTube et quand publier.</li>
+          <li><strong>Réglages → Destination Facebook</strong> : si Facebook est activé, colle le lien de ta Page. Les autres réseaux utilisent le compte connecté dans Chrome.</li>
+          <li><strong>Onglet YouTube → Réglages YouTube</strong> : choisis la visibilité et le rythme de publication.</li>
           <li><strong>Laisse Chrome ouvert.</strong> Toutes les 5 minutes, KappGen regarde ce qui est prêt et le publie.</li>
         </ol>
       </section>
@@ -476,10 +478,12 @@ Ingrédients : …</pre>
       <section class="help-card">
         <h3>Facebook</h3>
         <ol class="steps">
-          <li><strong>Réglages → Tes pages et comptes</strong> : colle le lien de ta page Facebook (ex. <code>https://www.facebook.com/ta-page</code>). Tu dois être connecté à cette page dans ce Chrome, avec le droit d’y publier.</li>
+          <li><strong>Réglages → Destination Facebook</strong> : colle le lien de ta page Facebook (ex. <code>https://www.facebook.com/ta-page</code>). Tu dois être connecté à cette page dans ce Chrome, avec le droit d’y publier.</li>
           <li><strong>Vidéos YouTube à partager</strong> : chaque vidéo déjà sur YouTube a un bouton « Publier sur Facebook ». Elle part avec son titre.</li>
           <li><strong>Reels et posts</strong> : choisis un dossier à part (même règle : un dossier par post, avec une image ou une vidéo et un texte). Le texte est publié tel quel.</li>
           <li><strong>Heure de publication</strong> : celle écrite dans le post (<code>publication.json</code> ou le nom du dossier, ex. <code>2026-10-02-1830-sujet</code>). Un post sans heure part tout de suite.</li>
+          <li><strong>Groupes</strong> : KappGen en coche 9 au maximum uniquement dans l’écran « Sélectionnez des groupes », clique « Terminé », revient aux paramètres puis clique le bouton bleu « Publier ». « Enregistrer » n’est jamais utilisé et les options « Booster », « Mention IA », « Story » ou publicitaires ne sont jamais cochées.</li>
+          <li>Le post est marqué « Publié » uniquement après une confirmation de Facebook ou son apparition sur la Page. Une fermeture de fenêtre ou un brouillon ne compte jamais comme une publication.</li>
         </ol>
       </section>
 
@@ -488,7 +492,7 @@ Ingrédients : …</pre>
         <ul class="guide">
           <li>TikTok accepte <strong>toutes les vidéos</strong>, horizontales comme verticales : la vidéo publiée sur YouTube part telle quelle (ou sa version verticale <code>short.mp4</code> si tu en as mis une), ainsi que les vidéos de ton dossier de posts.</li>
           <li>Reste connecté à TikTok dans ce Chrome. KappGen utilise ton onglet TikTok s’il est ouvert, envoie la vidéo, attend 100 %, écrit le titre (et les mots-clés en hashtags) puis publie.</li>
-          <li>Instagram, LinkedIn et X arrivent bientôt.</li>
+          <li>Instagram publie les versions verticales ; X et LinkedIn publient les posts et les liens vers les vidéos YouTube.</li>
         </ul>
       </section>
 
@@ -512,7 +516,7 @@ Ingrédients : …</pre>
         <dl class="glossary">
           <dt>Rien ne part</dt><dd>Chrome est-il ouvert ? La vidéo a-t-elle un fichier texte ? Était-elle déjà dans le dossier quand tu l’as choisi (alors clique « Publier ») ?</dd>
           <dt>« Autoriser l’accès »</dt><dd>Chrome redemande parfois l’accès au dossier : clique le bouton, puis « Autoriser à chaque visite ».</dd>
-          <dt>Envoi bloqué</dt><dd>Au bout de 5 minutes sans nouvelles, un bouton « Débloquer » apparaît. Vérifie sur YouTube / Facebook avant de relancer.</dd>
+          <dt>Envoi bloqué</dt><dd>Annule depuis le bandeau, puis vérifie sur le réseau concerné si la publication est partie avant de relancer.</dd>
           <dt>Échec Facebook</dt><dd>Le message indique l’étape ; termine-la dans l’onglet Facebook resté ouvert puis clique « Réessayer ».</dd>
         </dl>
       </section>
@@ -530,6 +534,7 @@ Ingrédients : …</pre>
   </footer>
 
   <script src="lib/fiches.js"></script>
+  <script src="lib/schedule.js"></script>
   <script src="lib/dossier.js"></script>
   <script src="sidepanel.js"></script>
 </body>

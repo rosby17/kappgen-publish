@@ -10,6 +10,7 @@
 #    clic de l'utilisateur : 3 clics par nouveau profil.
 set -e
 ZIP_URL="https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip"
+SHA_URL="$ZIP_URL.sha256"
 DIR="$HOME/KappGen-Publish"
 CHROME_DATA="$HOME/Library/Application Support/Google/Chrome"
 
@@ -31,18 +32,41 @@ fi
 
 echo "  1/3  Téléchargement de la dernière version…"
 TMP=$(mktemp -d)
+trap 'rm -rf -- "$TMP"' EXIT
 curl -fsSL -o "$TMP/k.zip" "$ZIP_URL"
+curl -fsSL -o "$TMP/k.zip.sha256" "$SHA_URL"
+EXPECTED=$(awk 'NR == 1 { print $1 }' "$TMP/k.zip.sha256")
+ACTUAL=$(shasum -a 256 "$TMP/k.zip" | awk '{ print $1 }')
+[ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo "  ✗ Signature SHA-256 invalide : téléchargement annulé."; exit 1; }
 mkdir -p "$TMP/x"
 unzip -q "$TMP/k.zip" -d "$TMP/x"
-[ -f "$TMP/x/manifest.json" ] || { echo "  ✗ Fichier téléchargé incomplet, réessaie dans un instant."; exit 1; }
+[ -f "$TMP/x/manifest.json" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"KappGen Publish"' "$TMP/x/manifest.json" \
+  || { echo "  ✗ Archive téléchargée invalide, installation annulée."; exit 1; }
 VERSION=$(sed -n 's/.*"version"[^"]*"\([^"]*\)".*/\1/p' "$TMP/x/manifest.json" | head -1)
 
 # Replaces the content of an extension folder with the new version (same
 # folder: Chrome keeps the extension, its settings and its connection).
 put_version() {
-  mkdir -p "$1"
-  find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  cp -R "$TMP/x/." "$1/"
+  TARGET=$1
+  case "$TARGET" in ""|/|"$HOME") echo "  ✗ Dossier de destination dangereux : $TARGET"; return 1 ;; esac
+  case "$TARGET" in /*) ;; *) echo "  ✗ Le dossier doit être un chemin absolu : $TARGET"; return 1 ;; esac
+  [ ! -L "$TARGET" ] || { echo "  ✗ Le dossier est un lien symbolique, non modifié : $TARGET"; return 1; }
+  if [ -d "$TARGET" ] && [ -n "$(find "$TARGET" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    [ -f "$TARGET/manifest.json" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"KappGen Publish"' "$TARGET/manifest.json" \
+      || { echo "  ✗ Le dossier existe mais ne contient pas KappGen Publish : $TARGET"; return 1; }
+  fi
+  PARENT=$(dirname "$TARGET")
+  BASE=$(basename "$TARGET")
+  STAGE="$PARENT/.${BASE}.new.$$"
+  BACKUP="$PARENT/.${BASE}.backup.$$"
+  mkdir -p "$PARENT"
+  cp -R "$TMP/x" "$STAGE"
+  if [ -e "$TARGET" ]; then mv "$TARGET" "$BACKUP"; fi
+  if ! mv "$STAGE" "$TARGET"; then
+    [ ! -e "$BACKUP" ] || mv "$BACKUP" "$TARGET"
+    return 1
+  fi
+  [ ! -e "$BACKUP" ] || rm -rf -- "$BACKUP"
 }
 
 echo "  2/3  Rangement dans $DIR"
@@ -92,7 +116,8 @@ while IFS=$'\t' read -r PDIR PNAME PPATH; do
     MISSING_NAMES+=("$PNAME")
   fi
 done <<< "$PROFILES"
-rm -rf "$TMP"
+rm -rf -- "$TMP"
+trap - EXIT
 
 echo "  3/3  Version $VERSION en place."
 echo ""

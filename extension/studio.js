@@ -191,6 +191,8 @@
     // reads the file and posts it here; it is then given to Studio's picker
     // as if dropped by hand.
     async receiveFile({ selector, src, path }) {
+      const token = new URL(src).searchParams.get('token');
+      if (!token) throw new Error('YouTube Studio : autorisation du fichier absente.');
       const input = await waitFor(() => document.querySelector(selector ? S(selector) : S('videoInput')), { timeout: 120000, what: 'le sélecteur de fichier' });
       const file = await new Promise((resolve, reject) => {
         const frame = document.createElement('iframe');
@@ -204,7 +206,7 @@
         const timer = setTimeout(() => done(reject, new Error('Le fichier local ne répond pas (accès au dossier à autoriser ?).')), 60000);
         function onMessage(event) {
           const data = event.data;
-          if (event.source !== frame.contentWindow || !data || data.kappgen !== 'file' || data.path !== path) return;
+          if (event.source !== frame.contentWindow || !data || data.kappgen !== 'file' || data.token !== token) return;
           if (data.error) done(reject, new Error(data.error));
           else done(resolve, data.file);
         }

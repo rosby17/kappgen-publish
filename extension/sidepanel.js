@@ -5,7 +5,10 @@
 const $ = (id) => document.getElementById(id);
 
 function send(message) {
-  return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
+  return new Promise((resolve) => chrome.runtime.sendMessage(message, (reply) => {
+    const error = chrome.runtime.lastError;
+    resolve(error ? { ok: false, error: error.message || 'Le service KappGen Publish ne répond pas.' } : reply);
+  }));
 }
 
 const size = (bytes) => (!bytes ? '' : bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} Go` : `${Math.round(bytes / 1e6)} Mo`);
@@ -17,15 +20,24 @@ function el(tag, className, text) {
   return node;
 }
 
+function objectImage(file, className = '') {
+  const img = document.createElement('img');
+  if (className) img.className = className;
+  img.alt = '';
+  const url = URL.createObjectURL(file);
+  const release = () => URL.revokeObjectURL(url);
+  img.addEventListener('load', release, { once: true });
+  img.addEventListener('error', release, { once: true });
+  img.src = url;
+  return img;
+}
+
 // Small preview of the thumbnail file kept in the folder.
 function thumb(path) {
   const box = el('div', 'thumb');
   if (path) {
     KappDossier.fileAt(path).then((file) => {
-      const img = document.createElement('img');
-      img.src = URL.createObjectURL(file);
-      img.alt = '';
-      box.append(img);
+      box.append(objectImage(file));
     }).catch(() => { box.classList.add('empty'); });
   } else {
     box.classList.add('empty');
@@ -40,9 +52,32 @@ function button(label, className, onClick) {
   return node;
 }
 
+function normalizedFacebookPage(value) {
+  if (!String(value || '').trim()) return null;
+  try {
+    const url = new URL(value);
+    const hosts = new Set(['facebook.com', 'www.facebook.com', 'web.facebook.com', 'm.facebook.com', 'mobile.facebook.com', 'business.facebook.com']);
+    if (url.protocol !== 'https:' || !hosts.has(url.hostname.toLowerCase()) || url.username || url.password) return null;
+    url.hostname = 'www.facebook.com';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 // Small status line with a coloured dot: ok, warn, info, busy (spinner).
 function pill(kind, text) {
   return el('div', `pill ${kind}`, text);
+}
+
+function liveRegion() {
+  const node = el('div', 'live');
+  node.setAttribute('role', 'status');
+  node.setAttribute('aria-live', 'polite');
+  node.setAttribute('aria-atomic', 'true');
+  return node;
 }
 
 // Small line icons (no emoji): clock, link, play, refresh.
@@ -77,7 +112,17 @@ function mediaRow({ path, preview, youtubeId, emptyLabel = 'Vidéo', title, deta
   const item = el('li', 'row media');
   if (path) item.dataset.path = path;
   const mini = el('div', 'mini wide', emptyLabel);
-  const show = (src) => { const img = document.createElement('img'); img.src = src; img.alt = ''; mini.replaceChildren(img); };
+  const show = (src, revoke = false) => {
+    const img = document.createElement('img');
+    img.alt = '';
+    if (revoke) {
+      const release = () => URL.revokeObjectURL(src);
+      img.addEventListener('load', release, { once: true });
+      img.addEventListener('error', release, { once: true });
+    }
+    img.src = src;
+    mini.replaceChildren(img);
+  };
   if (vertical) {
     mini.classList.add('vertical');
     const tall = (src) => {
@@ -95,13 +140,13 @@ function mediaRow({ path, preview, youtubeId, emptyLabel = 'Vidéo', title, deta
       probe.src = `https://i.ytimg.com/vi/${vertical.youtubeId}/oardefault.jpg`;
     } else fromFile();
   } else if (youtubeId) show(`https://i.ytimg.com/vi/${youtubeId}/mqdefault.jpg`);
-  else if (preview) KappDossier.fileAt(preview).then((file) => show(URL.createObjectURL(file))).catch(() => {});
+  else if (preview) KappDossier.fileAt(preview).then((file) => show(URL.createObjectURL(file), true)).catch(() => {});
   const what = el('div', 'what');
   const t = el('div', 't', title);
   t.title = title || '';
   what.append(t);
   if (detail) what.append(el('div', 'd', detail));
-  const live = el('div', 'live');
+  const live = liveRegion();
   const hint = (node) => { if (node && !node.title) node.title = node.textContent || ''; return node; };
   if (status) live.append(hint(status));
   what.append(live);
@@ -148,6 +193,7 @@ function iconLink(name, label, href) {
   const a = el('a', 'btn ghost icon-btn');
   a.href = href;
   a.target = '_blank';
+  a.rel = 'noopener noreferrer';
   a.title = label;
   a.append(icon(name), el('span', null, label));
   return a;
@@ -162,7 +208,7 @@ function card({ path, preview, emptyLabel, title, details = [], status, actions 
   const info = el('div', 'info');
   info.append(el('div', 'title', title));
   for (const line of details.filter(Boolean)) info.append(el('div', 'meta', line));
-  const live = el('div', 'live');
+  const live = liveRegion();
   if (status) live.append(status);
   info.append(live);
   item.append(box, info);
@@ -178,7 +224,6 @@ function card({ path, preview, emptyLabel, title, details = [], status, actions 
 
 // « Modifier l'heure »: a date and time field opened under the card.
 const pad2 = (n) => String(n).padStart(2, '0');
-const localInput = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const whenText = (ts) => new Date(ts).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 // Date and time picker drawn in the panel's own style (Chrome's default one
 // does not fit): a month to browse, the day, then hour and minutes.
@@ -186,10 +231,12 @@ const MONTHS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juill
 function pickDateTime(current, { clearable = false, title = 'Date et heure de publication' } = {}) {
   return new Promise((resolve) => {
     const start = new Date(current || Date.now() + 3600 * 1000);
+    start.setSeconds(0, 0);
+    start.setMinutes(Math.ceil(start.getMinutes() / 15) * 15);
     let chosen = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     let shown = new Date(start.getFullYear(), start.getMonth(), 1);
     let hour = start.getHours();
-    let minute = Math.round(start.getMinutes() / 5) * 5 % 60;
+    let minute = start.getMinutes();
     const overlay = el('div', 'dt-overlay');
     const box = el('div', 'dt-box');
     box.setAttribute('role', 'dialog');
@@ -203,6 +250,13 @@ function pickDateTime(current, { clearable = false, title = 'Date et heure de pu
     const time = el('div', 'dt-time');
     const hourOut = el('span', 'dt-num');
     const minOut = el('span', 'dt-num');
+    const changeMinute = (delta) => {
+      const nextMinute = minute + delta;
+      if (nextMinute < 0) hour = (hour + 23) % 24;
+      if (nextMinute >= 60) hour = (hour + 1) % 24;
+      minute = (nextMinute + 60) % 60;
+      drawTime();
+    };
     const stepper = (out, onMinus, onPlus) => {
       const wrap = el('div', 'dt-step');
       wrap.append(button('−', 'dt-nav', onMinus), out, button('+', 'dt-nav', onPlus));
@@ -211,14 +265,18 @@ function pickDateTime(current, { clearable = false, title = 'Date et heure de pu
     time.append(el('span', 'dt-label', 'Heure'),
       stepper(hourOut, () => { hour = (hour + 23) % 24; drawTime(); }, () => { hour = (hour + 1) % 24; drawTime(); }),
       el('span', 'dt-sep', ':'),
-      stepper(minOut, () => { minute = (minute + 55) % 60; drawTime(); }, () => { minute = (minute + 5) % 60; drawTime(); }));
+      stepper(minOut, () => changeMinute(-15), () => changeMinute(15)));
     const error = el('p', 'dt-error');
     error.hidden = true;
     const foot = el('div', 'dt-foot');
     const close = (value) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(value); };
     const save = button('Enregistrer', 'btn primary', () => {
       const at = new Date(chosen.getFullYear(), chosen.getMonth(), chosen.getDate(), hour, minute).getTime();
-      if (at < Date.now() + 60 * 1000) { error.textContent = 'Choisis une date et une heure à venir.'; error.hidden = false; return; }
+      if (at < Date.now() + 20 * 60 * 1000) {
+        error.textContent = 'Choisis un quart d’heure situé au moins 20 minutes dans le futur.';
+        error.hidden = false;
+        return;
+      }
       close(at);
     });
     foot.append(button('Annuler', 'btn ghost', () => close(undefined)));
@@ -292,9 +350,43 @@ let jobRunning = false;
 // ------------------------------------------------------------------ tabs
 
 for (const tab of document.querySelectorAll('nav [data-tab]')) {
+  tab.setAttribute('aria-controls', `tab-${tab.dataset.tab}`);
+  const networkTab = !!tab.closest('.tabs');
+  if (networkTab) {
+    tab.id = `network-tab-${tab.dataset.tab}`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(tab.classList.contains('active')));
+    tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
+    const pane = $(`tab-${tab.dataset.tab}`);
+    if (pane) {
+      pane.setAttribute('role', 'tabpanel');
+      pane.setAttribute('aria-labelledby', tab.id);
+    }
+  } else {
+    tab.setAttribute('aria-pressed', String(tab.classList.contains('active')));
+  }
   tab.addEventListener('click', () => {
-    for (const other of document.querySelectorAll('nav [data-tab]')) other.classList.toggle('active', other === tab);
+    for (const other of document.querySelectorAll('nav [data-tab]')) {
+      const active = other === tab;
+      other.classList.toggle('active', active);
+      if (other.closest('.tabs')) other.setAttribute('aria-selected', String(active));
+      else other.setAttribute('aria-pressed', String(active));
+      other.tabIndex = other.closest('.tabs') ? (active ? 0 : -1) : 0;
+    }
+    if (!tab.closest('.tabs')) {
+      const firstNetwork = [...document.querySelectorAll('.tabs [data-tab]')].find((item) => !item.hidden);
+      if (firstNetwork) firstNetwork.tabIndex = 0;
+    }
     for (const pane of document.querySelectorAll('.tab')) pane.hidden = pane.id !== `tab-${tab.dataset.tab}`;
+  });
+  if (networkTab) tab.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...document.querySelectorAll('.tabs [data-tab]')].filter((item) => !item.hidden);
+    const index = tabs.indexOf(tab);
+    const next = event.key === 'Home' ? tabs[0]
+      : event.key === 'End' ? tabs.at(-1)
+        : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+    if (next) { event.preventDefault(); next.click(); next.focus(); }
   });
 }
 
@@ -306,12 +398,14 @@ let setupOpened = false;
 async function renderSetup() {
   const config = await settings();
   const folderOk = (await KappDossier.access()).state === 'granted';
-  // Only the networks ticked (and that really publish) need their link.
-  const pagesOk = PAGE_FIELDS.filter(([name]) => LIVE_NETWORKS.has(name) && networkIsOn(config, name)).every(([name]) => pageUrlOf(config, name));
+  // Only Facebook routes publications by a saved Page URL. Other networks
+  // publish to the account that is already connected in this Chrome profile.
+  const pagesOk = !networkIsOn(config, 'facebook') || !!pageUrlOf(config, 'facebook');
   const fbOk = (await KappDossier.fbAccess().catch(() => ({}))).state === 'granted';
   $('setup-folder').classList.toggle('done', folderOk);
   $('setup-fb').classList.toggle('done', fbOk);
   $('setup-pages').classList.toggle('done', pagesOk);
+  $('setup-pages').closest('li').hidden = !networkIsOn(config, 'facebook');
   // The posts folder is optional: the card goes once the videos folder and the
   // links are set, or for good when closed with its ✕.
   const { setupClosed } = await chrome.storage.local.get('setupClosed');
@@ -487,9 +581,19 @@ function channelItem(channel, panelOwn) {
   facebookPage.value = own.facebookPageUrl || '';
   facebookPage.title = 'Page Facebook de cette chaîne : posts programmés (FACEBOOK/A-PUBLIER) et vidéos si « Facebook aussi » est coché.';
   facebookPage.addEventListener('change', async () => {
-    await saveChannel(channel.key, { facebookPageUrl: facebookPage.value.trim() || null });
+    const raw = facebookPage.value.trim();
+    const page = normalizedFacebookPage(raw);
+    if (raw && !page) {
+      facebookPage.setCustomValidity('Colle un lien https://www.facebook.com/…');
+      facebookPage.reportValidity();
+      return;
+    }
+    facebookPage.setCustomValidity('');
+    facebookPage.value = page || '';
+    await saveChannel(channel.key, { facebookPageUrl: page });
     send({ type: 'autoNow' });
   });
+  facebookPage.addEventListener('input', () => facebookPage.setCustomValidity(''));
   const visibility = document.createElement('select');
   visibility.title = 'Comment chaque vidéo de cette chaîne arrive sur YouTube.';
   for (const [value, text] of [
@@ -511,13 +615,32 @@ function channelItem(channel, panelOwn) {
   times.value = own.times || '18:00';
   times.title = 'Une vidéo par créneau : chaque nouvelle vidéo prend le prochain créneau libre (heures de ton ordinateur).';
   times.hidden = current !== 'SCHEDULE';
-  times.addEventListener('change', () => saveChannel(channel.key, { times: times.value.trim() || '18:00' }));
+  times.addEventListener('input', () => times.setCustomValidity(''));
+  times.addEventListener('change', async () => {
+    const normalized = normalizeTimes(times.value);
+    if (!normalized) {
+      times.setCustomValidity('Écris des quarts d’heure valides, par exemple 09:00, 18:30.');
+      times.reportValidity();
+      return;
+    }
+    times.setCustomValidity('');
+    times.value = normalized;
+    await saveChannel(channel.key, { times: normalized });
+  });
   visibility.addEventListener('change', async () => {
     if (visibility.value === 'PUBLIC' && !confirm(`${channel.name} : chaque vidéo prête sera PUBLIÉE directement sur YouTube, sans que tu la valides.`)) {
       visibility.value = own.visibility || 'UNLISTED';
       return;
     }
-    await saveChannel(channel.key, { visibility: visibility.value, times: times.value.trim() || '18:00' });
+    const normalized = normalizeTimes(times.value);
+    if (visibility.value === 'SCHEDULE' && !normalized) {
+      times.hidden = false;
+      times.setCustomValidity('Écris des quarts d’heure valides, par exemple 09:00, 18:30.');
+      times.reportValidity();
+      visibility.value = own.visibility || 'UNLISTED';
+      return;
+    }
+    await saveChannel(channel.key, { visibility: visibility.value, times: normalized || '18:00' });
     own.visibility = visibility.value;
     autoVisibility.set(channel.key, visibility.value);
     times.hidden = visibility.value !== 'SCHEDULE';
@@ -616,6 +739,7 @@ function sentItem(video) {
     const link = el('a', 'mini-link');
     link.href = `https://youtu.be/${video.youtube_id}`;
     link.target = '_blank';
+    link.rel = 'noopener noreferrer';
     link.title = 'Voir la vidéo sur YouTube';
     mini.replaceWith(link);
     link.append(mini);
@@ -625,105 +749,13 @@ function sentItem(video) {
   return item;
 }
 
-// « ⋮ » : the secondary actions of a row (Déjà publié, Retirer, Changer
-// l'heure…) in a small menu, written out in full; only « Publier » stays on
-// the row. entries: { label, icon, run, danger }.
-function closeMenus(except) {
-  for (const m of document.querySelectorAll('.more-menu')) if (m !== except) m.hidden = true;
-}
-document.addEventListener('click', () => closeMenus());
-function moreMenu(entries = []) {
-  const wrap = el('div', 'more');
-  const menu = el('div', 'more-menu');
-  menu.hidden = true;
-  const open = el('button', 'btn ghost icon-btn icon-only more-btn');
-  open.type = 'button';
-  open.append(icon('dots'));
-  open.title = 'Autres actions';
-  open.setAttribute('aria-label', 'Autres actions');
-  open.addEventListener('click', (event) => {
-    event.stopPropagation();
-    closeMenus(menu);
-    menu.hidden = !menu.hidden;
-  });
-  wrap.add = (entry) => {
-    if (!entry) return;
-    const row = el('button', `more-item${entry.danger ? ' danger' : ''}`);
-    row.type = 'button';
-    if (entry.icon) row.append(icon(entry.icon));
-    row.append(el('span', null, entry.label));
-    if (entry.title) row.title = entry.title;
-    row.addEventListener('click', (event) => {
-      event.stopPropagation();
-      menu.hidden = true;
-      entry.run();
-    });
-    menu.append(row);
-  };
-  entries.forEach(wrap.add);
-  wrap.append(open, menu);
-  return wrap;
-}
-// A button built elsewhere (time picker, action) offered in the menu.
-const entryOf = (node, label, iconName, extra = {}) => ({ label, icon: iconName, run: () => node.click(), title: node.title, ...extra });
-
-// « Déjà publié » on a failed row: the creator published it by hand. It is
-// marked as published on that network, so it is neither sent again nor shown
-// as a failure (nothing else changes).
-const nowIso = () => new Date().toISOString();
-function alreadyDone(getItem, mark) {
-  return {
-    label: 'Déjà publié (fait à la main)', icon: 'check',
-    title: 'Tu l’as publié à la main : le marquer comme publié, sans le renvoyer.',
-    run: async () => {
-      try {
-        await mark();
-        getItem().say('ok', 'Marqué comme déjà publié.');
-        setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
-      } catch (error) {
-        getItem().say('warn', String((error && error.message) || error));
-      }
-    },
-  };
-}
-const markVideoManual = (path, data) => KappDossier.mark(path, 'manual', data);
-const markPostManual = (path, net) => (net === 'facebook'
-  ? KappDossier.markPost(path, { statut: 'publie', published_at: nowIso(), erreur: null, manuel: true })
-  : KappDossier.markPost(path, { [net]: { statut: 'publie', published_at: nowIso(), manuel: true } }));
-
-// « Retirer » : this publication must not go out (and is no longer listed).
-// Nothing is deleted from the folder; only its mark changes.
-const RETIRED = 'retire';
-const realId = (id) => (id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null);
-function retireButton(getItem, mark) {
-  return {
-    label: 'Retirer (ne pas publier)', icon: 'trash', danger: true,
-    title: 'Cette publication ne partira pas et disparaît de la liste (le fichier reste dans le dossier).',
-    run: async () => {
-      if (!confirm('Retirer cette publication ? Elle ne partira pas et ne s’affichera plus (aucun fichier n’est supprimé).')) return;
-      try {
-        await mark();
-        getItem().say('ok', 'Retirée : elle ne partira pas.');
-        setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
-      } catch (error) {
-        getItem().say('warn', String((error && error.message) || error));
-      }
-    },
-  };
-}
-const retirePost = (path, net) => (net === 'facebook'
-  ? KappDossier.markPost(path, { statut: RETIRED, retire_le: nowIso() })
-  : KappDossier.markPost(path, { [net]: { statut: RETIRED, retire_le: nowIso() } }));
-
 // A video's Short (its vertical version, short.mp4): its own row, in « En
 // attente » until it is on YouTube, then in « Déjà publiés ».
 function shortItem(video) {
   const actions = [];
   let status;
   let item;
-  if (video.short_youtube_id === 'manuel') {
-    status = pill('ok', 'Short publié à la main sur YouTube.');
-  } else if (video.short_youtube_id) {
+  if (video.short_youtube_id) {
     status = pill('ok', 'Short publié sur YouTube.');
     actions.push(iconLink('link', 'Voir', `https://youtube.com/shorts/${video.short_youtube_id}`));
   } else {
@@ -736,12 +768,10 @@ function shortItem(video) {
     go.title = video.short_error ? 'Renvoyer le Short sur YouTube' : 'Publier le Short sur YouTube';
     go.dataset.publish = '1';
     actions.push(go);
-    actions.push(moreMenu([alreadyDone(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: 'manuel' })),
-      retireButton(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: RETIRED }))]));
   }
   item = mediaRow({
     path: video.relative_path, emptyLabel: 'Short',
-    vertical: { youtubeId: realId(video.short_youtube_id), file: video.vertical_path },
+    vertical: { youtubeId: video.short_youtube_id, file: video.vertical_path },
     title: String(video.title || video.relative_path.split('/').pop()).replace(/\s*[—-]\s*Short$/i, ''),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
     status, actions: actions.filter((x) => !(x.tagName === 'A' && /youtube\.com\/shorts/.test(x.href))),
@@ -752,6 +782,7 @@ function shortItem(video) {
     const link = el('a', 'mini-link');
     link.href = `https://youtube.com/shorts/${video.short_youtube_id}`;
     link.target = '_blank';
+    link.rel = 'noopener noreferrer';
     link.title = 'Voir le Short sur YouTube';
     mini.replaceWith(link);
     link.append(mini);
@@ -771,7 +802,6 @@ const LOGOS = {
   tiktok: { short: 'TikTok', color: '#ffffff', svg: '<path d="M12.53.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>' },
   instagram: { short: 'Insta', color: '#e1306c', svg: '<path fill="none" stroke="currentColor" stroke-width="2.2" d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"/><circle cx="12" cy="12" r="4.3" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="17.6" cy="6.4" r="1.4"/>' },
   linkedin: { short: 'In', color: '#0a66c2', svg: '<path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/>' },
-  snapchat: { short: 'Snap', color: '#fffc00', svg: '<path d="M12.2 1c2.6 0 4.9 1.5 5.9 3.8.5 1.1.4 2.9.3 4.3l-.1.6c.1.1.3.1.6.1.4 0 .9-.2 1.4-.4.2-.1.4-.1.5-.1.4 0 .9.3.9.8 0 .4-.3.7-1 1-.1 0-.2.1-.4.1-.6.2-1.4.4-1.6.9-.1.3 0 .6.2 1v.1c.1.1 1.8 4 5.4 4.6.3 0 .5.3.5.6 0 .1 0 .2-.1.3-.3.6-1.5 1.1-3.6 1.4-.1.1-.1.5-.2.8 0 .2-.1.4-.2.7-.1.3-.3.4-.6.4h-.1c-.2 0-.5 0-.8-.1-.5-.1-1.1-.2-1.8-.2-.4 0-.8 0-1.3.1-.8.1-1.5.6-2.2 1.1-1.1.8-2.2 1.6-3.9 1.6h-.3c-1.7 0-2.8-.8-3.8-1.6-.7-.5-1.4-1-2.2-1.1-.4-.1-.9-.1-1.3-.1-.8 0-1.4.1-1.8.2-.3.1-.6.1-.8.1-.2 0-.6-.1-.7-.5-.1-.3-.1-.5-.2-.7-.1-.3-.1-.7-.2-.8C1.5 20 .3 19.5 0 18.9c0-.1-.1-.2-.1-.3 0-.3.2-.6.5-.6 3.6-.6 5.3-4.5 5.4-4.6v-.1c.2-.4.3-.7.2-1-.2-.5-1-.7-1.6-.9-.1 0-.3-.1-.4-.1-.8-.3-1-.7-1-1 0-.4.4-.8.9-.8.2 0 .3 0 .4.1.5.2.9.4 1.3.4.3 0 .5-.1.6-.1l-.1-.6c-.1-1.4-.2-3.2.3-4.3C7.3 2.5 9.6 1 12.2 1z"/>' },
   x: { short: 'X', color: '#ffffff', svg: '<path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.58-6.64 7.58H.47l8.6-9.83L0 1.15h7.59l5.24 6.93zM17.61 20.64h2.04L6.49 3.24H4.3z"/>' },
 };
 const logo = (name, size = 14) => {
@@ -798,11 +828,10 @@ const NETWORKS = [
   ['tiktok', 'TikTok', 'Vidéos verticales (et horizontales) sur ton compte.', 'tiktok'],
   ['instagram', 'Instagram', 'Reels (versions verticales) sur ton compte.', 'instagram'],
   ['linkedin', 'LinkedIn', 'Vidéos (lien) et posts sur ton profil.', 'linkedin'],
-  ['snapchat', 'Snapchat', 'En développement.', 'snapchat'],
   ['x', 'X', 'Posts et vidéos sur ton compte.', 'x'],
 ];
-// Networks still in development are off unless ticked; the others on unless unticked.
-const LIVE_NETWORKS = new Set(['youtube', 'facebook', 'tiktok', 'instagram', 'x', 'linkedin']); // they really publish
+// Every listed network is operational. Older defaults stay enabled until the
+// creator unticks them; newer destinations require an explicit opt-in.
 const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);          // on until unticked
 const networkIsOn = (config, name) => {
   const value = (config.networks || {})[name];
@@ -856,7 +885,9 @@ async function renderNetworks() {
 
 // ------------------------------------------------ publication settings
 
-const TIMES = /^\s*\d{1,2}[:hH]\d{2}(\s*[,;\s]\s*\d{1,2}[:hH]\d{2})*\s*$/;
+function normalizeTimes(value) {
+  return KappSchedule.normalizeTimes(value);
+}
 
 async function renderPublishSettings() {
   const config = await settings();
@@ -894,19 +925,21 @@ for (const b of $('yt-visibility').querySelectorAll('button')) {
 for (const radio of document.querySelectorAll('input[name="yt-when"]')) {
   radio.addEventListener('change', async () => {
     $('yt-times-row').hidden = radio.value !== 'times';
-    if (radio.value === 'now' || TIMES.test($('yt-times').value)) await saveSetting({ schedule: radio.value });
+    if (radio.value === 'now' || normalizeTimes($('yt-times').value)) await saveSetting({ schedule: radio.value });
     else $('yt-times').focus();
   });
 }
 function timesSaver(input, key, extra = {}) {
   return async () => {
     const value = $(input).value.trim();
-    if (!TIMES.test(value)) {
-      $(input).setCustomValidity('Écris des heures comme 08:00, 12:30, 18:00');
+    const normalized = normalizeTimes(value);
+    if (!normalized) {
+      $(input).setCustomValidity('Écris des quarts d’heure valides, par exemple 08:00, 12:30, 18:45');
       $(input).reportValidity();
       return;
     }
-    await saveSetting({ [key]: value.replace(/[hH]/g, ':'), ...extra });
+    $(input).value = normalized;
+    await saveSetting({ [key]: normalized, ...extra });
     renderPosts();
   };
 }
@@ -918,7 +951,8 @@ for (const id of ['yt-times']) {
 
 // ------------------------------------------------------ Facebook posts
 
-const POST_STATES = { a_publier: 'prévu', en_cours: 'en cours', publie: 'publié', echec: 'échec' };
+const POST_STATES = { a_publier: 'prévu', en_cours: 'en cours', publie: 'publié', echec: 'échec',
+  a_verifier: 'à vérifier', configuration_invalide: 'configuration invalide' };
 const POST_TYPES = { photo: 'Photo', texte: 'Texte', reel: 'Réel' };
 
 let lastScan = null;  // last scan of the videos folder
@@ -954,16 +988,18 @@ function postRow(post) {
     when.append(el('strong', null, '—'), el('span', null, 'sans heure'));
   }
   const mini = el('div', 'mini', POST_TYPES[post.type]);
-  if (post.image_path) KappDossier.fileAt(post.image_path).then((file) => { const img = document.createElement('img'); img.src = URL.createObjectURL(file); img.alt = ''; mini.replaceChildren(img); }).catch(() => {});
+  if (post.image_path) KappDossier.fileAt(post.image_path).then((file) => mini.replaceChildren(objectImage(file))).catch(() => {});
   const what = el('div', 'what');
   what.append(el('div', 't', post.text.split('\n')[0] || '(sans texte)'));
-  const live = el('div', 'live');
+  const live = liveRegion();
   const due = post.due_at && post.due_at > Date.now();
   const states = {
     a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'En retard'),
     en_cours: pill('busy', 'Publication en cours…'),
     publie: pill('ok', 'Publié'),
     echec: pill('warn', post.error || 'Échec de la publication.'),
+    a_verifier: pill('warn', post.error || 'Vérifie sur Facebook avant toute nouvelle tentative.'),
+    configuration_invalide: pill('warn', post.configuration_error || 'Corrige publication.json.'),
   };
   live.append(states[post.statut] || pill('neutral', post.statut));
   what.append(live);
@@ -979,6 +1015,21 @@ function postRow(post) {
     const again = button('Repartager', 'btn ghost', () => act(item, again, { type: 'shareGroups', path: post.path }, 'Partage dans les groupes en cours…'));
     again.dataset.publish = '1';
     acts.append(again);
+  }
+  if (post.statut === 'a_verifier') {
+    const accept = button('Confirmer publié', 'btn ghost', async () => {
+      if (!confirm('As-tu vérifié que ce post est bien visible sur la Page Facebook ?\n\nConfirmer évite de le publier une seconde fois.')) return;
+      accept.disabled = true;
+      await KappDossier.markPost(post.path, { statut: 'publie', published_at: post.published_at || new Date().toISOString(), erreur: null });
+      renderPosts();
+    });
+    const unlock = button('Autoriser un renvoi', 'btn ghost', async () => {
+      if (!confirm('As-tu vérifié la Page ET les brouillons Facebook et confirmé que le post est absent ?\n\nIl faudra encore cliquer « Réessayer » avant tout nouvel envoi.')) return;
+      unlock.disabled = true;
+      await KappDossier.markPost(post.path, { statut: 'echec', erreur: 'Publication vérifiée comme absente : nouvel envoi autorisé manuellement.' });
+      renderPosts();
+    });
+    acts.append(accept, unlock);
   }
   if (post.statut === 'a_publier' || post.statut === 'echec') {
     const change = timeButton(() => item, post.due_at, async (at) => {
@@ -1030,7 +1081,9 @@ function dayGroups(list, timeOf, scope, { openToday = false, openFirst = false }
     box.open = openDays.has(id) || ((openToday && key === today) || (openFirst && index === 0)) && !openDays.has(`${id}:closed`);
     const summary = el('summary');
     const failed = posts.filter((p) => p.statut === 'echec').length;
-    summary.append(el('span', 'day-name', dayLabel(key)), el('span', 'day-count', `${posts.length} post${posts.length > 1 ? 's' : ''}${failed ? ` · ${failed} en échec` : ''}`));
+    const verify = posts.filter((p) => p.statut === 'a_verifier').length;
+    const invalid = posts.filter((p) => p.configuration_error).length;
+    summary.append(el('span', 'day-name', dayLabel(key)), el('span', 'day-count', `${posts.length} post${posts.length > 1 ? 's' : ''}${verify ? ` · ${verify} à vérifier` : ''}${failed ? ` · ${failed} en échec` : ''}${invalid ? ` · ${invalid} à corriger` : ''}`));
     const list = el('ul', 'rows');
     const fill = () => { if (!list.childElementCount) list.replaceChildren(...posts.map(postRow)); };
     if (box.open) fill();
@@ -1084,6 +1137,7 @@ async function renderGroups() {
     const a = el('a', null, groupName(link));
     a.href = link;
     a.target = '_blank';
+    a.rel = 'noopener noreferrer';
     a.title = link;
     const drop = el('button', 'group-drop', '✕');
     drop.type = 'button';
@@ -1109,7 +1163,7 @@ function groupsSaid(text, warn = false) {
 async function saveGroups() {
   const current = await settings();
   current.facebookGroups = [...new Set(groupList.map(groupLink).filter(Boolean))].slice(0, 500);
-  current.facebookGroupsPerPost = Math.min(25, Math.max(1, Number($('fb-groups-per').value) || 9));
+  current.facebookGroupsPerPost = Math.min(9, Math.max(1, Number($('fb-groups-per').value) || 9));
   current.facebookGroupsOn = $('fb-groups-on').checked; // no list needed: Facebook's own list is used
   await chrome.storage.local.set({ folder: current });
   renderGroups();
@@ -1154,7 +1208,7 @@ $('fb-from-yt').addEventListener('change', async () => {
 $('fb-groups-per').addEventListener('change', saveGroups);
 for (const [id, step] of [['fb-groups-less', -1], ['fb-groups-plus', 1]]) {
   $(id).addEventListener('click', () => {
-    $('fb-groups-per').value = Math.min(25, Math.max(1, (Number($('fb-groups-per').value) || 9) + step));
+    $('fb-groups-per').value = Math.min(9, Math.max(1, (Number($('fb-groups-per').value) || 9) + step));
     saveGroups();
   });
 }
@@ -1190,7 +1244,27 @@ $('fb-retry-all').addEventListener('click', async () => {
   renderPosts();
 });
 
-async function renderPosts() {
+let postsRenderPromise = null;
+let postsRenderQueued = false;
+function renderPosts() {
+  if (postsRenderPromise) {
+    postsRenderQueued = true;
+    return postsRenderPromise;
+  }
+  postsRenderPromise = renderPostsOnce().catch((error) => {
+    $('fb-summary').className = 'warn';
+    $('fb-summary').textContent = String(error.message || error);
+  }).finally(() => {
+    postsRenderPromise = null;
+    if (postsRenderQueued) {
+      postsRenderQueued = false;
+      queueMicrotask(renderPosts);
+    }
+  });
+  return postsRenderPromise;
+}
+
+async function renderPostsOnce() {
   const groupConfig = await settings();
   groupsDefault = !!groupConfig.facebookGroupsOn;
   renderGroups().catch(() => {});
@@ -1202,12 +1276,14 @@ async function renderPosts() {
   const { catchUp } = await chrome.storage.local.get('catchUp');
   lateEta = estimateLate(posts, catchUp);
   const failedCount = posts.filter((p) => p.statut === 'echec').length;
+  const verifyCount = posts.filter((p) => p.statut === 'a_verifier').length;
+  const invalidCount = posts.filter((p) => p.configuration_error).length;
   $('fb-retry-all').hidden = !failedCount;
   $('fb-retry-all').textContent = `Réessayer les ${failedCount} post(s) en échec`;
   const config = await settings();
   const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl) || config.facebookPageUrl;
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
-  const rank = { en_cours: 0, echec: 1, a_publier: 2 };
+  const rank = { en_cours: 0, a_verifier: 1, echec: 2, a_publier: 3 };
   const toCome = posts.filter((p) => p.statut !== 'publie')
     .sort((a, b) => (rank[a.statut] ?? 3) - (rank[b.statut] ?? 3) || (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
   const done = posts.filter((p) => p.statut === 'publie')
@@ -1217,7 +1293,9 @@ async function renderPosts() {
   else {
     summary.className = 'muted small';
     summary.textContent = !posts.length ? (access.state === 'granted' ? 'Aucun post dans ce dossier.' : '')
-      : `${toCome.length} à venir · ${done.length} publié(s)` + (missingPage ? ' · lien de la page manquant (en haut)' : '');
+      : `${toCome.length} à venir · ${done.length} publié(s)` + (verifyCount ? ` · ${verifyCount} à vérifier sur Facebook` : '')
+        + (invalidCount ? ` · ${invalidCount} configuration(s) à corriger` : '')
+        + (missingPage ? ' · lien de la page manquant (en haut)' : '');
   }
   const shown = (p) => !postFilter || (postFilter === 'echec' ? p.statut === 'echec' : p.type === postFilter);
   const upcoming = toCome.filter(shown);
@@ -1230,42 +1308,26 @@ async function renderPosts() {
   $('fb-done-days').replaceChildren(...dayGroups(doneShown, (p) => Date.parse(p.published_at || 0) || p.due_at, 'done', { openFirst: true }));
   $('no-posts').hidden = !(posts.length && !upcoming.length);
   applyJob();
-  // The folders of each network, then the tabs that depend on them.
-  netFolders = await KappDossier.folders().catch(() => ({}));
-  ownPosts = {};
-  await Promise.all(['tiktok', 'instagram', 'x', 'linkedin'].map(async (net) => {
-    const reply = await send({ type: 'networkPosts', net });
-    ownPosts[net] = reply && reply.ok ? reply.data : [];
-  }));
-  renderTikTok();
-  renderInstagram();
-  renderShare('x');
-  renderShare('linkedin');
-  renderNetSettings();
-  renderPages();
+  await refreshNetworkData();
+  renderNetworkViews();
 }
 
-// Settings › « Tes pages et comptes »: one link per network in use. Facebook's
-// stays in settings.facebookPageUrl (read by the background worker); the
-// others in settings.pageUrls, for now as a reminder of where to be signed in.
+// Facebook is the only network routed by a saved destination URL. YouTube,
+// TikTok, Instagram, X and LinkedIn publish to the account already connected
+// in this Chrome profile.
 const PAGE_FIELDS = [
-  ['youtube', 'YouTube', 'https://www.youtube.com/@ta-chaine', /^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//i],
-  ['facebook', 'Facebook', 'https://www.facebook.com/ta-page', /^https?:\/\/(www\.|m\.|web\.|business\.)?(facebook|fb)\.com\//i],
-  ['tiktok', 'TikTok', 'https://www.tiktok.com/@ton-compte', /^https?:\/\/(www\.)?tiktok\.com\//i],
-  ['instagram', 'Instagram', 'https://www.instagram.com/ton-compte', /^https?:\/\/(www\.)?instagram\.com\//i],
-  ['snapchat', 'Snapchat', 'https://www.snapchat.com/add/ton-compte', /^https?:\/\/(www\.)?snapchat\.com\//i],
-  ['linkedin', 'LinkedIn', 'https://www.linkedin.com/company/ta-page', /^https?:\/\/(www\.)?linkedin\.com\//i],
-  ['x', 'X', 'https://x.com/ton-compte', /^https?:\/\/(www\.)?(x|twitter)\.com\//i],
+  ['facebook', 'Facebook', 'https://www.facebook.com/ta-page', /^https:\/\/(www\.|m\.|web\.|business\.)?facebook\.com\//i],
 ];
-const pageUrlOf = (config, name) => (name === 'facebook' ? config.facebookPageUrl : (config.pageUrls || {})[name]) || '';
+const pageUrlOf = (config, name) => (name === 'facebook' ? config.facebookPageUrl : '') || '';
 
 async function renderPages() {
   const config = await settings();
   const used = PAGE_FIELDS.filter(([name]) => networkIsOn(config, name));
+  $('set-pages').hidden = !used.length;
   const active = used.filter(([name]) => pageUrlOf(config, name)).length;
   const state = $('pages-state');
-  state.className = `pill ${active ? 'ok' : 'neutral'}`;
-  state.textContent = `${active} lien${active > 1 ? 's' : ''} actif${active > 1 ? 's' : ''}`;
+  state.className = `pill ${active ? 'ok' : 'warn'}`;
+  state.textContent = active ? 'Page configurée' : 'Page à renseigner';
   $('pages').replaceChildren(...used.map(([name, label, placeholder, pattern]) => {
     const row = el('label', 'page-row');
     const input = document.createElement('input');
@@ -1307,13 +1369,13 @@ async function renderPages() {
         input.reportValidity();
         return;
       }
+      const savedUrl = name === 'facebook' && url ? normalizedFacebookPage(url) : url;
       const current = await settings();
       if (name === 'facebook') {
-        current.facebookPageUrl = url || null;
+        current.facebookPageUrl = savedUrl || null;
+        input.value = savedUrl || '';
         // One page for everything: links saved per channel by older versions go.
         for (const own of Object.values(current.channels || {})) { delete own.facebookPageUrl; delete own.facebook; delete own.facebookSince; }
-      } else {
-        current.pageUrls = { ...(current.pageUrls || {}), [name]: url || null };
       }
       await chrome.storage.local.set({ folder: current });
       send({ type: 'autoNow' });
@@ -1328,7 +1390,28 @@ async function renderPages() {
   renderSetup().catch(() => {});
 }
 
-async function renderFolder() {
+let folderRenderPromise = null;
+let folderRenderQueued = false;
+function renderFolder() {
+  if (folderRenderPromise) {
+    folderRenderQueued = true;
+    return folderRenderPromise;
+  }
+  folderRenderPromise = renderFolderOnce().catch((error) => {
+    $('folder-status').hidden = false;
+    $('folder-status').className = 'status error';
+    $('folder-status').textContent = String(error.message || error);
+  }).finally(() => {
+    folderRenderPromise = null;
+    if (folderRenderQueued) {
+      folderRenderQueued = false;
+      queueMicrotask(renderFolder);
+    }
+  });
+  return folderRenderPromise;
+}
+
+async function renderFolderOnce() {
   renderSetup().catch(() => {});
   const lists = ['videos', 'sent', 'facebook'].map($);
   if (!(await renderAccess())) {
@@ -1372,19 +1455,8 @@ async function renderFolder() {
   renderOnYoutube(data, config);
   applyYtFilter();
   renderFacebook(data);
-  // The folders of each network, then the tabs that depend on them.
-  netFolders = await KappDossier.folders().catch(() => ({}));
-  ownPosts = {};
-  await Promise.all(['tiktok', 'instagram', 'x', 'linkedin'].map(async (net) => {
-    const reply = await send({ type: 'networkPosts', net });
-    ownPosts[net] = reply && reply.ok ? reply.data : [];
-  }));
-  renderTikTok();
-  renderInstagram();
-  renderShare('x');
-  renderShare('linkedin');
-  renderNetSettings();
-  renderPages();
+  await refreshNetworkData();
+  renderNetworkViews();
 }
 
 // One YouTube publication on the Facebook Page: `as` "video" (the long video)
@@ -1435,12 +1507,37 @@ function facebookItem(video, page, as = 'video') {
 // (that folder, or <NETWORK>/A-PUBLIER in the main folder).
 let netFolders = {};
 let ownPosts = {};
+let networkDataPromise = null;
+async function refreshNetworkData() {
+  if (!networkDataPromise) {
+    networkDataPromise = (async () => {
+      const folders = await KappDossier.folders().catch(() => ({}));
+      const entries = await Promise.all(['tiktok', 'instagram', 'x', 'linkedin'].map(async (net) => {
+        const reply = await send({ type: 'networkPosts', net });
+        return [net, reply && reply.ok && Array.isArray(reply.data) ? reply.data : []];
+      }));
+      netFolders = folders;
+      ownPosts = Object.fromEntries(entries);
+    })().finally(() => { networkDataPromise = null; });
+  }
+  return networkDataPromise;
+}
+
+function renderNetworkViews() {
+  renderTikTok();
+  renderInstagram();
+  renderShare('x');
+  renderShare('linkedin');
+  renderNetSettings();
+  renderPages();
+}
 const hasOwn = (net) => !!(netFolders[net] && netFolders[net].own);
 // A network's own post, as a row of its tab.
 function ownPostItem(p, net) {
   return { path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Post', preview: p.image_path,
     detail: [POST_TYPES[p.type] || 'Post', 'dossier du réseau', chan(p.channel_name)].filter(Boolean).join(' · '),
-    done: p.statut === 'publie', error: p.statut === 'echec' ? (p.error || 'échec') : null, date: p.published_at || p.due_at,
+    done: p.statut === 'publie', error: p.configuration_error || (p.statut === 'echec' ? (p.error || 'échec') : null),
+    blocked: !!p.configuration_error, date: p.published_at || p.due_at,
     auto: true, at: p.statut === 'a_publier' && p.due_at && p.due_at > Date.now() ? p.due_at : null, own: true, net };
 }
 
@@ -1480,23 +1577,21 @@ async function renderShare(net) {
     let status;
     if (it.done) status = pill('ok', `Publié sur ${k.name}.`);
     else {
-      status = it.error ? pill('warn', `Échec : ${it.error}`)
+      status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
+        : it.error ? pill('warn', `Échec : ${it.error}`)
         : it.at ? pillIcon('neutral', `Programmé : ${whenText(it.at)}`, 'clock')
           : it.auto ? pill('ok', `Part tout seul sur ${k.name}.`) : pill('neutral', `Publié avant d’avoir coché ${k.name} : clique « Publier ».`);
-      const go = button(it.error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
-        { type: it.kind === 'video' ? k.video : k.post, path: it.path }, `Publication sur ${k.name} en cours…`));
-      go.dataset.publish = '1';
-      actions.push(go);
-      actions.push(moreMenu([alreadyDone(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { [`${net}PublishedAt`]: nowIso() }) : markPostManual(it.path, net))),
-      retireButton(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { [`${net}PublishedAt`]: RETIRED }) : retirePost(it.path, net)))]));
+      if (!it.blocked) {
+        const go = button(it.error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
+          { type: it.kind === 'video' ? k.video : k.post, path: it.path }, `Publication sur ${k.name} en cours…`));
+        go.dataset.publish = '1';
+        actions.push(go);
+      }
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, emptyLabel: it.kind === 'video' ? 'Vidéo' : 'Post', title: it.title, detail: it.detail, status, actions });
     return item;
   };
   const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
-  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
   const waiting = items.filter((it) => !it.done).sort((a, b) => (a.at || 0) - (b.at || 0) || recent(a, b)).slice(0, 60);
   const done = items.filter((it) => it.done).sort(recent);
   $(`${net}-list`).replaceChildren(...waiting.map(card));
@@ -1520,7 +1615,8 @@ function renderTikTok() {
     if (!p.video_path) continue;
     items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
       detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
-      done: p.tiktok_statut === 'publie', error: p.tiktok_error, date: p.due_at });
+      done: p.tiktok_statut === 'publie', error: p.configuration_error || p.tiktok_error,
+      blocked: !!p.configuration_error, date: p.due_at });
   }
   for (const p of ownPosts.tiktok || []) if (p.video_path) items.push(ownPostItem(p, 'tiktok'));
   const tiktokCard = (it) => {
@@ -1529,17 +1625,16 @@ function renderTikTok() {
     let status;
     if (it.done) status = pill('ok', 'Publiée sur TikTok.');
     else {
-      status = it.error ? pill('warn', `Échec sur TikTok : ${it.error}`) : pill('neutral', 'Prête à partir sur TikTok.');
-      const go = button(it.error ? 'Réessayer' : it.kind === 'video' && !it.vertical ? 'Publier (format long)' : 'Publier', 'btn primary', () => act(item, go,
-        { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
-      go.dataset.publish = '1';
-      actions.push(go);
-      actions.push(moreMenu([alreadyDone(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { tiktokPublishedAt: nowIso() }) : markPostManual(it.path, 'tiktok'))),
-      retireButton(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { tiktokPublishedAt: RETIRED }) : retirePost(it.path, 'tiktok')))]));
+      status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
+        : it.error ? pill('warn', `Échec sur TikTok : ${it.error}`) : pill('neutral', 'Prête à partir sur TikTok.');
+      if (!it.blocked) {
+        const go = button(it.error ? 'Réessayer' : it.kind === 'video' && !it.vertical ? 'Publier (format long)' : 'Publier', 'btn primary', () => act(item, go,
+          { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
+        go.dataset.publish = '1';
+        actions.push(go);
+      }
       // The long version stays possible, as an option.
-      if (it.kind === 'video' && it.vertical) {
+      if (!it.blocked && it.kind === 'video' && it.vertical) {
         const long = button('Version longue', 'btn ghost', () => act(item, long,
           { type: 'tiktok', path: it.path, long: true }, 'Version longue vers TikTok en cours…'));
         long.dataset.publish = '1';
@@ -1577,7 +1672,8 @@ function renderInstagram() {
     if (!p.video_path) continue;
     items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
       detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
-      done: p.instagram_statut === 'publie', error: p.instagram_error, date: p.due_at });
+      done: p.instagram_statut === 'publie', error: p.configuration_error || p.instagram_error,
+      blocked: !!p.configuration_error, date: p.due_at });
   }
   for (const p of ownPosts.instagram || []) if (p.video_path) items.push(ownPostItem(p, 'instagram'));
   const igCard = (it) => {
@@ -1586,15 +1682,14 @@ function renderInstagram() {
     let status;
     if (it.done) status = pill('ok', 'Publiée sur Instagram.');
     else {
-      status = it.error ? pill('warn', `Échec sur Instagram : ${it.error}`) : pill('neutral', 'Prête à partir sur Instagram.');
-      const go = button(it.error ? 'Réessayer' : 'Publier sur Instagram', 'btn primary', () => act(item, go,
-        { type: it.kind === 'video' ? 'instagram' : 'instagramPost', path: it.path }, 'Publication sur Instagram en cours… (Instagram s’ouvre)'));
-      go.dataset.publish = '1';
-      actions.push(go);
-      actions.push(moreMenu([alreadyDone(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { instagramPublishedAt: nowIso() }) : markPostManual(it.path, 'instagram'))),
-      retireButton(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { instagramPublishedAt: RETIRED }) : retirePost(it.path, 'instagram')))]));
+      status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
+        : it.error ? pill('warn', `Échec sur Instagram : ${it.error}`) : pill('neutral', 'Prête à partir sur Instagram.');
+      if (!it.blocked) {
+        const go = button(it.error ? 'Réessayer' : 'Publier sur Instagram', 'btn primary', () => act(item, go,
+          { type: it.kind === 'video' ? 'instagram' : 'instagramPost', path: it.path }, 'Publication sur Instagram en cours… (Instagram s’ouvre)'));
+        go.dataset.publish = '1';
+        actions.push(go);
+      }
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
     return item;
@@ -1644,7 +1739,7 @@ async function renderFacebook(data) {
 async function renderOnYoutube(data, config) {
   // The long video and its Short: two rows, one under the other.
   $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
-    .flatMap((v) => (v.short_youtube_id && v.short_youtube_id !== RETIRED ? [sentItem(v), shortItem(v)] : [sentItem(v)])));
+    .flatMap((v) => (v.short_youtube_id ? [sentItem(v), shortItem(v)] : [sentItem(v)])));
   applyYtFilter();
   applyJob();
   if (!data.sent.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';
@@ -1662,6 +1757,7 @@ function youtubeItem(video) {
   const link = el('a', 'secondary', 'Ouvrir dans Studio');
   link.href = `https://studio.youtube.com/video/${video.id}/edit`;
   link.target = '_blank';
+  link.rel = 'noopener noreferrer';
   const buttons = el('div', 'buttons');
   buttons.append(link);
   item.append(box, info, buttons);
@@ -1983,7 +2079,7 @@ document.addEventListener('visibilitychange', async () => {
 // Everything else waits for the KappGen account to be connected.
 async function renderAccount() {
   const reply = await send({ type: 'account' });
-  const user = reply && reply.ok ? reply.data : null;
+  const user = reply && reply.ok && reply.data && typeof reply.data === 'object' ? reply.data : null;
   $('profile').hidden = !user;
   $('account').hidden = !!user; // the login card only when signed out
   $('login').hidden = !!user;
@@ -1995,9 +2091,11 @@ async function renderAccount() {
     if (reply && !reply.ok) error.textContent = reply.error;
     return false;
   }
-  $('account-email').textContent = user.email;
-  $('pw-account-email').textContent = user.email; // shown on the paywall: the right account?
-  $('account-name').textContent = user.name || user.email.split('@')[0];
+  const email = typeof user.email === 'string' ? user.email : '';
+  const name = typeof user.name === 'string' ? user.name : '';
+  $('account-email').textContent = email || 'Compte KappGen';
+  $('pw-account-email').textContent = email || 'Compte KappGen'; // shown on the paywall: the right account?
+  $('account-name').textContent = name || email.split('@')[0] || 'Compte KappGen';
   // Profile photo (Google account), otherwise the first letter.
   const avatar = $('avatar');
   avatar.replaceChildren();
@@ -2006,10 +2104,10 @@ async function renderAccount() {
     img.src = user.picture_url;
     img.alt = '';
     img.referrerPolicy = 'no-referrer';
-    img.addEventListener('error', () => { avatar.textContent = (user.name || user.email || '?').trim()[0].toUpperCase(); });
+    img.addEventListener('error', () => { avatar.textContent = (name || email || '?').trim()[0].toUpperCase(); });
     avatar.append(img);
   } else {
-    avatar.textContent = (user.name || user.email || '?').trim()[0].toUpperCase();
+    avatar.textContent = (name || email || '?').trim()[0].toUpperCase();
   }
   return true;
 }
@@ -2108,21 +2206,24 @@ $('logout').addEventListener('click', async () => {
 // the online version publishes them itself): shown only when there are some.
 async function renderApp() {
   const queue = await send({ type: 'queue' });
-  const videos = queue && queue.ok ? queue.data.videos : [];
+  const videos = queue && queue.ok && Array.isArray(queue.data && queue.data.videos) ? queue.data.videos : [];
   $('app-block').hidden = !videos.length;
   $('app-videos').replaceChildren(...videos.map((video) => {
-    const item = el('li');
+    const item = el('li', 'item');
+    item.dataset.path = String(video.id);
     const info = el('div', 'info');
-    info.append(el('div', 'title', video.title), el('div', 'meta', [video.channel_name, size(video.size_bytes)].filter(Boolean).join(' · ')));
-    if (video.last_error) info.append(el('div', 'warn', video.last_error));
-    const go = button('Envoyer (non répertoriée)', 'btn primary', async () => {
-      go.disabled = true;
-      // Videos of the KappGen app are handed to Studio by path, which needs
-      // the "debugger" permission. Chrome refuses it as an optional one, so
-      // without it the job explains to put the video in the folder instead.
-      const reply = await send({ type: 'publish', source: 'app', videoId: video.id, visibility: 'UNLISTED' });
-      if (!reply || !reply.ok) go.disabled = false;
-    });
+    const live = liveRegion();
+    info.append(el('div', 'title', video.title), el('div', 'meta', [video.channel_name, size(video.size_bytes)].filter(Boolean).join(' · ')), live);
+    item.say = (kind, text) => live.replaceChildren(pill(kind, text));
+    if (video.last_error) item.say('warn', video.last_error);
+    const go = button('Envoyer (non répertoriée)', 'btn primary', () => act(
+      item,
+      go,
+      { type: 'publish', source: 'app', videoId: video.id, visibility: 'UNLISTED' },
+      'Envoi vers YouTube Studio…',
+    ));
+    go.dataset.publish = '1';
+    go.dataset.publishAvailable = video.file_path ? '1' : '0';
     go.disabled = jobRunning || !video.file_path;
     item.append(info, go);
     return item;
@@ -2137,18 +2238,20 @@ let jobHideTimer = null;
 // The running job, on its own card (and the other publish buttons wait).
 function applyJob() {
   const job = currentJob;
-  for (const node of document.querySelectorAll('[data-publish]')) node.disabled = !!(job && job.running);
+  for (const node of document.querySelectorAll('[data-publish]')) {
+    node.disabled = !!(job && job.running) || node.dataset.publishAvailable === '0';
+  }
   if (!job || !job.path) return;
   // A job's news shows on its own network's tab only (a YouTube failure is
   // not the Facebook Reel's state).
   const tabOf = { facebook: 'facebook', post: 'facebook', image: 'facebook', groups: 'facebook', x: 'x', linkedin: 'linkedin', tiktok: 'tiktok', instagram: 'instagram' };
   const jobTab = `tab-${tabOf[job.kind] || 'youtube'}`;
   for (const item of document.querySelectorAll('li.item, li.row')) {
-    if (item.dataset.path !== job.path || !item.say) continue;
+    if (item.dataset.path !== String(job.path) || !item.say) continue;
     const tab = item.closest('.tab');
     if (tab && tab.id !== jobTab) continue;
     if (job.running) item.say('busy', job.message || 'En cours…');
-    else if (job.error) item.say('warn', job.error);
+    else if (job.error || job.warning) item.say('warn', job.error || job.warning);
     else if (job.done) item.say('ok', job.message || 'Terminé.');
   }
 }
@@ -2160,9 +2263,12 @@ function renderJob(job) {
   jobRunning = !!(job && job.running);
   box.hidden = !job;
   if (job) {
-    box.className = `job ${job.running ? 'running' : job.error ? 'error' : 'done'}`;
-    $('job-title').textContent = job.running ? `En cours : ${job.title || 'publication'}` : job.error ? 'Échec' : 'Terminé';
-    $('job-message').textContent = [job.channel, job.message].filter(Boolean).join(' — ')
+    box.className = `job ${job.running ? 'running' : job.error ? 'error' : job.warning ? 'warning' : 'done'}`;
+    $('job-title').textContent = job.running ? `En cours : ${job.title || 'publication'}`
+      : job.error ? 'Échec' : job.warning ? 'Terminé avec avertissement' : 'Terminé';
+    const jobDetails = [job.channel, job.message].filter(Boolean);
+    if (job.warning && !String(job.message || '').includes(job.warning)) jobDetails.push(job.warning);
+    $('job-message').textContent = jobDetails.join(' — ')
       + (job.running ? ' Les autres boutons « Publier » attendent la fin.' : '');
     $('job-link').hidden = !job.youtubeUrl;
     if (job.youtubeUrl) $('job-link').href = job.youtubeUrl;
@@ -2174,7 +2280,7 @@ function renderJob(job) {
   }
   applyJob();
   clearTimeout(jobHideTimer);
-  if (job && job.done && !job.error && !job.running) {
+  if (job && job.done && !job.error && !job.warning && !job.running) {
     jobHideTimer = setTimeout(async () => { await send({ type: 'clearJob' }); renderJob(null); }, 6000);
   }
   if (wasRunning && !jobRunning) { renderFolder(); renderApp(); renderPosts(); }
@@ -2195,10 +2301,32 @@ $('job-clear').addEventListener('click', async () => {
   renderJob(null);
 });
 
+function normalizedServerUrl(value) {
+  if (!String(value || '').trim()) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  const local = ['localhost', '127.0.0.1'].includes(url.hostname) && url.protocol === 'http:';
+  const official = ['api.kappgen.com', 'app.kappgen.com'].includes(url.hostname) && url.protocol === 'https:';
+  if ((!local && !official) || url.username || url.password || (official && url.port && url.port !== '443')) return null;
+  url.pathname = url.pathname.replace(/\/+$/, '');
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
+
 $('save-url').addEventListener('click', async () => {
-  await chrome.storage.local.set({ appUrl: $('app-url').value.trim() || null });
+  const input = $('app-url');
+  const value = normalizedServerUrl(input.value);
+  if (input.value.trim() && !value) {
+    input.setCustomValidity('Utilise https://api.kappgen.com ou un serveur local http://localhost…');
+    input.reportValidity();
+    return;
+  }
+  input.setCustomValidity('');
+  await chrome.storage.local.set({ appUrl: value });
   start();
 });
+$('app-url').addEventListener('input', () => $('app-url').setCustomValidity(''));
 
 // Version next to the logo, and a notice when a newer one is out on GitHub
 // (the zip install cannot update itself: the link explains how).
@@ -2357,7 +2485,29 @@ $('pause-all').addEventListener('click', async () => {
 });
 renderPauseButton();
 
-async function start() {
+let startPromise = null;
+let startQueued = false;
+function start() {
+  if (startPromise) {
+    startQueued = true;
+    return startPromise;
+  }
+  startPromise = startOnce().catch((error) => {
+    const target = $('main').hidden ? $('login-error') : $('folder-status');
+    target.hidden = false;
+    target.className = target === $('folder-status') ? 'status error' : target.className;
+    target.textContent = String(error.message || error);
+  }).finally(() => {
+    startPromise = null;
+    if (startQueued) {
+      startQueued = false;
+      queueMicrotask(start);
+    }
+  });
+  return startPromise;
+}
+
+async function startOnce() {
   const { appUrl } = await chrome.storage.local.get('appUrl');
   $('app-url').value = appUrl || '';
   if (!(await renderAccount())) { watchLogin(); return; }
