@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $zipUrl = 'https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip'
+$shaUrl = $zipUrl + '.sha256'
 $dir = Join-Path $env:USERPROFILE 'KappGen-Publish'
 
 Write-Host ''
@@ -34,20 +35,55 @@ $tmp = Join-Path $env:TEMP ('kappgen-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $zip = Join-Path $tmp 'k.zip'
 Invoke-WebRequest -Uri $zipUrl -OutFile $zip -UseBasicParsing
+$shaFile = Join-Path $tmp 'k.zip.sha256'
+Invoke-WebRequest -Uri $shaUrl -OutFile $shaFile -UseBasicParsing
+$expected = ((Get-Content $shaFile -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+$actual = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if (-not $expected -or $expected -ne $actual) {
+  throw 'Signature SHA-256 invalide : telechargement annule.'
+}
 $new = Join-Path $tmp 'x'
 Expand-Archive -Path $zip -DestinationPath $new -Force
-if (-not (Test-Path (Join-Path $new 'manifest.json'))) {
-  Write-Host '  X Fichier telecharge incomplet, reessaie dans un instant.' -ForegroundColor Red
-  return
-}
-$version = (Get-Content (Join-Path $new 'manifest.json') -Raw | ConvertFrom-Json).version
+$manifestPath = Join-Path $new 'manifest.json'
+if (-not (Test-Path $manifestPath)) { throw 'Archive telechargee incomplete.' }
+$manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+if ($manifest.name -ne 'KappGen Publish') { throw 'Archive telechargee invalide.' }
+$version = $manifest.version
 
 # Replaces the content of an extension folder with the new version (same
 # folder: Chrome keeps the extension, its settings and its connection).
 function Set-KappVersion($target) {
-  New-Item -ItemType Directory -Path $target -Force | Out-Null
-  Get-ChildItem -Path $target -Force | Remove-Item -Recurse -Force
-  Copy-Item -Path (Join-Path $new '*') -Destination $target -Recurse -Force
+  $full = [IO.Path]::GetFullPath([string]$target).TrimEnd('\')
+  $home = [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')
+  $driveRoot = ([IO.Path]::GetPathRoot($full)).TrimEnd('\')
+  if (-not $full -or $full -eq $home -or $full -eq $driveRoot) {
+    throw "Dossier de destination dangereux : $full"
+  }
+  if (Test-Path $full) {
+    $item = Get-Item $full -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Lien symbolique non modifie : $full" }
+    $existing = @(Get-ChildItem $full -Force)
+    if ($existing.Count -gt 0) {
+      $oldManifest = Join-Path $full 'manifest.json'
+      if ((-not (Test-Path $oldManifest)) -or ((Get-Content $oldManifest -Raw) -notmatch '"name"\s*:\s*"KappGen Publish"')) {
+        throw "Le dossier existe mais ne contient pas KappGen Publish : $full"
+      }
+    }
+  }
+  $parent = Split-Path $full -Parent
+  $leaf = Split-Path $full -Leaf
+  $stage = Join-Path $parent ('.' + $leaf + '.new.' + [guid]::NewGuid())
+  $backup = Join-Path $parent ('.' + $leaf + '.backup.' + [guid]::NewGuid())
+  New-Item -ItemType Directory -Path $parent -Force | Out-Null
+  Copy-Item -Path $new -Destination $stage -Recurse -Force
+  if (Test-Path $full) { Move-Item -Path $full -Destination $backup }
+  try {
+    Move-Item -Path $stage -Destination $full
+  } catch {
+    if (Test-Path $backup) { Move-Item -Path $backup -Destination $full }
+    throw
+  }
+  if (Test-Path $backup) { Remove-Item -Path $backup -Recurse -Force }
 }
 
 Write-Host "  2/3  Rangement dans $dir"
@@ -81,7 +117,12 @@ $missing = @()
 foreach ($p in $profiles) {
   if ($p.Path) {
     if ($p.Path.TrimEnd('\') -ne $dir.TrimEnd('\')) {
-      if (Test-Path (Join-Path (Split-Path $p.Path -Parent) '.git')) {
+      $inGitWorkTree = $false
+      if (Get-Command git -ErrorAction SilentlyContinue) {
+        & git -C $p.Path rev-parse --is-inside-work-tree *> $null
+        $inGitWorkTree = $LASTEXITCODE -eq 0
+      }
+      if ($inGitWorkTree) {
         Write-Host "  -  $($p.Name) : dossier de developpement ($($p.Path)), non touche."
         continue
       }

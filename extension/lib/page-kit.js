@@ -72,6 +72,8 @@
   };
   // Hands one file of the chosen folder to the page's file field.
   async function giveFile(input, { src, path }) {
+    const token = new URL(src).searchParams.get('token');
+    if (!token) throw new Error('Autorisation du fichier absente.');
     const file = await new Promise((resolve, reject) => {
       const frame = document.createElement('iframe');
       frame.style.display = 'none';
@@ -79,7 +81,7 @@
       const timer = setTimeout(() => done(reject, new Error('Le fichier ne répond pas (accès au dossier à autoriser ?).')), 60000);
       function onMessage(event) {
         const data = event.data;
-        if (event.source !== frame.contentWindow || !data || data.kappgen !== 'file' || data.path !== path) return;
+        if (event.source !== frame.contentWindow || !data || data.kappgen !== 'file' || data.token !== token) return;
         if (data.error) done(reject, new Error(data.error)); else done(resolve, data.file);
       }
       window.addEventListener('message', onMessage);
@@ -124,5 +126,5 @@
     return written();
   }
   window.KappKit = { version: VERSION, S, X, sleep, visible, textOf, labelsOf, enabled, click, dialogs, byText, findButton, waitFor,
-    silence, keepQuiet, uploading, giveFile, writeText, seenButtons };
+    silence, keepQuiet, cleanup: () => keepQuiet(false), uploading, giveFile, writeText, seenButtons };
 })();

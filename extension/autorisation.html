@@ -10,6 +10,7 @@
   strong { color: #fff; }
   button { font: inherit; font-weight: 700; font-size: 16px; width: 100%; padding: 12px; margin: 14px 0 8px; border: 0; border-radius: 10px; background: #2f6bff; color: #fff; cursor: pointer; }
   button:hover { background: #4a7dff; }
+  button:disabled { opacity: .55; cursor: wait; }
   .hint { font-size: 12.5px; color: #9fb0d0; }
   .ok { color: #7ee2a8; font-weight: 600; }
   .warn { color: #ffcf6e; }
@@ -17,9 +18,9 @@
 </head>
 <body>
   <img src="icons/icon48.png" alt="" width="40" height="40">
-  <h1>Accès à ton dossier de vidéos</h1>
+  <h1>Accès à tes dossiers</h1>
   <p id="message">Chrome demande de confirmer l’accès au dossier.</p>
-  <button id="grant">Autoriser</button>
+  <button id="grant" disabled>Autoriser</button>
   <p class="hint">Dans la fenêtre de Chrome qui s’ouvre, choisis <strong>« Autoriser à chaque visite »</strong> : tu n’auras plus à le refaire.</p>
 <script src="lib/fiches.js"></script>
 <script src="lib/dossier.js"></script>

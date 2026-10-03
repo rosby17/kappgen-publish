@@ -19,36 +19,76 @@
 // Progress lives in chrome.storage.session so the popup can be closed and
 // reopened at any time.
 
+importScripts('lib/schedule.js');
+
 // The user's KappGen account (session cookie of kappgen.com). The local
 // Docker version is chosen in the panel's Help tab (http://localhost:8080).
 const DEFAULT_APP_URL = 'https://api.kappgen.com';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function normalizeAppUrl(value) {
+  let url;
+  try { url = new URL(String(value || DEFAULT_APP_URL)); } catch { throw new Error('Adresse du serveur KappGen invalide.'); }
+  const local = ['localhost', '127.0.0.1'].includes(url.hostname) && url.protocol === 'http:';
+  const official = ['api.kappgen.com', 'app.kappgen.com'].includes(url.hostname) && url.protocol === 'https:';
+  if ((!local && !official) || url.username || url.password || (official && url.port && url.port !== '443')) {
+    throw new Error('Serveur refusé : utilise KappGen en HTTPS, ou localhost pour le développement.');
+  }
+  url.pathname = url.pathname.replace(/\/+$/, '');
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
+
+function safeRedirectUrl(value) {
+  let url;
+  try { url = new URL(String(value || '')); } catch { throw new Error('Adresse de paiement invalide.'); }
+  const local = ['localhost', '127.0.0.1'].includes(url.hostname) && url.protocol === 'http:';
+  if ((url.protocol !== 'https:' && !local) || url.username || url.password) throw new Error('Adresse de paiement refusée.');
+  return url.toString();
+}
+
 async function appUrl() {
   const { appUrl: saved } = await chrome.storage.local.get('appUrl');
-  return (saved || DEFAULT_APP_URL).replace(/\/+$/, '');
+  return normalizeAppUrl(saved || DEFAULT_APP_URL);
+}
+
+async function isLocalApp() {
+  const host = new URL(await appUrl()).hostname;
+  return host === 'localhost' || host === '127.0.0.1';
 }
 
 async function api(path, options = {}) {
   const base = await appUrl();
   let response;
+  let data;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
   try {
     response = await fetch(`${base}/api${path}`, {
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       ...options,
+      signal: options.signal || controller.signal,
     });
-  } catch {
-    throw new Error('KappGen est injoignable. Vérifie ta connexion Internet.');
+    data = await response.json().catch(() => ({}));
+  } catch (error) {
+    const timeoutMessage = error && error.name === 'AbortError' ? ' (délai de 20 secondes dépassé)' : '';
+    throw new Error(`KappGen est injoignable${timeoutMessage}. Vérifie ta connexion Internet.`);
+  } finally {
+    clearTimeout(timeout);
   }
   if (response.status === 401 && path !== '/auth/login') throw Object.assign(new Error('Connecte-toi à ton compte KappGen.'), { status: 401 });
   if (response.status === 404) throw Object.assign(new Error('Fonction indisponible sur ce serveur KappGen.'), { status: 404 });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `Erreur KappGen (${response.status}).`);
+  if (!response.ok) {
+    const message = typeof data.detail === 'string' ? data.detail : `Erreur KappGen (${response.status}).`;
+    throw Object.assign(new Error(message), { status: response.status });
+  }
   return data;
 }
 
 async function setJob(patch) {
+  if (patch.running === false) workTabId = null;
   const { job } = await chrome.storage.session.get('job');
   const next = { ...(job || {}), ...patch, updatedAt: Date.now() };
   await chrome.storage.session.set({ job: next });
@@ -61,7 +101,7 @@ async function setJob(patch) {
 
 // The day's publications, on this computer's clock; sent once in the evening
 // (21:00) to creators who ticked « Bilan du soir par mail » (off by default).
-const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram', 'x']);
+const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram', 'x', 'linkedin']);
 const REPORT_HOUR = 21;
 const pad2 = (n) => String(n).padStart(2, '0');
 const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -72,7 +112,8 @@ async function logDay(job) {
   const { dayLog } = await chrome.storage.local.get('dayLog');
   const oldest = dayKey(now - 8 * 86400000);
   const entry = { day: dayKey(now), time: hourMinute(now), kind: job.kind, title: String(job.title || '').slice(0, 300),
-    ok: !job.error, error: job.error ? String(job.error).slice(0, 300) : null, url: job.youtubeUrl || null };
+    ok: !job.error && !job.warning,
+    error: job.error || job.warning ? String(job.error || job.warning).slice(0, 300) : null, url: job.youtubeUrl || null };
   await chrome.storage.local.set({ dayLog: [...(dayLog || []).filter((e) => e.day >= oldest), entry].slice(-500) });
 }
 
@@ -116,10 +157,11 @@ async function autoState(state, extra = {}) {
 const ACCESS_TTL = 10 * 60 * 1000;
 async function publishAccess({ fresh = false } = {}) {
   const { publishAccess: cached } = await chrome.storage.local.get('publishAccess');
-  if (!fresh && cached && Date.now() - cached.checkedAt < ACCESS_TTL) return cached;
+  const safeCached = cached ? { ...cached, active: cached.active === true } : null;
+  if (!fresh && safeCached && Date.now() - safeCached.checkedAt < ACCESS_TTL) return safeCached;
   try {
     const data = await api('/publish/access');
-    const state = { ...data, checkedAt: Date.now() };
+    const state = { ...data, active: data && data.active === true, checkedAt: Date.now() };
     await chrome.storage.local.set({ publishAccess: state });
     return state;
   } catch (error) {
@@ -129,8 +171,8 @@ async function publishAccess({ fresh = false } = {}) {
     }
     if (error.status === 404) return { active: false, unavailable: true, checkedAt: Date.now() };
     // Network trouble: the last answer, if recent and still running.
-    if (cached && Date.now() - cached.checkedAt < 24 * 3600 * 1000
-      && (!cached.expires_at || Date.parse(cached.expires_at) > Date.now())) return cached;
+    if (safeCached && Date.now() - safeCached.checkedAt < 24 * 3600 * 1000
+      && (!safeCached.expires_at || Date.parse(safeCached.expires_at) > Date.now())) return safeCached;
     return { active: false, offline: true, checkedAt: Date.now() };
   }
 }
@@ -149,29 +191,79 @@ async function requireAccess() {
 // Selectors and button names of YouTube Studio, Facebook, TikTok and
 // Instagram are not shipped with the extension: the server sends them, as
 // data, to accounts with an active trial or subscription (lib/recette.js
-// reads them inside the page). Kept in memory only, refreshed every 30 min.
+// reads them inside the page). Refreshed every 30 min and kept locally for a
+// short, validated offline fallback when the MV3 worker restarts.
 const RECIPE_TTL = 30 * 60 * 1000;
+const RECIPE_OFFLINE_TTL = 7 * 24 * 3600 * 1000;
 let recipeCache = null;
+
+function validateRecipe(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Recette de publication invalide.');
+  let encoded;
+  try { encoded = JSON.stringify(data); } catch { throw new Error('Recette de publication illisible.'); }
+  if (encoded.length > 250000) throw new Error('Recette de publication trop volumineuse.');
+  let count = 0;
+  const visit = (value, depth = 0) => {
+    count += 1;
+    if (depth > 10 || count > 6000) throw new Error('Recette de publication trop complexe.');
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') return;
+    if (typeof value === 'string') {
+      if (value.length > 20000) throw new Error('Recette de publication invalide.');
+      return;
+    }
+    if (Array.isArray(value)) { value.forEach((item) => visit(item, depth + 1)); return; }
+    if (typeof value !== 'object') throw new Error('Recette de publication invalide.');
+    for (const [key, item] of Object.entries(value)) {
+      if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Recette de publication non sûre.');
+      visit(item, depth + 1);
+    }
+  };
+  visit(data);
+  for (const [network, config] of Object.entries(data)) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error(`Recette invalide (${network}).`);
+    for (const selector of Object.values(config.sel || {})) {
+      if (typeof selector !== 'string' || selector.length > 2000) throw new Error(`Sélecteur invalide (${network}).`);
+    }
+    for (const raw of Object.values(config.re || {})) {
+      const parts = typeof raw === 'string' && /^\/([\s\S]*)\/([dimsuv]*)$/.exec(raw);
+      if (!parts) throw new Error(`Expression régulière invalide (${network}).`);
+      try { new RegExp(parts[1], parts[2]); } catch { throw new Error(`Expression régulière invalide (${network}).`); }
+    }
+  }
+  return data;
+}
+
 async function publishRecipe({ fresh = false } = {}) {
   if (!fresh && recipeCache && Date.now() - recipeCache.at < RECIPE_TTL) return recipeCache.data;
   await requireAccess();
   let data;
   try {
-    data = await api('/publish/recipe');
+    data = validateRecipe(await api('/publish/recipe'));
   } catch (error) {
     if (error.status === 401) throw new Error('Connecte-toi à ton compte KappGen.');
     if (error.status === 402) throw new Error('Ton abonnement KappGen Publish n’est pas actif : ouvre le panneau pour t’abonner.');
     if (error.status === 404) throw new Error('Le serveur KappGen n’est pas encore à jour pour cette version de KappGen Publish.');
-    // Network trouble: the last recipe of this session, if any.
-    if (recipeCache) return recipeCache.data;
+    const { publishRecipeCache: stored } = await chrome.storage.local.get('publishRecipeCache');
+    const fallback = recipeCache || stored;
+    if (fallback && Date.now() - fallback.at < RECIPE_OFFLINE_TTL) {
+      recipeCache = { data: validateRecipe(fallback.data), at: fallback.at };
+      return recipeCache.data;
+    }
     throw new Error('Impossible de joindre KappGen pour préparer la publication (connexion Internet ?).');
   }
   recipeCache = { data, at: Date.now() };
+  await chrome.storage.local.set({ publishRecipeCache: recipeCache });
   return data;
 }
 
 // Puts the recipe in the page, then the network's scripts.
 async function injectScripts(tabId, files) {
+  // Facebook is autonomous, but publishing still requires a valid account.
+  if (files.length === 1 && files[0] === 'facebook.js') {
+    await requireAccess();
+    await chrome.scripting.executeScript({ target: { tabId }, files });
+    return;
+  }
   const recipe = await publishRecipe();
   await chrome.scripting.executeScript({ target: { tabId }, func: (data) => { window.__kappgenRecipe = data; }, args: [recipe] });
   await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/recette.js', ...files] });
@@ -188,17 +280,29 @@ async function recipeSelector(network, key) {
 
 const AUTO_EVERY_MINUTES = 5;
 
+let creatingOffscreen = null;
+async function offscreenExists() {
+  if (typeof chrome.offscreen.hasDocument === 'function') return chrome.offscreen.hasDocument();
+  if (typeof chrome.runtime.getContexts === 'function') {
+    const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [chrome.runtime.getURL('offscreen.html')] });
+    return contexts.length > 0;
+  }
+  return self.clients ? (await self.clients.matchAll()).some((client) => client.url === chrome.runtime.getURL('offscreen.html')) : false;
+}
+
 async function ensureOffscreen() {
-  if (await chrome.offscreen.hasDocument()) return;
-  try {
-    await chrome.offscreen.createDocument({
+  if (await offscreenExists()) return;
+  if (!creatingOffscreen) {
+    creatingOffscreen = chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['BLOBS'],
       justification: 'Lire le dossier de vidéos choisi par l’utilisateur.',
-    });
-  } catch (error) {
-    if (!/single offscreen/i.test(String(error && error.message))) throw error;
+    }).catch((error) => {
+      if (!/single offscreen/i.test(String(error && error.message))) throw error;
+    }).finally(() => { creatingOffscreen = null; });
   }
+  await creatingOffscreen;
 }
 
 // Chrome sometimes asks again for access to the videos folder. Granting it
@@ -208,9 +312,10 @@ async function ensureOffscreen() {
 const ASK_URL = chrome.runtime.getURL('autorisation.html');
 async function askAccess({ wait = false, force = false } = {}) {
   const access = await folder('access').catch(() => ({ state: 'none' }));
-  // The Facebook folder (Reels and posts) is asked in the same small window.
-  const fbAccess = await folder('fbAccess').catch(() => ({ state: 'none' }));
-  if (access.state !== 'prompt' && (fbAccess.state !== 'prompt' || wait)) return access.state === 'granted';
+  // The other folders (main, each network's own) are asked in the same small window.
+  const all = await folder('folders').catch(() => ({}));
+  const otherAsks = Object.values(all).some((f) => f && f.state === 'prompt');
+  if (access.state !== 'prompt' && (!otherAsks || wait)) return access.state === 'granted';
   const [open] = await chrome.tabs.query({ url: ASK_URL });
   if (open) {
     await chrome.windows.update(open.windowId, { focused: true, drawAttention: true }).catch(() => {});
@@ -268,9 +373,61 @@ async function folder(type, payload = {}) {
   return reply.data;
 }
 
+// A page never receives a disk path. It gets a short-lived, one-use grant
+// bound to its own tab; bridge.html exchanges that token for the path.
+const BRIDGE_GRANT_MS = 2 * 60 * 1000;
+const bridgeGrantKey = (token) => `bridgeGrant:${token}`;
+async function bridgeSource(tabId, path) {
+  if (!Number.isInteger(tabId) || !path) throw new Error('Destination de fichier invalide.');
+  const stored = await chrome.storage.session.get(null);
+  const expired = Object.entries(stored).filter(([key, value]) => key.startsWith('bridgeGrant:')
+    && (!value || !Number.isFinite(value.expiresAt) || value.expiresAt < Date.now())).map(([key]) => key);
+  if (expired.length) await chrome.storage.session.remove(expired);
+  const token = crypto.randomUUID();
+  const key = bridgeGrantKey(token);
+  await chrome.storage.session.set({ [key]: { tabId, path, expiresAt: Date.now() + BRIDGE_GRANT_MS } });
+  return chrome.runtime.getURL(`bridge.html?token=${encodeURIComponent(token)}`);
+}
+
+async function consumeBridgeGrant(token, sender) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(token || ''))) throw new Error('Autorisation de fichier invalide.');
+  const key = bridgeGrantKey(token);
+  const stored = await chrome.storage.session.get(key);
+  const grant = stored[key];
+  await chrome.storage.session.remove(key);
+  let bridgePage = false;
+  try { bridgePage = new URL(sender.url || '').pathname === '/bridge.html'; } catch { /* invalid sender URL */ }
+  if (!grant || grant.expiresAt < Date.now()) throw new Error('Autorisation de fichier expirée. Relance la publication.');
+  if (sender.id !== chrome.runtime.id || !bridgePage || !sender.tab || sender.tab.id !== grant.tabId) {
+    throw new Error('Autorisation de fichier refusée.');
+  }
+  return { path: grant.path };
+}
+
 // Facebook posts: each one at the time written in it (or right away).
-async function postsList() {
-  return folder('posts', {});
+// net: a network's own posts (its folder, or its <NETWORK>/A-PUBLIER folders).
+async function postsList(net = 'facebook') {
+  return folder('posts', { net });
+}
+const POST_NETS = ['instagram', 'tiktok', 'x', 'linkedin'];
+// A post by its path, whichever list it is in.
+async function findPost(postPath) {
+  for (const net of ['facebook', ...POST_NETS]) {
+    const post = (await postsList(net).catch(() => [])).find((p) => p.path === postPath);
+    if (post) return post;
+  }
+  return null;
+}
+function requireValidPost(post) {
+  if (!post) throw new Error('Post introuvable (déplacé ?).');
+  if (post.configuration_error) throw new Error(`${post.configuration_error} Corrige publication.json avant de publier.`);
+  if (!post.text && !post.image_path && !post.video_path) throw new Error('Ce post ne contient aucun texte, aucune image et aucune vidéo à publier.');
+  return post;
+}
+// True when the network has its own folder (Réglages → Dossiers).
+async function ownFolders() {
+  const all = await folder('folders').catch(() => ({}));
+  return (net) => !!(all[net] && all[net].own);
 }
 
 async function folderQueue() {
@@ -287,6 +444,7 @@ function channelIdOf(text) {
 // Runs one window.__kappgen step inside the Studio tab.
 // Same as step(), for a network driven by its own script (TikTok…).
 async function stepIn(tabId, namespace, name, args) {
+  ensureNotCancelled();
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
     func: async (ns, fn, input) => {
@@ -302,35 +460,53 @@ async function stepIn(tabId, namespace, name, args) {
   return result.value;
 }
 
-// sendPost / publish: when the page reloads right after « Publier » (no
-// answer from the script), the mark left in the tab tells it was clicked.
+// sendPost / publish: when Facebook reloads right after « Publier », reinject
+// the page helper and demand actual confirmation.  A click timestamp alone is
+// never proof: Facebook can close the composer after saving a draft.
 async function postStep(tabId, name, args) {
-  try { await chrome.scripting.executeScript({ target: { tabId }, func: () => sessionStorage.removeItem('kappgenPublishClicked') }); } catch { /* checked below */ }
+  try { await chrome.scripting.executeScript({ target: { tabId }, func: () => sessionStorage.removeItem('kappgenPublishAttempt') }); } catch { /* checked below */ }
   try {
     return await step(tabId, name, args);
   } catch (error) {
     if (!/impossible\.$/.test(String(error.message))) throw error;
     await sleep(4000);
     const [{ result } = {}] = await chrome.scripting.executeScript({ target: { tabId },
-      func: () => Number(sessionStorage.getItem('kappgenPublishClicked') || 0) }).catch(() => [{}]);
-    if (result && Date.now() - result < 30 * 60000) return { groups: [], extra: [], reloaded: true };
+      func: () => { try { return JSON.parse(sessionStorage.getItem('kappgenPublishAttempt') || 'null'); } catch { return null; } } }).catch(() => [{}]);
+    if (result && result.at && Date.now() - result.at < 30 * 60000) {
+      await injectScripts(tabId, ['facebook.js']);
+      return step(tabId, 'verifyPublication', { expectedText: args && args.expectedText, timeout: 120000 });
+    }
     throw error;
   }
 }
 
 async function step(tabId, name, args) {
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: async (fn, input) => {
-      try {
-        return { ok: true, value: await window.__kappgen[fn](input) };
-      } catch (error) {
-        return { ok: false, error: String((error && error.message) || error) };
-      }
-    },
-    args: [name, args || {}],
-  });
-  if (!result || !result.ok) throw new Error((result && result.error) || `Étape « ${name} » impossible.`);
+  ensureNotCancelled();
+  // Studio sometimes reloads the page under the script (after a thumbnail, a
+  // redirect...): window.__kappgen is then gone. Inject the script again and
+  // retry the step once instead of failing with « reading '...' of undefined ».
+  const run = async () => {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (fn, input) => {
+        if (!window.__kappgen) return { ok: false, missing: true };
+        try {
+          return { ok: true, value: await window.__kappgen[fn](input) };
+        } catch (error) {
+          return { ok: false, error: String((error && error.message) || error) };
+        }
+      },
+      args: [name, args || {}],
+    });
+    return result;
+  };
+  let result = await run();
+  if (result && result.missing) {
+    await sleep(4000); // let the reloaded page settle
+    await injectScripts(tabId, ['studio.js']);
+    result = await run();
+  }
+  if (!result || !result.ok) throw new Error((result && !result.missing && result.error) || `Étape « ${name} » impossible.`);
   return result.value;
 }
 
@@ -366,8 +542,9 @@ async function setBorrowed(tabId, on) {
 // Closes a Studio tab the extension opened by itself (automatic uploads),
 // leaves the creator's own tab open.
 async function closeStudioTab(tabId) {
+  if (workTabId === tabId) workTabId = null;
   if ((await borrowedTabs()).has(tabId)) return;
-  chrome.tabs.remove(tabId).catch(() => {});
+  await chrome.tabs.remove(tabId).catch(() => {});
 }
 
 // An already open tab of the site is used (the one in front first, then one
@@ -383,6 +560,7 @@ async function tabToReuse(pattern, patterns) {
 const tiktokTabToReuse = () => tabToReuse(/^https:\/\/www\.tiktok\.com\//, ['https://www.tiktok.com/*']);
 const instagramTabToReuse = () => tabToReuse(/^https:\/\/www\.instagram\.com\//, ['https://www.instagram.com/*']);
 const xTabToReuse = () => tabToReuse(/^https:\/\/(x|twitter)\.com\//, ['https://x.com/*', 'https://twitter.com/*']);
+const linkedinTabToReuse = () => tabToReuse(/^https:\/\/www\.linkedin\.com\//, ['https://www.linkedin.com/*']);
 const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
 const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
   ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
@@ -398,6 +576,7 @@ async function reuseOrOpen(findTab, url, { sameIfStartsWith = null, normalize = 
   } else {
     tab = await chrome.tabs.create({ url, active: false });
   }
+  workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   return tab;
 }
@@ -407,12 +586,14 @@ async function reuseOrOpen(findTab, url, { sameIfStartsWith = null, normalize = 
 // working in is never taken over).
 async function openStudioUpload(channelId, active = true, { reuse = false } = {}) {
   const url = channelId ? `https://studio.youtube.com/channel/${channelId}/videos/upload?d=ud` : 'https://www.youtube.com/upload';
-  // The YouTube Studio tab already open is used, for clicks and automatic
-  // uploads alike; a new tab only when none is open.
-  const tab = await reuseOrOpen(studioTabToReuse, url);
+  const tab = reuse ? await reuseOrOpen(studioTabToReuse, url)
+    : await chrome.tabs.create({ url, active: false });
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   if (reuse || active) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
   const start = Date.now();
   while (Date.now() - start < 90000) {
+    ensureNotCancelled();
     const current = await chrome.tabs.get(tab.id);
     const url = current.url || current.pendingUrl || '';
     if (url.startsWith('https://accounts.google.com')) {
@@ -434,8 +615,11 @@ async function openStudioUpload(channelId, active = true, { reuse = false } = {}
 // `key`, without reading the file.
 async function setLocalFile(tabId, key, path) {
   const selector = await recipeSelector('studio', key);
-  if (!chrome.debugger || !await chrome.permissions.contains({ permissions: ['debugger'] })) {
-    throw new Error('Cette vidéo de l’application ne peut pas être envoyée directement : télécharge-la et range-la dans ton dossier de vidéos, elle partira toute seule.');
+  if (!chrome.debugger) throw new Error('Chrome ne permet pas de remettre ce fichier à YouTube Studio.');
+  if (!(await isLocalApp())) throw new Error('L’envoi par chemin local est réservé à l’application KappGen exécutée sur cet ordinateur.');
+  if (typeof path !== 'string' || path.length > 4096 || /[\0\r\n]/.test(path)
+    || !(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path))) {
+    throw new Error('Chemin de fichier local invalide.');
   }
   const target = { tabId };
   await chrome.debugger.attach(target, '1.3');
@@ -455,15 +639,31 @@ async function setLocalFile(tabId, key, path) {
 // The tab a publication is working in, so « Annuler » can stop it.
 let workTabId = null;
 let cancelRequested = false;
+function ensureNotCancelled() {
+  if (cancelRequested) throw new Error('Publication annulée.');
+}
+async function publicationSleep(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    ensureNotCancelled();
+    await sleep(Math.min(500, end - Date.now()));
+  }
+  ensureNotCancelled();
+}
+chrome.tabs.onRemoved.addListener((tabId) => {
+  setBorrowed(tabId, false).catch(() => {});
+  if (workTabId === tabId) workTabId = null;
+});
 async function whileShown(tabId, fn) {
   workTabId = tabId;
+  ensureNotCancelled();
   const tab = await chrome.tabs.get(tabId);
   const [previous] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
   await chrome.tabs.update(tabId, { active: true });
   try {
+    ensureNotCancelled();
     return await fn();
   } finally {
-    if (workTabId === tabId) workTabId = null;
     if (previous && previous.id !== tabId) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
   }
 }
@@ -496,7 +696,7 @@ function ownOf(settings, video) {
   // on by default, for videos published from the moment it was switched on),
   // unless the channel's own folder settings say otherwise.
   if (own.facebook === undefined) own.facebook = settings.facebookFromYoutube !== false;
-  if (!own.facebookSince) own.facebookSince = settings.facebookFromYoutubeSince || Date.now();
+  if (!own.facebookSince) own.facebookSince = settings.facebookFromYoutubeSince || 1;
   if (!networkOn(settings, 'facebook')) own.facebook = false;
   return own;
 }
@@ -517,13 +717,7 @@ async function rememberChannel(channelKey, youtubeChannelId) {
 // "18:00" or "9:00, 18:30" -> [[18, 0]] / [[9, 0], [18, 30]] (quarter hours:
 // Studio only offers times every 15 minutes).
 function parseTimes(text) {
-  const times = [];
-  for (const m of String(text || '18:00').matchAll(/(\d{1,2})\s*[:h]\s*(\d{2})?/g)) {
-    const hour = Number(m[1]);
-    const minute = Math.round(Number(m[2] || 0) / 15) * 15;
-    if (hour < 24) times.push([hour + Math.floor(minute / 60), minute % 60]);
-  }
-  return times.length ? times.sort((a, b) => a[0] - b[0] || a[1] - b[1]) : [[18, 0]];
+  return KappSchedule.parseTimes(text);
 }
 
 // Next publishing time of the channel not taken by an earlier scheduled
@@ -585,14 +779,19 @@ async function channelVideos(youtubeChannelId) {
 // which Page receives the post.
 // In several countries (much of Africa among them) Facebook serves itself
 // from web.facebook.com: same site, same session, same page.
-const FACEBOOK_HOST = /^https?:\/\/(?:www\.|web\.|m\.|mobile\.)?facebook\.com(?=\/|$)/i;
+const FACEBOOK_HOST = /^https:\/\/(?:www\.|web\.|m\.|mobile\.|business\.)?facebook\.com(?=\/|$)/i;
 const facebookWww = (url) => String(url || '').replace(FACEBOOK_HOST, 'https://www.facebook.com');
-async function openFacebookReel(pageUrl) {
-  const safePage = FACEBOOK_HOST.test(String(pageUrl || '')) ? facebookWww(pageUrl) : 'https://www.facebook.com/';
-  // The Facebook tab already open is used (left as is if it already shows the page).
-  const tab = await reuseOrOpen(facebookTabToReuse, safePage, { sameIfStartsWith: safePage.replace(/\/+$/, ''), normalize: facebookWww });
+async function openFacebookReel(pageUrl, { reuse = true } = {}) {
+  if (!FACEBOOK_HOST.test(String(pageUrl || ''))) throw new Error('Lien de page ou de groupe Facebook invalide. Utilise une adresse https://www.facebook.com/…');
+  const safePage = facebookWww(pageUrl);
+  const tab = reuse
+    ? await reuseOrOpen(facebookTabToReuse, safePage, { sameIfStartsWith: safePage.replace(/\/+$/, ''), normalize: facebookWww })
+    : await chrome.tabs.create({ url: safePage, active: false });
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
   while (Date.now() - start < 90000) {
+    ensureNotCancelled();
     const current = await chrome.tabs.get(tab.id);
     const url = current.url || current.pendingUrl || '';
     if (/login|checkpoint|recover/i.test(url)) throw new Error('Connecte-toi d’abord à Facebook dans ce navigateur, puis relance.');
@@ -606,48 +805,54 @@ async function openFacebookReel(pageUrl) {
 }
 
 // filePath: the file to post (the long video, or its vertical version).
-async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path, { groups = [], groupCount = 0 } = {}) {
+async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path, { groups = [], groupCount = 0, reuse = true } = {}) {
   if (!filePath) throw new Error('Aucun fichier vertical associé à cette vidéo.');
-  const tabId = await openFacebookReel(pageUrl);
-  // The long video is a normal video post ("Photo/vidéo"); only the vertical
-  // version is a Reel.
-  if (filePath === video.relative_path && !video.vertical_path) {
-    await whileShown(tabId, async () => {
-      await step(tabId, 'openPost', { photo: true });
-      await setJob({ message: 'Envoi de la vidéo sur Facebook…' });
-      await step(tabId, 'receiveFile', { kind: 'video', path: filePath,
-        src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`) });
-      await sleep(3000);
-      // Only the catchy title of the YouTube video goes with it on Facebook.
-      await step(tabId, 'fillCaption', { caption: (video.title || '').slice(0, 500) });
-      await setJob({ message: 'Envoi de la vidéo à Facebook, puis publication (peut prendre plusieurs minutes)…' });
-      await postStep(tabId, 'sendPost', { timeout: 15 * 60000 });
-    });
-    return true;
-  }
-  let picked = { groups: [], extra: [] };
+  const tabId = await openFacebookReel(pageUrl, { reuse });
+  let complete = false;
   try {
+    // The long video is a normal video post ("Photo/vidéo"); only the vertical
+    // version is a Reel.
+    if (filePath === video.relative_path) {
+      await whileShown(tabId, async () => {
+        await step(tabId, 'openPost', { photo: true });
+        await setJob({ message: 'Envoi de la vidéo sur Facebook…' });
+        await step(tabId, 'receiveFile', { kind: 'video', path: filePath,
+          src: await bridgeSource(tabId, filePath) });
+        await sleep(3000);
+        const caption = (video.title || '').slice(0, 500);
+        await step(tabId, 'fillCaption', { caption });
+        await setJob({ message: 'Envoi de la vidéo à Facebook, puis publication (peut prendre plusieurs minutes)…' });
+        // expectedText: what was actually written, so the page script can
+        // recognise the new post in the feed and confirm the publication.
+        await postStep(tabId, 'sendPost', { timeout: 15 * 60000, expectedText: caption });
+      });
+      complete = true;
+      return true;
+    }
+    let picked = { groups: [], extra: [] };
     await whileShown(tabId, async () => {
       await step(tabId, 'openReel');
       await step(tabId, 'receiveFile', {
-        src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`),
+        src: await bridgeSource(tabId, filePath),
         path: filePath,
       });
       await setJob({ message: `Préparation de la publication Facebook (${channelName || 'page sélectionnée'})…` });
       // A YouTube video: its title only; a Reel post of the Facebook folder: its text.
       const caption = (video.title || video.description || '').slice(0, 5000);
       await step(tabId, 'fillCaption', { caption });
-      picked = await postStep(tabId, 'publish', { groups, groupCount });
+      picked = await postStep(tabId, 'publish', { groups, groupCount, expectedText: caption });
     });
+    complete = true;
     return picked;
   } finally {
-    // Keep Facebook visible after a successful post so the creator can see
-    // the selected Page and the published Reel. On error, it stays open too
-    // because the visible error is usually actionable in the composer.
+    await step(tabId, 'cleanup').catch(() => {});
+    if (complete) await closeStudioTab(tabId);
   }
 }
 
-async function publishShortYouTube(video, channelId, visibility, { reuse = false } = {}) {
+// monetization: the channel's choice, like its long videos ("on" answers the
+// « Adéquation publicitaire » questionnaire; before 1.18.1 Shorts always stopped there).
+async function publishShortYouTube(video, channelId, visibility, { reuse = false, monetization = 'on' } = {}) {
   const tabId = await openStudioUpload(channelId, false, { reuse });
   const shortVisibility = visibility === 'SCHEDULE' ? 'UNLISTED' : visibility;
   const job = { source: 'folder', social: true, videoId: video.id, tabId,
@@ -662,17 +867,18 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
       await step(tabId, 'waitForFilePicker');
       await step(tabId, 'receiveFile', {
         selector: 'videoInput',
-        src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.vertical_path)}`),
+        src: await bridgeSource(tabId, video.vertical_path),
         path: video.vertical_path,
       });
       await step(tabId, 'fillDetails', { title: `${video.title} — Short`, description: video.description });
       if (video.tags && video.tags.length) await step(tabId, 'fillTags', { tags: video.tags }).catch(() => {});
-      await step(tabId, 'chooseVisibility', { visibility: shortVisibility, monetization: 'manual' });
+      await step(tabId, 'chooseVisibility', { visibility: shortVisibility, monetization });
     });
-    await finishUpload(job);
-    const { job: finished } = await chrome.storage.session.get('job');
-    return finished && finished.youtubeId;
+    return await finishUpload(job);
   } catch (error) {
+    // 1.18.2 : sans ça, la marque « envoi en cours » restait et bloquait toute
+    // la file (posts Facebook compris) jusqu'à 8 h après un Short raté.
+    await chrome.storage.local.remove('pending');
     closeStudioTab(tabId);
     throw error;
   }
@@ -684,22 +890,25 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
 // automatically for channels in automatic mode).
 async function publishShortOnly(relativePath, { auto = false } = {}) {
   await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'short', path: relativePath, auto, message: 'Préparation du Short YouTube…', startedAt: Date.now() } });
+  let video = null;
+  let attempted = false;
   try {
     const { sent } = await folderQueue();
-    const video = sent.find((item) => item.relative_path === relativePath);
+    video = sent.find((item) => item.relative_path === relativePath);
     if (!video || !video.youtube_id) throw new Error('La vidéo longue doit d’abord être publiée sur YouTube.');
     if (!video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier de la vidéo.');
     if (video.short_youtube_id) throw new Error('Le Short de cette vidéo est déjà publié.');
     const own = ownOf(await folderSettings(), video);
     const channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
     await setJob({ title: video.title, message: 'Envoi du Short sur YouTube…' });
-    const shortId = await publishShortYouTube(video, channelId, channelVisibility(own), { reuse: !auto });
+    attempted = true;
+    const shortId = await publishShortYouTube(video, channelId, channelVisibility(own), { reuse: !auto, monetization: own.monetization || 'on' });
     if (shortId) await folder('mark', { path: relativePath, status: 'published', data: { shortYoutubeId: shortId } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Short publié sur YouTube.' });
   } catch (error) {
     const message = friendly(error);
     // Not retried on its own (never a double Short): the panel offers « Réessayer ».
-    await folder('mark', { path: relativePath, status: 'published', data: { shortError: message } }).catch(() => {});
+    if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: { shortError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -739,7 +948,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       video = videos.find((v) => v.id === videoId);
       if (!video) throw new Error('Cette vidéo n’est plus dans la liste à publier.');
       if (!configured || !video.file_path) {
-        throw new Error('KappGen ne connaît pas l’emplacement des vidéos sur ce Mac (KAPPGEN_DATA_DIR, voir LOCAL.md).');
+        throw new Error('KappGen ne connaît pas l’emplacement des vidéos sur cet ordinateur. Configure KAPPGEN_DATA_DIR dans l’application KappGen locale.');
       }
     }
     await setJob({ title: video.title, channel: video.channel_name, message: 'Ouverture de YouTube Studio…' });
@@ -761,7 +970,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       await setJob({ message: 'Sélection du fichier vidéo…' });
       const videoInput = 'videoInput';
       if (source === 'folder') {
-        const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.relative_path)}`);
+        const src = await bridgeSource(tabId, video.relative_path);
         await step(tabId, 'receiveFile', { selector: videoInput, src, path: video.relative_path });
       } else {
         await setLocalFile(tabId, videoInput, video.file_path);
@@ -777,7 +986,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       if (video.thumbnail_path && await step(tabId, 'hasThumbnailPicker')) {
         const thumbInput = 'thumbInput';
         if (source === 'folder') {
-          const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.thumbnail_path)}`);
+          const src = await bridgeSource(tabId, video.thumbnail_path);
           await step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path }).catch(() => {});
         } else {
           await setLocalFile(tabId, thumbInput, video.thumbnail_path).catch(() => {});
@@ -824,6 +1033,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
 async function earlyLink(tabId, timeout = 60000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
+    ensureNotCancelled();
     const { youtubeId } = await step(tabId, 'progress').catch(() => ({}));
     if (youtubeId) return youtubeId;
     await sleep(1500);
@@ -863,9 +1073,20 @@ async function finishUpload(job) {
   }
   await setJob({ running: true, youtubeUrl: `https://youtu.be/${youtubeId}`, message: 'Enregistrée dans Studio, transfert en cours (garde l’onglet Studio ouvert)…' });
   let calm = 0;
+  let pollingErrors = 0;
   const deadline = Date.now() + 8 * 3600 * 1000;
   while (calm < 3 && Date.now() < deadline) {
-    const busy = await step(tabId, 'stillUploading').catch(() => false);
+    ensureNotCancelled();
+    let busy;
+    try {
+      busy = await step(tabId, 'stillUploading');
+      pollingErrors = 0;
+    } catch (error) {
+      pollingErrors += 1;
+      if (pollingErrors >= 3) throw error;
+      await sleep(3000);
+      continue;
+    }
     calm = busy ? 0 : calm + 1;
     // A dialog still "Saving…" gets a few visible seconds now and then:
     // Studio only moves on while its tab is shown.
@@ -874,6 +1095,7 @@ async function finishUpload(job) {
     }
     await sleep(3000);
   }
+  if (calm < 3) throw new Error('Le transfert YouTube n’a pas pu être confirmé après huit heures. Vérifie son état dans Studio avant toute relance.');
   // Transfer over and the upload dialog never finished saving: the video
   // exists (it has its link), so set its visibility from its own page.
   if (job.saveStuck && await step(tabId, 'saveState').catch(() => 'closed') !== 'closed') {
@@ -882,8 +1104,14 @@ async function finishUpload(job) {
   }
   await closeStudioTab(tabId);
   await chrome.storage.local.remove('pending');
+  // A Short is a nested step: publishShortOnly() or the long video's social
+  // chain owns the final job state. Marking the job done here would re-enable
+  // every publish button while Facebook distribution is still running.
+  if (job.social) return youtubeId;
   let socialMessage = '';
-  if (source === 'folder' && !job.social) {
+  let socialFailure = null;
+  let socialWarning = null;
+  if (source === 'folder') {
     try {
       const settings = await folderSettings();
       const { sent: sentNow } = await folderQueue();
@@ -895,8 +1123,10 @@ async function finishUpload(job) {
       if (own.facebook && own.facebookMode !== 'reel' && publishedNow && !publishedNow.facebook_published_at) {
         // The same long video, posted on the channel's Facebook Page.
         await setJob({ message: 'Vidéo envoyée sur YouTube — publication sur Facebook…' });
-        await publishFacebookReel(publishedNow, video.channel_name, own.facebookPageUrl, publishedNow.relative_path);
+        socialFailure = { facebookError: 'Publication Facebook interrompue.' };
+        await publishFacebookReel(publishedNow, video.channel_name, own.facebookPageUrl, publishedNow.relative_path, { reuse: !job.auto });
         await folder('mark', { path: video.relative_path, status: 'published', data: { facebookPublishedAt: new Date().toISOString() } });
+        socialFailure = null;
         socialMessage = ' Publiée aussi sur Facebook.';
       } else if (own.facebook && own.facebookMode === 'reel' && video.vertical_path) {
         await setJob({ message: 'Vidéo envoyée sur YouTube — publication du Short et du Reel Facebook…' });
@@ -906,24 +1136,37 @@ async function finishUpload(job) {
           let shortId = published.short_youtube_id;
           if (!shortId) {
             const channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
-            shortId = await publishShortYouTube(published, channelId, visibility, { reuse: !job.auto });
+            socialFailure = { shortError: 'Publication du Short interrompue.' };
+            shortId = await publishShortYouTube(published, channelId, visibility, { reuse: !job.auto, monetization: own.monetization || 'on' });
             await folder('mark', { path: video.relative_path, status: 'published', data: { shortYoutubeId: shortId } });
+            socialFailure = null;
           }
-          if (!published.facebook_published_at) {
-            await publishFacebookReel(published, video.channel_name, own.facebookPageUrl);
-            await folder('mark', { path: video.relative_path, status: 'published', data: { facebookPublishedAt: new Date().toISOString() } });
+          if (!published.facebook_reel_at) {
+            socialFailure = { facebookReelError: 'Publication du Réel Facebook interrompue.' };
+            await publishFacebookReel(published, video.channel_name, own.facebookPageUrl, published.vertical_path, { reuse: !job.auto });
+            await folder('mark', { path: video.relative_path, status: 'published', data: { facebookReelAt: new Date().toISOString() } });
+            socialFailure = null;
           }
           socialMessage = ' Short YouTube et Reel Facebook publiés.';
         }
       } else if (own.facebook && own.facebookMode === 'reel' && !video.vertical_path) {
         socialMessage = ' Facebook activé, mais aucun fichier vertical associé n’a été trouvé.';
+        socialWarning = socialMessage.trim();
       }
     } catch (error) {
-      socialMessage = ` Facebook non publié : ${friendly(error)}`;
+      const message = friendly(error);
+      if (socialFailure) {
+        const key = Object.keys(socialFailure)[0];
+        await folder('mark', { path: video.relative_path, status: 'published', data: { [key]: message } }).catch(() => {});
+      }
+      socialMessage = ` Distribution sociale interrompue : ${message}`;
+      socialWarning = socialMessage.trim();
     }
   }
-  await setJob({ running: false, done: true, error: null, message: `Vidéo envoyée sur YouTube.${socialMessage}` });
+  await setJob({ running: false, done: true, error: null, youtubeUrl: `https://youtu.be/${youtubeId}`,
+    ...(socialWarning ? { warning: socialWarning } : {}), message: `Vidéo envoyée sur YouTube.${socialMessage}` });
   await remember({ title: video.title, channel: video.channel_name, youtubeId, visibility, at: Date.now() });
+  return youtubeId;
 }
 
 // Clicks Save and makes sure the upload dialog really closes. Studio
@@ -966,6 +1209,27 @@ async function resume() {
   if (!pending) return;
   resuming = true;
   try {
+    // Before the dialog has been saved, a worker restart leaves no reliable
+    // indication that title, audience, monetization and visibility were all
+    // applied. Never click Save blindly: leave Studio open and require a
+    // deliberate check/retry. If its link was already known, its draft record
+    // remains the source of truth and prevents a duplicate upload.
+    if (pending.stage !== 'saved') {
+      await chrome.storage.local.remove('pending');
+      const kind = pending.social ? 'Short' : 'Envoi';
+      const message = `${kind} interrompu avant l’enregistrement dans Studio : vérifie l’onglet resté ouvert avant de relancer.`;
+      if (pending.source === 'folder' && pending.video && pending.video.relative_path) {
+        if (pending.social) {
+          await folder('mark', { path: pending.video.relative_path, status: 'published', data: { shortError: message } }).catch(() => {});
+        } else if (!pending.youtubeId) {
+          await folder('mark', { path: pending.video.relative_path, status: 'failed', data: { error: message } }).catch(() => {});
+        }
+      } else if (pending.source === 'app' && !pending.youtubeId) {
+        await api(`/studio-upload/${pending.videoId}/failed`, { method: 'POST', body: JSON.stringify({ error: message }) }).catch(() => {});
+      }
+      await setJob({ running: false, done: false, error: message, message });
+      return;
+    }
     const tab = await chrome.tabs.get(pending.tabId).catch(() => null);
     if (!tab || !(tab.url || '').startsWith('https://studio.youtube.com')) {
       await chrome.storage.local.remove('pending');
@@ -1021,8 +1285,23 @@ async function updateVideo(relativePath, auto = false) {
       const thumbInput = 'editThumbInput';
       if (video.thumbnail_path) {
         await setJob({ message: 'Miniature…' });
-        const src = chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(video.thumbnail_path)}`);
-        await step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path });
+        const src = await bridgeSource(tabId, video.thumbnail_path);
+        // Studio sometimes reloads the edit page under the script (no answer:
+        // « Étape impossible »): wait, inject again, try once more. A thumbnail
+        // that still cannot be set must not block the title and description.
+        const sendThumb = () => step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path });
+        try {
+          try {
+            await sendThumb();
+          } catch (error) {
+            if (!/impossible\.$/.test(String(error.message))) throw error;
+            await sleep(5000);
+            await injectScripts(tabId, ['studio.js']);
+            await sendThumb();
+          }
+        } catch (error) {
+          await setJob({ warning: `Miniature non mise à jour : ${friendly(error)}` });
+        }
         await sleep(3000);
       }
       await setJob({ message: 'Titre, description, mots-clés…' });
@@ -1049,9 +1328,11 @@ async function updateVideo(relativePath, auto = false) {
 async function publishFacebookOnly(relativePath, { auto = false, as = null } = {}) {
   await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'facebook', path: relativePath, auto, message: 'Préparation de la publication Facebook…', startedAt: Date.now() } });
   let reel = as === 'reel';
+  let video = null;
+  let attempted = false;
   try {
     const { sent } = await folderQueue();
-    const video = sent.find((item) => item.relative_path === relativePath);
+    video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo longue doit d’abord être publiée sur YouTube.');
     const own = ownOf(await folderSettings(), video);
     // Without `as` (the « Publier » button): the Short as a Reel if there is one, else the video.
@@ -1059,14 +1340,15 @@ async function publishFacebookOnly(relativePath, { auto = false, as = null } = {
     if (reel && !video.vertical_path) throw new Error('Pas de version verticale (short.mp4) pour un Réel.');
     const file = reel ? video.vertical_path : video.relative_path;
     await setJob({ title: video.title, message: reel ? 'Réel sur Facebook…' : 'Vidéo sur Facebook…' });
-    await publishFacebookReel(video, video.channel_name, own.facebookPageUrl, file);
+    attempted = true;
+    await publishFacebookReel(video, video.channel_name, own.facebookPageUrl, file, { reuse: !auto });
     const at = new Date().toISOString();
     await folder('mark', { path: relativePath, status: 'published', data: reel ? { facebookReelAt: at } : { facebookPublishedAt: at } });
     await setJob({ running: false, done: true, error: null, message: reel ? 'Réel publié sur Facebook.' : 'Vidéo publiée sur Facebook.' });
   } catch (error) {
     const message = friendly(error);
     // Not retried on its own (never a double post): the panel offers « Réessayer ».
-    await folder('mark', { path: relativePath, status: 'published', data: reel ? { facebookReelError: message } : { facebookError: message } }).catch(() => {});
+    if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: reel ? { facebookReelError: message } : { facebookError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1074,10 +1356,14 @@ async function publishFacebookOnly(relativePath, { auto = false, as = null } = {
 // ---------------------------------------------------------------- TikTok
 
 // TikTok Studio's upload page, in the TikTok tab already open if there is one.
-async function openTikTok() {
-  const tab = await reuseOrOpen(tiktokTabToReuse, 'https://www.tiktok.com/tiktokstudio/upload?from=webapp');
+async function openTikTok({ reuse = true } = {}) {
+  const url = 'https://www.tiktok.com/tiktokstudio/upload?from=webapp';
+  const tab = reuse ? await reuseOrOpen(tiktokTabToReuse, url) : await chrome.tabs.create({ url, active: false });
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
   while (Date.now() - start < 90000) {
+    ensureNotCancelled();
     const current = await chrome.tabs.get(tab.id);
     const url = current.url || current.pendingUrl || '';
     if (/\/login|\/signup/.test(url)) throw new Error('Connecte-toi d’abord à TikTok dans ce navigateur, puis relance.');
@@ -1091,17 +1377,19 @@ async function openTikTok() {
 }
 
 // One vertical video to TikTok with its caption.
-async function sendToTikTok({ filePath, caption, title, channel, path }) {
+async function sendToTikTok({ filePath, caption, title, channel, path, auto = false }) {
   await chrome.storage.session.set({ job: { running: true, source: 'tiktok', kind: 'tiktok', path, title, channel, message: 'Ouverture de TikTok Studio…', startedAt: Date.now() } });
-  const tabId = await openTikTok();
-  await whileShown(tabId, async () => {
-    await setJob({ message: 'Envoi de la vidéo à TikTok…' });
-    await stepIn(tabId, '__kappgenTikTok', 'sendVideo', { path: filePath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`) });
-    await setJob({ message: 'Envoi à TikTok (jusqu’à 100 %), puis description…' });
-    await stepIn(tabId, '__kappgenTikTok', 'writeCaption', { caption });
-    await setJob({ message: 'Publication sur TikTok…' });
-    await stepIn(tabId, '__kappgenTikTok', 'post');
-  });
+  const tabId = await openTikTok({ reuse: !auto });
+  try {
+    await whileShown(tabId, async () => {
+      await setJob({ message: 'Envoi de la vidéo à TikTok…' });
+      await stepIn(tabId, '__kappgenTikTok', 'sendVideo', { path: filePath, src: await bridgeSource(tabId, filePath) });
+      await setJob({ message: 'Envoi à TikTok (jusqu’à 100 %), puis description…' });
+      await stepIn(tabId, '__kappgenTikTok', 'writeCaption', { caption });
+      await setJob({ message: 'Publication sur TikTok…' });
+      await stepIn(tabId, '__kappgenTikTok', 'post');
+    });
+  } finally { await stepIn(tabId, 'KappKit', 'cleanup').catch(() => {}); }
   closeStudioTab(tabId); // only a tab opened for this post is closed
 }
 
@@ -1110,19 +1398,22 @@ const hashtags = (tags) => (tags || []).slice(0, 5).map((t) => `#${String(t).rep
 // A video already on YouTube: its vertical version if there is one, otherwise
 // the video itself (TikTok takes horizontal videos too).
 async function publishTikTokVideo(relativePath, { auto = false, long = false } = {}) {
+  let video = null;
+  let attempted = false;
   try {
     const { sent } = await folderQueue();
-    const video = sent.find((item) => item.relative_path === relativePath);
+    video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
     // The vertical version first (TikTok's own format); the long one on request.
     const filePath = long ? video.relative_path : (video.vertical_path || video.relative_path);
     const caption = [video.title, hashtags(video.tags)].filter(Boolean).join(' ').slice(0, 2200);
-    await sendToTikTok({ filePath, caption, title: video.title, channel: video.channel_name, path: relativePath });
+    attempted = true;
+    await sendToTikTok({ filePath, caption, title: video.title, channel: video.channel_name, path: relativePath, auto });
     await folder('mark', { path: relativePath, status: 'published', data: { tiktokPublishedAt: new Date().toISOString() } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur TikTok.' });
   } catch (error) {
     const message = friendly(error);
-    await folder('mark', { path: relativePath, status: 'published', data: { tiktokError: message } }).catch(() => {});
+    if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: { tiktokError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1130,10 +1421,14 @@ async function publishTikTokVideo(relativePath, { auto = false, long = false } =
 // ---------------------------------------------------------------- X
 
 // X's « new post » window, in the X tab already open if there is one.
-async function openX() {
-  const tab = await reuseOrOpen(xTabToReuse, 'https://x.com/compose/post');
+async function openX({ reuse = true } = {}) {
+  const tab = reuse ? await reuseOrOpen(xTabToReuse, 'https://x.com/compose/post')
+    : await chrome.tabs.create({ url: 'https://x.com/compose/post', active: false });
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
   while (Date.now() - start < 90000) {
+    ensureNotCancelled();
     const current = await chrome.tabs.get(tab.id);
     const url = current.url || current.pendingUrl || '';
     if (/\/login|\/i\/flow\/(login|signup)|\/logout/.test(url)) throw new Error('Connecte-toi d’abord à X dans ce navigateur, puis relance.');
@@ -1159,53 +1454,143 @@ function xText(text, link = '') {
   return link ? `${body}\n\n${link}` : body;
 }
 
-async function sendToX({ text, mediaPath, title, channel, path }) {
+async function sendToX({ text, mediaPath, title, channel, path, auto = false }) {
   await chrome.storage.session.set({ job: { running: true, source: 'x', kind: 'x', path, title, channel, message: 'Ouverture de X…', startedAt: Date.now() } });
-  const tabId = await openX();
-  await whileShown(tabId, async () => {
+  const tabId = await openX({ reuse: !auto });
+  try { await whileShown(tabId, async () => {
     await setJob({ message: 'Texte du post…' });
     await stepIn(tabId, '__kappgenX', 'writePost', { text });
     if (mediaPath) {
       await setJob({ message: 'Envoi du média à X…' });
-      await stepIn(tabId, '__kappgenX', 'addMedia', { path: mediaPath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(mediaPath)}`) });
+      await stepIn(tabId, '__kappgenX', 'addMedia', { path: mediaPath, src: await bridgeSource(tabId, mediaPath) });
       await sleep(3000);
     }
     await setJob({ message: 'Publication sur X…' });
     await stepIn(tabId, '__kappgenX', 'send');
-  });
+  }); } finally { await stepIn(tabId, 'KappKit', 'cleanup').catch(() => {}); }
   closeStudioTab(tabId); // only a tab opened for this post is closed
 }
 
 // A video already on YouTube: its title and link, with its Short attached
 // when there is one (X takes short videos; the long one stays a link).
 async function publishXVideo(relativePath, { auto = false } = {}) {
+  let video = null;
+  let attempted = false;
   try {
     const { sent } = await folderQueue();
-    const video = sent.find((item) => item.relative_path === relativePath);
+    video = sent.find((item) => item.relative_path === relativePath);
     if (!video || !video.youtube_id) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
+    attempted = true;
     await sendToX({ text: xText(video.title, `https://youtu.be/${video.youtube_id}`), mediaPath: video.vertical_path || null,
-      title: video.title, channel: video.channel_name, path: relativePath });
+      title: video.title, channel: video.channel_name, path: relativePath, auto });
     await folder('mark', { path: relativePath, status: 'published', data: { xPublishedAt: new Date().toISOString() } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur X.' });
   } catch (error) {
     const message = friendly(error);
-    await folder('mark', { path: relativePath, status: 'published', data: { xError: message } }).catch(() => {});
+    if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: { xError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
 
 // A post of the posts folder: its text, and its photo or video.
 async function publishXPost(postPath, { auto = false } = {}) {
-  const post = (await postsList()).find((p) => p.path === postPath);
+  const post = await findPost(postPath);
   try {
-    if (!post) throw new Error('Post introuvable (déplacé ?).');
+    requireValidPost(post);
     await sendToX({ text: xText(post.text), mediaPath: post.video_path || post.image_path || null,
-      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath });
+      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath, auto });
     await folder('markPost', { path: postPath, patch: { x: { statut: 'publie', published_at: new Date().toISOString() } } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur X.' });
   } catch (error) {
     const message = friendly(error);
-    await folder('markPost', { path: postPath, patch: { x: { statut: 'echec', erreur: message } } }).catch(() => {});
+    if (post && !post.configuration_error) await folder('markPost', { path: postPath, patch: { x: { statut: 'echec', erreur: message } } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// ---------------------------------------------------------------- LinkedIn
+
+// LinkedIn's « Commencer un post » window, in the LinkedIn tab already open if there is one.
+const LINKEDIN_COMPOSE = 'https://www.linkedin.com/feed/?shareActive=true';
+async function openLinkedin({ reuse = true } = {}) {
+  const tab = reuse ? await reuseOrOpen(linkedinTabToReuse, LINKEDIN_COMPOSE)
+    : await chrome.tabs.create({ url: LINKEDIN_COMPOSE, active: false });
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  const start = Date.now();
+  let asked = false;
+  while (Date.now() - start < 90000) {
+    ensureNotCancelled();
+    const current = await chrome.tabs.get(tab.id);
+    const url = current.url || current.pendingUrl || '';
+    if (/\/(login|signup|checkpoint|authwall|uas\/login)/.test(url)) throw new Error('Connecte-toi d’abord à LinkedIn dans ce navigateur, puis relance.');
+    if (url.startsWith('https://www.linkedin.com/') && current.status === 'complete') {
+      if (!asked && !/shareActive=true/.test(url)) {
+        asked = true;
+        await chrome.tabs.update(tab.id, { url: LINKEDIN_COMPOSE });
+        await sleep(2500);
+        continue;
+      }
+      await sleep(1500);
+      await injectScripts(tab.id, ['lib/page-kit.js', 'linkedin.js']);
+      return tab.id;
+    }
+    await sleep(700);
+  }
+  throw new Error('LinkedIn ne s’est pas ouvert.');
+}
+
+async function sendToLinkedin({ text, mediaPath, title, channel, path, auto = false }) {
+  await chrome.storage.session.set({ job: { running: true, source: 'linkedin', kind: 'linkedin', path, title, channel, message: 'Ouverture de LinkedIn…', startedAt: Date.now() } });
+  const tabId = await openLinkedin({ reuse: !auto });
+  try { await whileShown(tabId, async () => {
+    await stepIn(tabId, '__kappgenLinkedin', 'openComposer');
+    await setJob({ message: 'Texte du post…' });
+    await stepIn(tabId, '__kappgenLinkedin', 'writePost', { text });
+    if (mediaPath) {
+      await setJob({ message: 'Envoi du média à LinkedIn…' });
+      await stepIn(tabId, '__kappgenLinkedin', 'addMedia', { path: mediaPath, src: await bridgeSource(tabId, mediaPath) });
+    }
+    await setJob({ message: 'Publication sur LinkedIn…' });
+    await stepIn(tabId, '__kappgenLinkedin', 'send');
+  }); } finally { await stepIn(tabId, 'KappKit', 'cleanup').catch(() => {}); }
+  closeStudioTab(tabId); // only a tab opened for this post is closed
+}
+
+// A video already on YouTube: its title, description start and link
+// (LinkedIn shows the YouTube preview).
+async function publishLinkedinVideo(relativePath, { auto = false } = {}) {
+  let video = null;
+  let attempted = false;
+  try {
+    const { sent } = await folderQueue();
+    video = sent.find((item) => item.relative_path === relativePath);
+    if (!video || !video.youtube_id) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
+    const intro = String(video.description || '').split(/\n\s*\n/)[0].slice(0, 600);
+    attempted = true;
+    await sendToLinkedin({ text: [video.title, intro, `https://youtu.be/${video.youtube_id}`].filter(Boolean).join('\n\n'),
+      mediaPath: null, title: video.title, channel: video.channel_name, path: relativePath, auto });
+    await folder('mark', { path: relativePath, status: 'published', data: { linkedinPublishedAt: new Date().toISOString() } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur LinkedIn.' });
+  } catch (error) {
+    const message = friendly(error);
+    if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: { linkedinError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// A post (Facebook's, or LinkedIn's own): its text, and its photo or video.
+async function publishLinkedinPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
+  try {
+    requireValidPost(post);
+    await sendToLinkedin({ text: post.text.slice(0, 3000), mediaPath: post.video_path || post.image_path || null,
+      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath, auto });
+    await folder('markPost', { path: postPath, patch: { linkedin: { statut: 'publie', published_at: new Date().toISOString() } } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur LinkedIn.' });
+  } catch (error) {
+    const message = friendly(error);
+    if (post && !post.configuration_error) await folder('markPost', { path: postPath, patch: { linkedin: { statut: 'echec', erreur: message } } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1213,10 +1598,14 @@ async function publishXPost(postPath, { auto = false } = {}) {
 // ---------------------------------------------------------------- Instagram
 
 // Instagram home, in the Instagram tab already open if there is one.
-async function openInstagram() {
-  const tab = await reuseOrOpen(instagramTabToReuse, 'https://www.instagram.com/');
+async function openInstagram({ reuse = true } = {}) {
+  const tab = reuse ? await reuseOrOpen(instagramTabToReuse, 'https://www.instagram.com/')
+    : await chrome.tabs.create({ url: 'https://www.instagram.com/', active: false });
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
   while (Date.now() - start < 90000) {
+    ensureNotCancelled();
     const current = await chrome.tabs.get(tab.id);
     const url = current.url || current.pendingUrl || '';
     if (/\/accounts\/(login|signup)|\/challenge\//.test(url)) throw new Error('Connecte-toi d’abord à Instagram dans ce navigateur, puis relance.');
@@ -1231,67 +1620,72 @@ async function openInstagram() {
 }
 
 // One vertical video to Instagram (it becomes a Reel) with its caption.
-async function sendToInstagram({ filePath, caption, title, channel, path }) {
+async function sendToInstagram({ filePath, caption, title, channel, path, auto = false }) {
   await chrome.storage.session.set({ job: { running: true, source: 'instagram', kind: 'instagram', path, title, channel, message: 'Ouverture d’Instagram…', startedAt: Date.now() } });
-  const tabId = await openInstagram();
-  await whileShown(tabId, async () => {
+  const tabId = await openInstagram({ reuse: !auto });
+  try { await whileShown(tabId, async () => {
     await stepIn(tabId, '__kappgenInstagram', 'openComposer');
     await setJob({ message: 'Envoi de la vidéo à Instagram…' });
-    await stepIn(tabId, '__kappgenInstagram', 'sendVideo', { path: filePath, src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(filePath)}`) });
+    await stepIn(tabId, '__kappgenInstagram', 'sendVideo', { path: filePath, src: await bridgeSource(tabId, filePath) });
     await stepIn(tabId, '__kappgenInstagram', 'next', { times: 2 });
     await setJob({ message: 'Légende…' });
     await stepIn(tabId, '__kappgenInstagram', 'writeCaption', { caption });
     await setJob({ message: 'Partage sur Instagram (envoi jusqu’au bout)…' });
     await stepIn(tabId, '__kappgenInstagram', 'share');
-  });
+  }); } finally { await stepIn(tabId, 'KappKit', 'cleanup').catch(() => {}); }
   closeStudioTab(tabId); // only a tab opened for this post is closed
 }
 
 // A video already on YouTube, as a Reel: needs its vertical version
 // (Instagram crops a horizontal video to a square).
 async function publishInstagramVideo(relativePath, { auto = false } = {}) {
+  let video = null;
+  let attempted = false;
   try {
     const { sent } = await folderQueue();
-    const video = sent.find((item) => item.relative_path === relativePath);
+    video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
     if (!video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier : Instagram recadrerait la vidéo.');
     const caption = [video.title, hashtags(video.tags)].filter(Boolean).join('\n\n').slice(0, 2200);
-    await sendToInstagram({ filePath: video.vertical_path, caption, title: video.title, channel: video.channel_name, path: relativePath });
+    attempted = true;
+    await sendToInstagram({ filePath: video.vertical_path, caption, title: video.title, channel: video.channel_name, path: relativePath, auto });
     await folder('mark', { path: relativePath, status: 'published', data: { instagramPublishedAt: new Date().toISOString() } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur Instagram.' });
   } catch (error) {
     const message = friendly(error);
-    await folder('mark', { path: relativePath, status: 'published', data: { instagramError: message } }).catch(() => {});
+    if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: { instagramError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
 
 // A video of the posts folder, as a Reel.
-async function publishInstagramPost(postPath) {
-  const post = (await postsList()).find((p) => p.path === postPath);
+async function publishInstagramPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
   try {
-    if (!post || !post.video_path) throw new Error('Ce post n’a pas de vidéo pour Instagram.');
-    await sendToInstagram({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath });
+    requireValidPost(post);
+    if (!post.video_path) throw new Error('Ce post n’a pas de vidéo pour Instagram.');
+    await sendToInstagram({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath, auto });
     await folder('markPost', { path: postPath, patch: { instagram: { statut: 'publie', published_at: new Date().toISOString() } } });
-    await setJob({ running: false, done: true, error: null, message: 'Publié sur Instagram.' });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur Instagram.' });
   } catch (error) {
     const message = friendly(error);
-    await folder('markPost', { path: postPath, patch: { instagram: { statut: 'echec', erreur: message } } }).catch(() => {});
+    if (post && !post.configuration_error) await folder('markPost', { path: postPath, patch: { instagram: { statut: 'echec', erreur: message } } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
 
 // A Reel (vertical video) of the posts folder.
-async function publishTikTokPost(postPath) {
-  const post = (await postsList()).find((p) => p.path === postPath);
+async function publishTikTokPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
   try {
-    if (!post || !post.video_path) throw new Error('Ce post n’a pas de vidéo pour TikTok.');
-    await sendToTikTok({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath });
+    requireValidPost(post);
+    if (!post.video_path) throw new Error('Ce post n’a pas de vidéo pour TikTok.');
+    await sendToTikTok({ filePath: post.video_path, caption: (post.text || '').slice(0, 2200), title: post.text.split('\n')[0] || 'Reel', channel: post.channel_name, path: postPath, auto });
     await folder('markPost', { path: postPath, patch: { tiktok: { statut: 'publie', published_at: new Date().toISOString() } } });
-    await setJob({ running: false, done: true, error: null, message: 'Publié sur TikTok.' });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur TikTok.' });
   } catch (error) {
     const message = friendly(error);
-    await folder('markPost', { path: postPath, patch: { tiktok: { statut: 'echec', erreur: message } } }).catch(() => {});
+    if (post && !post.configuration_error) await folder('markPost', { path: postPath, patch: { tiktok: { statut: 'echec', erreur: message } } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
 }
@@ -1309,6 +1703,7 @@ async function postPage(post) {
 // "statut": "publie" into its publication.json. A failed post is not retried
 // on its own (never a double post): it shows in the panel with its error.
 async function publishFacebookPost(post, { auto = false } = {}) {
+  requireValidPost(post);
   const page = await postPage(post);
   if (!page) throw new Error(`${post.channel_name} : lien de la page Facebook à renseigner (planning.json ou reglages-publication.json).`);
   await chrome.storage.session.set({ job: { running: true, source: 'facebook', kind: 'post', path: post.path, auto, title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', channel: post.channel_name, message: 'Ouverture de Facebook…', startedAt: Date.now() } });
@@ -1323,9 +1718,11 @@ async function publishFacebookPost(post, { auto = false } = {}) {
     const names = (await folderSettings()).facebookGroupNames || {};
     const count = Math.min(SHARE_BATCH, await groupTarget(post, plan));
     const during = plan.filter((url) => names[url] && !(post.groups_shared && post.groups_shared[url] && post.groups_shared[url].statut === 'publie')).slice(0, SHARE_BATCH);
+    let groupWarning = null;
     const markDuring = (result) => {
       const picked = Array.isArray(result) ? result : (result && result.groups) || [];
       const extra = (result && Array.isArray(result.extra)) ? result.extra : [];
+      if (result && result.warning) groupWarning = result.warning;
       const lower = picked.map((n) => n.toLowerCase());
       const shared = { ...(post.groups_shared || {}) };
       const at = new Date().toISOString();
@@ -1335,29 +1732,39 @@ async function publishFacebookPost(post, { auto = false } = {}) {
     };
     if (post.type === 'reel') {
       markDuring(await publishFacebookReel({ title: '', description: post.text }, post.channel_name, page, post.video_path,
-        { groups: during.map((url) => names[url]), groupCount: count }));
+        { groups: during.map((url) => names[url]), groupCount: count, reuse: !auto }));
     } else {
-      tabId = await openFacebookReel(page);
+      tabId = await openFacebookReel(page, { reuse: !auto });
       await whileShown(tabId, async () => {
         await step(tabId, 'openPost', { photo: post.type === 'photo' });
         if (post.image_path) {
           await setJob({ message: 'Photo…' });
           await step(tabId, 'receiveFile', { kind: 'image', path: post.image_path,
-            src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(post.image_path)}`) });
+            src: await bridgeSource(tabId, post.image_path) });
           await sleep(2500);
         }
         await setJob({ message: 'Texte…' });
         await step(tabId, 'fillCaption', { caption: post.text });
         await setJob({ message: count ? `Publication sur la Page et dans ${count} groupe(s)…` : 'Publication…' });
-        markDuring(await postStep(tabId, 'sendPost', { groups: during.map((url) => names[url]), groupCount: count }));
+        markDuring(await postStep(tabId, 'sendPost', { groups: during.map((url) => names[url]), groupCount: count, expectedText: post.text }));
       });
       closeStudioTab(tabId); // only a tab opened for this post is closed
     }
     await folder('markPost', { path: post.path, patch: { statut: 'publie', published_at: new Date().toISOString(), erreur: null,
       ...(Object.keys(post.groups_shared || {}).length ? { groupes_partages: post.groups_shared } : {}) } });
     // The groups not ticked while publishing (more than 9, or no option): right after.
-    const shared = await shareInGroups(post).catch(() => null);
-    await setJob({ running: false, done: true, error: null, message: `Post publié sur Facebook${groupsText(shared)}.` });
+    let shared = null;
+    let shareWarning = null;
+    try {
+      shared = await shareInGroups(post);
+      if (shared.bad) shareWarning = `${shared.bad} partage(s) en groupe ont échoué. Utilise « Repartager » après vérification.`;
+    } catch (error) {
+      shareWarning = `Le post est publié, mais le partage en groupes a été interrompu : ${friendly(error)}`;
+    }
+    const warning = [groupWarning, shareWarning].filter(Boolean).join(' ');
+    const groupSuffix = warning ? ` ${warning}` : '';
+    await setJob({ running: false, done: true, error: null, ...(warning ? { warning } : {}),
+      message: `Post publié sur Facebook${groupsText(shared)}.${groupSuffix}` });
   } catch (error) {
     const message = friendly(error);
     await folder('markPost', { path: post.path, patch: { statut: 'echec', erreur: message } }).catch(() => {});
@@ -1371,7 +1778,7 @@ async function publishFacebookPost(post, { auto = false } = {}) {
 // otherwise the panel's list when « Partager dans les groupes » is ticked.
 // One group after another, with a pause, so Facebook does not take it for spam.
 const GROUP_PAUSE_MS = 40000;
-const MAX_GROUPS = 25;   // groups for one post
+const MAX_GROUPS = 9;    // conservative anti-spam ceiling for one post
 const POOL_MAX = 500;    // groups in the list a post's groups are drawn from
 const SHARE_BATCH = 9;   // Facebook's share window takes 9 groups at most at once
 function groupUrl(url) {
@@ -1505,6 +1912,9 @@ async function shareAllAtOnce(post, urls) {
     if (confirmed) throw error;
     await step(tabId, 'closeDialogs').catch(() => {});
     return [];
+  } finally {
+    await step(tabId, 'cleanup').catch(() => {});
+    await closeStudioTab(tabId);
   }
 }
 
@@ -1518,9 +1928,9 @@ async function shareInGroups(post) {
   let todo = groups.filter((url) => !(done[url] && done[url].statut === 'publie')).slice(0, Math.max(0, target - already));
   let ok = already;
   let bad = 0;
-  // By packs of 9 (25 groups = 3 shares), as long as Facebook offers the boxes.
+  // One conservative pack of at most 9, as long as Facebook offers the boxes.
   for (let pack = 0; todo.length > 1 && pack < Math.ceil(MAX_GROUPS / SHARE_BATCH); pack += 1) {
-    if (pack) await sleep(GROUP_PAUSE_MS);
+    if (pack) await publicationSleep(GROUP_PAUSE_MS);
     if (await isPaused()) { todo = []; break; }
     let atOnce = [];
     try {
@@ -1542,14 +1952,15 @@ async function shareInGroups(post) {
     await folder('markPost', { path: post.path, patch: { groupes_partages: done } }).catch(() => {});
     if (!todo.length) break;
   }
-  if (todo.length && ok) await sleep(GROUP_PAUSE_MS);
+  if (todo.length && ok) await publicationSleep(GROUP_PAUSE_MS);
   const media = post.video_path || post.image_path;
   for (const [i, url] of todo.entries()) {
-    if (i) await sleep(GROUP_PAUSE_MS);
+    if (i) await publicationSleep(GROUP_PAUSE_MS);
     if (await isPaused()) break; // « Pause » stops the remaining groups
     await setJob({ message: `Partage dans les groupes Facebook (${i + 1}/${todo.length})…` });
+    let tabId = null;
     try {
-      const tabId = await openFacebookReel(url);
+      tabId = await openFacebookReel(url);
       const tab = await chrome.tabs.get(tabId);
       if (!/\/groups\//.test(tab.url || '')) throw new Error('Groupe introuvable, ou tu n’en es pas membre avec ce compte.');
       const name = String(tab.title || '').replace(/\s*[|·-]\s*Facebook\s*$/i, '').replace(/^\(\d+\)\s*/, '').trim();
@@ -1558,17 +1969,22 @@ async function shareInGroups(post) {
         await step(tabId, 'openPost', { photo: !!media });
         if (media) {
           await step(tabId, 'receiveFile', { kind: post.video_path ? 'video' : 'image', path: media,
-            src: chrome.runtime.getURL(`bridge.html?path=${encodeURIComponent(media)}`) });
+            src: await bridgeSource(tabId, media) });
           await sleep(post.video_path ? 3000 : 2500);
         }
         await step(tabId, 'fillCaption', { caption: post.text });
-        await postStep(tabId, 'sendPost', { timeout: post.video_path ? 15 * 60000 : 90000 });
+        await postStep(tabId, 'sendPost', { timeout: post.video_path ? 15 * 60000 : 90000, expectedText: post.text });
       });
       done[url] = { statut: 'publie', published_at: new Date().toISOString() };
       ok += 1;
     } catch (error) {
       done[url] = { statut: 'echec', erreur: friendly(error) };
       bad += 1;
+    } finally {
+      if (tabId) {
+        await step(tabId, 'cleanup').catch(() => {});
+        await closeStudioTab(tabId);
+      }
     }
     await folder('markPost', { path: post.path, patch: { groupes_partages: done } }).catch(() => {});
   }
@@ -1646,7 +2062,8 @@ const STALE_JOB_MS = 30 * 60 * 1000;
 // Wakes up exactly at the time of the next Facebook post (the regular pass
 // is only every 5 minutes, and Chrome may have put the extension to sleep).
 async function planNextDue() {
-  const posts = await postsList().catch(() => []);
+  const posts = [];
+  for (const net of ['facebook', ...POST_NETS]) posts.push(...await postsList(net).catch(() => []));
   let next = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at > Date.now())
     .reduce((min, p) => Math.min(min, p.due_at), Infinity);
   // Catching up late posts: wake up for the next one of them.
@@ -1666,6 +2083,104 @@ async function autoTick() {
 }
 
 const isPaused = async () => !!(await chrome.storage.local.get('autoPaused')).autoPaused;
+
+// After a publication that went well, straight on to the next step (the
+// same publication on the next network). After a failure, the regular pass.
+async function chainIfDone(since) {
+  const { job } = await chrome.storage.session.get('job');
+  if (job && job.done && !job.error && (job.startedAt || 0) >= since) autoTick();
+}
+
+// What is already out (a video on YouTube, a post on Facebook) goes on to
+// the person's other networks: all the networks of one publication, in
+// order, before the next publication. A network with its own folder
+// (Réglages → Dossiers) only takes that folder's posts. Nothing is retried
+// on its own after a failure (the panel shows « Réessayer »).
+async function spreadNext(settings, sent, own) {
+  const on = (net) => networkOn(settings, net);
+  // « Mes vidéos YouTube sur ma Page » is on by default: without a start
+  // date kept, « since now » moved at every pass and nothing ever went
+  // (before 1.18.1). From now on, plus the videos of the last 7 days.
+  if (!settings.facebookFromYoutubeSince) {
+    settings.facebookFromYoutubeSince = Date.now() - 7 * 24 * 3600000;
+    await chrome.storage.local.set({ folder: settings });
+  }
+  // X / LinkedIn ticked before their start date was kept: from now on.
+  for (const net of ['x', 'linkedin']) {
+    if (on(net) && !settings[`${net}Since`]) {
+      settings[`${net}Since`] = Date.now();
+      await chrome.storage.local.set({ folder: settings });
+    }
+  }
+  const after = (v, since) => {
+    const boundary = typeof since === 'number' ? since : Date.parse(since || '') || Infinity;
+    return !!v.published_at && v.published_at >= boundary;
+  };
+  const videos = sent.filter((v) => v.youtube_id).sort((a, b) => (a.published_at || 0) - (b.published_at || 0));
+  const todo = [];
+  for (const v of videos) {
+    const ch = ownOf(settings, v);
+    const fb = on('facebook') && ch.facebook && ch.facebookPageUrl && after(v, ch.facebookSince || 1);
+    const steps = [
+      // Its Short (vertical version) on YouTube.
+      [on('youtube') && v.vertical_path && !v.short_youtube_id && !v.short_error && ch.auto !== false,
+        () => publishShortOnly(v.relative_path, { auto: true })],
+      // On the Facebook Page: the long video, then its Short as a Reel.
+      [fb && !v.facebook_published_at && !v.facebook_error, () => publishFacebookOnly(v.relative_path, { auto: true, as: 'video' })],
+      // The Reel once the Short is on YouTube (or when YouTube's Short failed / is not used).
+      [fb && v.vertical_path && (v.short_youtube_id || v.short_error || !on('youtube')) && !v.facebook_reel_at && !v.facebook_reel_error,
+        () => publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' })],
+      [on('tiktok') && settings.tiktokAuto && !own('tiktok') && !v.tiktok_published_at && !v.tiktok_error && after(v, settings.tiktokSince),
+        () => publishTikTokVideo(v.relative_path, { auto: true })],
+      [on('instagram') && settings.instagramAuto && !own('instagram') && v.vertical_path && !v.instagram_published_at && !v.instagram_error
+        && after(v, settings.instagramSince), () => publishInstagramVideo(v.relative_path, { auto: true })],
+      [on('x') && !own('x') && settings.xFromYoutube !== false && !v.x_published_at && !v.x_error && after(v, settings.xSince),
+        () => publishXVideo(v.relative_path, { auto: true })],
+      [on('linkedin') && !own('linkedin') && settings.linkedinFromYoutube !== false && !v.linkedin_published_at && !v.linkedin_error && after(v, settings.linkedinSince),
+        () => publishLinkedinVideo(v.relative_path, { auto: true })],
+    ];
+    const step = steps.find(([due]) => due);
+    // The oldest publication first, video or post.
+    if (step) { todo.push([v.published_at || 0, step[1]]); break; }
+  }
+  // Facebook's posts on X and LinkedIn: once out on Facebook; without
+  // Facebook, at their own time.
+  const now = Date.now();
+  const fbOn = on('facebook');
+  const posts = (await postsList().catch(() => []))
+    .sort((a, b) => (Date.parse(a.published_at || 0) || a.due_at || 0) - (Date.parse(b.published_at || 0) || b.due_at || 0));
+  find: for (const p of posts) {
+    for (const [net, send] of [['x', publishXPost], ['linkedin', publishLinkedinPost]]) {
+      if (!on(net) || own(net) || settings[`${net}FromFacebook`] === false || p[`${net}_statut`]) continue;
+      const savedSince = settings[`${net}Since`];
+      const since = typeof savedSince === 'number' ? savedSince : Date.parse(savedSince || '') || Infinity;
+      const due = p.statut === 'publie' ? p.published_at && Date.parse(p.published_at) >= since
+        : !fbOn && p.statut === 'a_publier' && p.due_at && p.due_at <= now && p.due_at >= since;
+      if (due) { todo.push([Date.parse(p.published_at || 0) || p.due_at || 0, () => send(p.path, { auto: true })]); break find; }
+    }
+  }
+  todo.sort((a, b) => a[0] - b[0]);
+  if (!todo.length) return false;
+  await todo[0][1]();
+  return true;
+}
+
+// The next post of a network's own folder whose time has come (TikTok and
+// Instagram need a video).
+async function ownPostNext(settings) {
+  const ready = [];
+  for (const net of POST_NETS) {
+    if (!networkOn(settings, net)) continue;
+    ready.push(...(await postsList(net).catch(() => []))
+      .filter((p) => p.ready && (!['tiktok', 'instagram'].includes(net) || p.video_path)));
+  }
+  ready.sort((a, b) => (a.due_at || 0) - (b.due_at || 0));
+  const post = ready[0];
+  if (!post) return false;
+  const send = { x: publishXPost, linkedin: publishLinkedinPost, tiktok: publishTikTokPost, instagram: publishInstagramPost }[post.network];
+  await send(post.path, { auto: true });
+  return true;
+}
 
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
@@ -1717,15 +2232,22 @@ async function autoPass() {
   await autoState('ok');
   await chrome.storage.session.remove('permissionNotified');
   if ((await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
-  // A post whose time has come goes first: it has a time, a new video has not.
+  const { videos, sent } = await folderQueue();
+  const own = await ownFolders();
+  const passAt = Date.now();
+  // What is already out somewhere goes on to the other networks first: one
+  // publication on all its networks, then the next one.
+  if (await spreadNext(settings, sent, own)) { await chainIfDone(passAt); return; }
+  // A post whose time has come: it has a time, a new video has not.
   const duePost = networkOn(settings, 'facebook') ? await nextDuePost() : null;
   if (duePost) {
     await chrome.storage.local.set({ lastAutoPostAt: Date.now() });
     await publishFacebookPost(duePost, { auto: true });
-    autoPass(); // another may be due
+    await chainIfDone(passAt); // then the same post on the other networks
     return;
   }
-  const { videos, sent } = await folderQueue();
+  // Each network's own posts (its folder, or <NETWORK>/A-PUBLIER), at their time.
+  if (await ownPostNext(settings)) { await chainIfDone(passAt); return; }
   let next = null;
   for (const candidate of networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
@@ -1742,62 +2264,6 @@ async function autoPass() {
     await publish('folder', next.id, visibility, { auto: true });
     autoTick(); // more may be waiting
     return;
-  }
-  // TikTok, when switched on: videos published on YouTube since then
-  // (vertical version if any, otherwise the video; never retried after a failure).
-  if (settings.tiktokAuto && networkOn(settings, 'tiktok')) {
-    const next = sent.find((v) => v.youtube_id && !v.tiktok_published_at && !v.tiktok_error
-      && v.published_at && v.published_at >= (settings.tiktokSince || Infinity));
-    if (next) {
-      await publishTikTokVideo(next.relative_path, { auto: true });
-      return;
-    }
-  }
-  // The Short of a video already on YouTube whose vertical version came later
-  // (never retried after a failure: the panel shows it with « Réessayer »).
-  if (networkOn(settings, 'youtube')) {
-    const shortNext = sent.find((v) => v.youtube_id && v.vertical_path && !v.short_youtube_id && !v.short_error
-      && ownOf(settings, v).auto !== false);
-    if (shortNext) {
-      await publishShortOnly(shortNext.relative_path, { auto: true });
-      return;
-    }
-  }
-  // Instagram, when its automatic mode is on: videos with a vertical version
-  // published on YouTube since then.
-  if (settings.instagramAuto && networkOn(settings, 'instagram')) {
-    const igNext = sent.find((v) => v.youtube_id && v.vertical_path && !v.instagram_published_at && !v.instagram_error
-      && v.published_at && v.published_at >= (settings.instagramSince || Infinity));
-    if (igNext) {
-      await publishInstagramVideo(igNext.relative_path, { auto: true });
-      return;
-    }
-  }
-  // X, when ticked in « Réseaux utilisés »: what is published from then on
-  // (YouTube videos, then the posts already out on Facebook), never retried
-  // on its own after a failure.
-  if (networkOn(settings, 'x') && settings.xSince) {
-    const xNext = sent.find((v) => v.youtube_id && !v.x_published_at && !v.x_error && v.published_at && v.published_at >= settings.xSince);
-    if (xNext) { await publishXVideo(xNext.relative_path, { auto: true }); return; }
-    const xPost = (await postsList().catch(() => [])).find((p) => p.statut === 'publie' && !p.x_statut
-      && p.published_at && Date.parse(p.published_at) >= settings.xSince);
-    if (xPost) { await publishXPost(xPost.path, { auto: true }); return; }
-  }
-  // Then a video already on YouTube, for a channel whose Facebook publishing
-  // is automatic (videos published on YouTube since it was switched on).
-  // (the long video as a video post, then its Short as a Reel).
-  for (const v of sent) {
-    const own = ownOf(settings, v);
-    if (!own.facebook || !own.facebookPageUrl || !v.youtube_id) continue;
-    if (!v.published_at || v.published_at < (own.facebookSince || 0)) continue;
-    if (!v.facebook_published_at && !v.facebook_error) {
-      await publishFacebookOnly(v.relative_path, { auto: true, as: 'video' });
-      return;
-    }
-    if (v.vertical_path && v.short_youtube_id && !v.facebook_reel_at && !v.facebook_reel_error) {
-      await publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' });
-      return;
-    }
   }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
   let stale = null;
@@ -1910,32 +2376,19 @@ chrome.notifications.onClicked.addListener(async (id) => {
   if (id !== 'kappgen-folder-access') return;
   await askAccess({ force: true }).catch(() => {});
 });
-// Copies of KappGen Publish with another id (the ones installed before 1.16.14
-// fixed the id): switched off at once, so a post never goes out twice. Chrome
-// does not let an extension remove another one without its own confirmation
-// window, so they stay listed (switched off) in chrome://extensions.
-const isOldCopy = (e) => e.id !== chrome.runtime.id && e.type === 'extension'
-  && /^KappGen (Publish|Uploader)/i.test(e.name || '') && !/libre/i.test(e.name || '');
-async function oldCopies() {
-  const all = await chrome.management.getAll().catch(() => []);
-  return all.filter(isOldCopy);
-}
-async function disableOldCopies() {
-  for (const e of await oldCopies()) if (e.enabled) await chrome.management.setEnabled(e.id, false).catch(() => {});
-}
-chrome.runtime.onStartup.addListener(() => { heartbeat(); resume(); disableOldCopies(); });
-chrome.runtime.onInstalled.addListener(() => { heartbeat(); resume(); closeOldKeeper(); disableOldCopies(); });
-disableOldCopies();
+chrome.runtime.onStartup.addListener(() => { heartbeat(); resume(); });
+chrome.runtime.onInstalled.addListener(() => { heartbeat(); resume(); closeOldKeeper(); });
 resume(); // service worker restarted while an upload was being followed
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.target === 'offscreen') return false;
   const handlers = {
+    consumeBridgeGrant: () => consumeBridgeGrant(message.token, sender),
     account: () => api('/auth/session').catch((error) => { if (error.status === 401) return null; throw error; }),
     login: () => api('/auth/login', { method: 'POST', body: JSON.stringify({ email: message.email, password: message.password }) }),
     logout: async () => { await chrome.storage.local.remove(['publishAccess', 'pendingOrder']); return api('/auth/logout', { method: 'POST' }); },
     status: () => api('/studio-upload/status'),
-    queue: () => api('/studio-upload/queue'),
+    queue: async () => (await isLocalApp() ? api('/studio-upload/queue') : { videos: [], host_storage_configured: false }),
     folderQueue: () => folderQueue(),
     folderMark: () => folder('mark', { path: message.path, status: message.status }),
     channelVideos: () => channelVideos(message.channelId),
@@ -1949,12 +2402,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       const post = (await postsList()).find((p) => p.path === message.path);
-      if (!post) throw new Error('Post introuvable (déplacé ?).');
+      requireValidPost(post);
       for (const [url, state] of Object.entries(post.groups_shared || {})) if (state.statut === 'echec') delete post.groups_shared[url];
       await chrome.storage.session.set({ job: { running: true, source: 'facebook', kind: 'groups', path: post.path,
         title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', message: 'Partage dans les groupes Facebook…', startedAt: Date.now() } });
       shareInGroups(post).then(
-        (r) => setJob({ running: false, done: true, error: r.bad ? `${r.bad} groupe(s) en échec.` : null, message: `Partagé dans ${r.ok} groupe(s) sur ${r.total}.` }),
+        (r) => setJob({ running: false, done: true, error: null,
+          ...(r.bad ? { warning: `${r.bad} groupe(s) en échec.` } : {}), message: `Partagé dans ${r.ok} groupe(s) sur ${r.total}.` }),
         (e) => setJob({ running: false, done: false, error: friendly(e), message: friendly(e) }));
       return { started: true };
     },
@@ -1963,7 +2417,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       const post = (await postsList()).find((p) => p.path === message.path);
-      if (!post) throw new Error('Post introuvable (déplacé ?).');
+      requireValidPost(post);
       if (!await postPage(post)) throw new Error('Ajoute d’abord le lien de ta page Facebook (en haut de l’onglet Facebook).');
       publishFacebookPost(post).catch(() => {}); // runs on; the panel follows chrome.storage
       return { started: true };
@@ -1979,9 +2433,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Opens the payment page; the order is checked when the creator comes back.
     subscribe: async () => {
       const data = await api('/publish/checkout', { method: 'POST', body: JSON.stringify({ provider: message.provider, offer: message.offer || 'monthly' }) });
+      const redirectUrl = safeRedirectUrl(data.redirect_url);
+      if (!data.order_id) throw new Error('Réponse de paiement incomplète.');
       await chrome.storage.local.set({ pendingOrder: data.order_id });
-      await chrome.tabs.create({ url: data.redirect_url, active: true });
-      return data;
+      await chrome.tabs.create({ url: redirectUrl, active: true });
+      return { ...data, redirect_url: redirectUrl };
     },
     checkPayment: async () => {
       const { pendingOrder } = await chrome.storage.local.get('pendingOrder');
@@ -2031,9 +2487,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      requireValidPost(await findPost(message.path));
       publishXPost(message.path).catch(() => {});
       return { started: true };
     },
+    linkedin: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishLinkedinVideo(message.path).catch(() => {});
+      return { started: true };
+    },
+    linkedinPost: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      requireValidPost(await findPost(message.path));
+      publishLinkedinPost(message.path).catch(() => {});
+      return { started: true };
+    },
+    networkPosts: async () => postsList(message.net),
+    folders: async () => folder('folders'),
     tiktok: async () => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
@@ -2059,13 +2533,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      requireValidPost(await findPost(message.path));
       publishInstagramPost(message.path).catch(() => {});
       return { started: true };
     },
     instagramAuto: async () => {
       const settings = await folderSettings();
       settings.instagramAuto = !!message.on;
-      if (message.on && !settings.instagramSince) settings.instagramSince = new Date().toISOString();
+      if (message.on && !settings.instagramSince) settings.instagramSince = Date.now();
       await chrome.storage.local.set({ folder: settings });
       return { on: settings.instagramAuto };
     },
@@ -2073,6 +2548,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      requireValidPost(await findPost(message.path));
       publishTikTokPost(message.path).catch(() => {});
       return { started: true };
     },
@@ -2114,7 +2590,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return {};
     },
     unblockJob: async () => {
-      await chrome.storage.session.set({ job: { running: false, done: false, error: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.', message: 'Envoi arrêté à la main. Vérifie sur YouTube / Facebook s’il est parti avant de relancer.' } });
+      await chrome.storage.session.set({ job: { running: false, done: false, error: 'Envoi arrêté à la main. Vérifie sur le réseau concerné s’il est parti avant de relancer.', message: 'Envoi arrêté à la main. Vérifie sur le réseau concerné s’il est parti avant de relancer.' } });
       return {};
     },
     // Panel opened: look for a newer version (at most once every 15 min).

@@ -1,76 +1,86 @@
 # KappGen Publish
 
-Extension Chrome qui **publie toute seule tes vidéos finies sur YouTube (et Facebook)** à partir d'un dossier de ton ordinateur : elle trouve la vidéo, son titre, sa description, ses mots-clés et sa miniature, remplit YouTube Studio à ta place et suit l'envoi jusqu'au bout.
+KappGen Publish est une extension Chrome Manifest V3 qui publie des vidéos et des posts depuis un dossier local vers YouTube, Facebook, TikTok, Instagram, X et LinkedIn. Elle détecte les médias prêts, lit leur fiche, respecte leur programmation et garde une trace locale pour éviter les doublons.
 
-## ⬇️ Télécharger
+## Installation
 
-**[Télécharger la dernière version (kappgen-uploader.zip)](https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip)**
+Prérequis : Google Chrome 116 ou plus récent et un compte KappGen avec un essai ou un abonnement actif.
 
-Ce lien donne toujours la version la plus récente. Historique des versions : [Releases](https://github.com/rosby17/kappgen-uploader/releases).
+1. Télécharge [la dernière archive](https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip).
+2. Vérifie facultativement son empreinte avec le fichier `.sha256` publié à côté.
+3. Décompresse l’archive dans un emplacement permanent.
+4. Ouvre `chrome://extensions`, active le mode développeur, puis choisis « Charger l’extension non empaquetée ».
+5. Ouvre KappGen Publish, connecte-toi et sélectionne le dossier principal. Dans la boîte de dialogue Chrome, choisis « Autoriser à chaque visite ».
 
-## Installer (2 minutes)
+Les installateurs guidés sont disponibles sur la [page d’installation](https://rosby17.github.io/kappgen-uploader/). Ils vérifient l’empreinte SHA-256 et remplacent une version existante de manière atomique.
 
-1. Télécharge le fichier ci-dessus et **décompresse-le** (double-clic) : tu obtiens un dossier `kappgen-uploader`.
-2. Dans Chrome, ouvre l'adresse `chrome://extensions`.
-3. En haut à droite, active **« Mode développeur »**.
-4. Clique **« Charger l'extension non empaquetée »** et choisis le dossier `kappgen-uploader`.
-5. Épingle l'extension (icône puzzle 🧩 → punaise), puis clique sur son icône : le panneau KappGen Publish s'ouvre à droite.
-6. Connecte-toi à ton compte KappGen ([app.kappgen.com](https://app.kappgen.com)), puis **« Choisir le dossier des vidéos »** → le dossier où tu ranges tes vidéos finies → **« Autoriser à chaque visite »**.
+> L’édition Chrome Web Store et l’édition installée manuellement peuvent avoir des identifiants différents. Le stockage Chrome et les autorisations de dossiers ne migrent pas automatiquement entre ces éditions. N’active pas les automatisations dans les deux en même temps.
 
-Garde le dossier décompressé à sa place : Chrome l'utilise en permanence.
+## Organisation minimale
 
-### Mettre à jour
-À partir de la 1.16.1, l'extension prévient (notification) quand une nouvelle version sort. Télécharge à nouveau le zip, remplace l'ancien dossier par le nouveau (même emplacement), puis sur `chrome://extensions` clique la flèche **↻** de KappGen Publish. Tes réglages sont conservés.
+Un dossier contenant une vidéo représente une publication. Les noms sont libres et KappGen descend dans les sous-dossiers.
 
-## Ranger tes vidéos
-
-**Un dossier = une publication.** Range chaque vidéo finie dans son propre dossier, avec son image et un petit fichier texte. Les noms sont libres, et tu peux ranger comme tu veux (par mois, par thème…) : l'extension descend dans tous les sous-dossiers.
-
-```
+```text
 Mes vidéos/
-├── Recette du pain/
-│   ├── video.mp4        ← la vidéo
-│   ├── image.jpg        ← la miniature (1280×720, moins de 2 Mo)
-│   └── texte.txt        ← 1re ligne = titre, le reste = description
-└── Octobre/
-    └── Astuce frigo/
-        ├── astuce.mp4
-        ├── miniature.png
-        ├── legende.txt
-        └── short.mp4    ← (facultatif) version verticale : Short / Reel
+└── Recette du pain/
+    ├── video.mp4        # vidéo d’au moins 5 Mo
+    ├── image.jpg        # miniature, moins de 2 Mo
+    ├── texte.txt        # première ligne = titre, suite = description
+    └── short.mp4        # facultatif : Short/Reel vertical
 ```
 
-- Seules les vidéos ajoutées **après** le choix du dossier partent toutes seules ; les autres attendent un clic.
-- Un dossier qui commence par `_` est ignoré (brouillons, travail en cours).
-- Après publication, `DEJA-PUBLIEE.txt` apparaît dans le dossier (ne l'efface pas).
-- Plusieurs chaînes : un profil Chrome par chaîne.
+Règles de sécurité :
 
-Tout est aussi expliqué dans l'onglet **Aide** du panneau. Règles complètes : **[NORME-PUBLICATION.md](NORME-PUBLICATION.md)**.
+- Une vidéo sans titre reste manuelle.
+- Une vidéo modifiée depuis moins de dix minutes est considérée comme incomplète.
+- Seules les vidéos terminées après le choix du dossier sont éligibles à l’automatisation ; les fichiers déjà présents attendent un clic.
+- Un dossier ou fichier commençant par `.` ou `_` est ignoré.
+- Les états `.kappgen.json`, `.kappgen-publications.json` et `DEJA-PUBLIEE.txt` empêchent les doubles envois : ne les supprime pas.
+- Un fichier d’état illisible ou corrompu bloque la file au lieu d’être assimilé à un historique vide.
+- Un `publication.json` invalide bloque le post concerné et affiche son erreur ; il n’est jamais publié avec des valeurs implicites.
 
-## Ce qu'elle fait
-- Envoie chaque nouvelle vidéo prête (non répertoriée par défaut, ou publique, privée, programmée aux heures choisies), chaîne par chaîne.
-- Met YouTube à jour toute seule quand tu modifies la fiche ou la miniature d'une vidéo déjà envoyée.
-- Ne renvoie jamais une vidéo déjà envoyée (suivi dans un fichier `.kappgen.json` à côté de chaque vidéo : ne pas l'effacer).
-- Facebook : publie aussi la vidéo (ou sa version verticale en Reel) sur la page de la chaîne si tu l'actives.
+La spécification complète se trouve dans [NORME-PUBLICATION.md](NORME-PUBLICATION.md).
 
-Chrome doit rester ouvert et connecté au compte Google de tes chaînes YouTube (et à Facebook si besoin).
+## Fonctions
 
-## Confidentialité
-L'extension lit uniquement le dossier que tu choisis et n'envoie tes vidéos qu'à YouTube / Facebook, depuis ton propre navigateur. Détails : [politique de confidentialité](PRIVACY.md).
+- YouTube : vidéos longues, Shorts, titres, descriptions, tags, miniatures, visibilité et créneaux de quinze minutes.
+- Facebook : vidéos, Reels, posts texte/photo/vidéo et partage prudent dans neuf groupes maximum.
+- TikTok et Instagram : vidéos et Reels depuis les médias verticaux ou les dossiers propres au réseau.
+- X et LinkedIn : posts, médias compatibles et relais des vidéos YouTube.
+- Un dossier principal ou un dossier dédié par réseau.
+- Une seule publication active à la fois ; une publication termine sa distribution avant le passage à la suivante.
+- Les actions automatiques utilisent un onglet dédié en arrière-plan afin de ne pas écraser un brouillon ouvert par l’utilisateur.
+- Mise à jour automatique des métadonnées YouTube lorsque la fiche ou la miniature change.
+- Bilan quotidien par e-mail uniquement si l’utilisateur l’active.
+- Pour une vidéo issue de l’application KappGen locale, l’autorisation Chrome `debugger` remet à YouTube Studio le fichier désigné par son chemin, puis l’extension se détache immédiatement. Cette voie est refusée si le serveur configuré n’est pas `localhost` ou `127.0.0.1`. Chrome impose que l’autorisation figure dans l’installation ; le mode dossier ne l’utilise jamais.
 
-## Pour le développeur
-- Code de l'extension : `extension/` (Manifest V3, aucun code distant).
-- Publier une nouvelle version : augmenter `version` dans `extension/manifest.json`, puis `./publier-version.sh` (crée la Release GitHub avec `kappgen-uploader.zip` ; pour le Chrome Web Store, envoyer `dist/kappgen-uploader-chrome-web-store.zip`, le même sans `key`).
-- `key` dans `manifest.json` fixe l'identifiant de l'extension (`ohgfmmejmlbdpflenlkikbnebgfegkic`) quel que soit le dossier d'où elle est chargée : ses réglages, dossiers choisis et connexion sont gardés d'une mise à jour à l'autre et d'un dossier à l'autre. Ne pas la retirer ni la changer.
-- Fiche Chrome Web Store (textes, justifications, images) : `store/`.
+Chrome doit rester ouvert et les comptes des réseaux choisis doivent déjà être connectés dans ce profil Chrome. Les interfaces des plateformes peuvent changer ; en cas d’échec, l’extension conserve l’onglet et affiche l’étape à terminer ou à relancer.
 
-## Recette de publication (protection, 1.17.0)
-Les sélecteurs et noms des boutons de YouTube Studio, Facebook, TikTok et Instagram ne sont PAS dans l'extension : le serveur KappGen les envoie (`GET /api/publish/recipe`, fichier `src/publish/recipe.json` du backend) aux seuls comptes en essai ou abonnés, marqués par compte. Les scripts de page les lisent avec `S('clé')` / `X('clé')` (lib/recette.js). RÈGLE : tout nouveau sélecteur ou texte de bouton va dans recipe.json (serveur), jamais en dur dans un script. Quand un site change : corriger recipe.json et redéployer le serveur, sans nouvelle version de l'extension.
+## Confidentialité et sécurité
 
-## Règle : une mise à jour ne perd JAMAIS les réglages d'un utilisateur (Roosevelt, 02/10)
-Dossiers choisis, liens des pages, réseaux cochés, groupes, horaires, abonnement : tout ce que l'utilisateur a réglé doit survivre à n'importe quelle mise à jour.
-- Ne jamais changer ni retirer la clé `"key"` du manifest (elle fixe l'identifiant de l'extension : un autre identifiant = une extension neuve, réglages perdus).
-- Ne jamais vider `chrome.storage.local` ni la base IndexedDB des dossiers. Une nouvelle version qui change la forme d'un réglage le CONVERTIT (lit l'ancien format, écrit le nouveau), elle ne l'efface pas.
-- Un nouveau réglage a une valeur par défaut raisonnable : l'utilisateur n'a rien à refaire.
-- La mise à jour se fait en remplaçant les fichiers dans le même dossier (commande d'installation), jamais en supprimant puis réinstallant l'extension.
+L’accès au disque est limité aux dossiers explicitement choisis. Lors d’un envoi, le fichier est remis à la page du réseau par une autorisation à usage unique, liée à l’onglet et valable deux minutes ; aucun chemin local n’est exposé au site. L’extension ne lit pas les mots de passe des réseaux.
 
+KappGen télécharge une configuration de publication déclarative (sélecteurs et expressions régulières), validée avant utilisation et conservée sept jours au maximum pour la continuité hors ligne. Aucun JavaScript distant n’est téléchargé ou exécuté. Voir la [politique de confidentialité](PRIVACY.md) et [SECURITY.md](SECURITY.md).
+
+## Développement
+
+Le code de l’extension se trouve dans `extension/`. Aucun paquet d’exécution n’est nécessaire.
+
+```bash
+npm run check
+```
+
+Cette commande vérifie le manifeste, les scripts, les ressources HTML et exécute les tests métier. La CI lance les mêmes contrôles à chaque push et pull request.
+
+Pour publier :
+
+1. augmente les versions de `extension/manifest.json` et `package.json` ;
+2. exécute `npm run check` ;
+3. commite tous les fichiers ;
+4. lance `./publier-version.sh "Notes de version"`.
+
+Le script refuse un dépôt sale ou en retard, construit l’archive manuelle et l’archive Chrome Web Store sans `key`, génère leurs SHA-256, pousse le commit et crée la release GitHub. La clé du manifeste manuel fixe l’identifiant `ohgfmmejmlbdpflenlkikbnebgfegkic` : ne la remplace pas.
+
+## Mise à jour des données locales
+
+Une mise à jour ne doit jamais effacer `chrome.storage.local` ni la base IndexedDB qui contient les autorisations de dossiers. Toute évolution de schéma doit lire l’ancien format, le convertir et conserver des valeurs par défaut compatibles.
