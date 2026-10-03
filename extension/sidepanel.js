@@ -2441,25 +2441,54 @@ $('job-clear').addEventListener('click', async () => {
   renderJob(null);
 });
 
-// Version next to the logo, and a notice when a newer one is out on GitHub
-// (the zip install cannot update itself: the link explains how).
+// Version next to the logo, and a button when a newer one is out on GitHub:
+// one click installs it into the extension's folder (lib/maj.js). Installed
+// some other way (Chrome Web Store), the button opens the update guide.
 const newerVersion = (a, b) => {
   const x = String(a).split('.').map(Number);
   const y = String(b).split('.').map(Number);
   for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
   return false;
 };
+let updating = false;
 function renderVersion(releaseCheck) {
   const current = chrome.runtime.getManifest().version;
   $('version').textContent = `v${current}`;
+  if (updating) return;
   const latest = releaseCheck && releaseCheck.latest;
   const pill = $('update-pill');
   pill.hidden = !(latest && newerVersion(latest, current));
   if (!pill.hidden) {
-    pill.textContent = `Mise à jour ${latest}`;
-    pill.title = `Ce profil Chrome a encore la version ${current}, la ${latest} est sortie. Relance la commande d’installation : elle met à jour tous tes profils. Si ce profil reste en retard, regarde d’où il charge l’extension (chrome://extensions → Détails → « Chargée depuis »).`;
+    pill.textContent = `Mettre à jour (${latest})`;
+    pill.title = `Tu as la version ${current}, la ${latest} est sortie. Un clic l’installe ; tes réglages et tes publications sont gardés.`;
   }
 }
+$('update-pill').addEventListener('click', async () => {
+  const pill = $('update-pill');
+  if (updating) return;
+  if (!(await KappMaj.canUpdateHere())) {
+    chrome.tabs.create({ url: 'https://app.kappgen.com/extension#maj' });
+    return;
+  }
+  const status = $('update-status');
+  updating = true;
+  pill.disabled = true;
+  pill.classList.add('busy');
+  pill.textContent = 'Mise à jour…';
+  status.className = 'update-status';
+  status.textContent = 'Si Chrome demande un dossier, choisis celui de KappGen Publish (en général « KappGen-Publish » dans ton dossier personnel ; il est indiqué dans chrome://extensions → KappGen Publish → Détails → « Chargée depuis »). Une seule fois.';
+  status.hidden = false;
+  try {
+    await KappMaj.update((text) => { pill.textContent = text; status.textContent = text; });
+  } catch (error) {
+    updating = false;
+    pill.disabled = false;
+    pill.classList.remove('busy');
+    pill.textContent = 'Réessayer la mise à jour';
+    status.className = 'update-status error';
+    status.textContent = `Mise à jour impossible : ${(error && error.message) || error}`;
+  }
+});
 chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.releaseCheck) renderVersion(changes.releaseCheck.newValue);

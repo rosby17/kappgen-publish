@@ -2358,8 +2358,8 @@ async function heartbeat() {
   if (!lastAutoTick || Date.now() - lastAutoTick > (AUTO_EVERY_MINUTES + 1) * 60000) autoTick().catch(() => {});
 }
 
-// Installed from the zip, the extension cannot replace its own files: when a
-// newer version is out on GitHub, tell the creator once (notification + badge).
+// When a newer version is out on GitHub, tell the creator once (notification);
+// the « Mettre à jour » button of the side panel installs it (lib/maj.js).
 const RELEASES_URL = 'https://api.github.com/repos/rosby17/kappgen-publish/releases/latest';
 const UPDATE_GUIDE = 'https://app.kappgen.com/extension#maj';
 const newer = (a, b) => {
@@ -2386,7 +2386,7 @@ async function checkNewRelease({ maxAge = 6 * 3600 * 1000 } = {}) {
     type: 'basic',
     iconUrl: 'icons/icon128.png',
     title: `KappGen Publish ${latest} est disponible`,
-    message: `Tu as la version ${current}. Clique ici pour voir comment mettre à jour (2 minutes, tes réglages sont gardés).`,
+    message: `Tu as la version ${current}. Ouvre le panneau KappGen Publish et clique « Mettre à jour » (tes réglages sont gardés).`,
     priority: 1,
   });
 }
