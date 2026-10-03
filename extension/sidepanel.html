@@ -40,15 +40,6 @@
       </div>
     </div>
   </header>
-  <div class="update-banner-text">
-      <strong>Mise à jour v<span id="banner-version"></span> disponible</strong>
-      <span class="small muted">Une nouvelle version est prête sur GitHub.</span>
-    </div>
-    <button type="button" id="banner-update-btn" class="btn primary small-btn">
-      ⚡ Mettre à jour
-    </button>
-  </div>
-
 
   <section id="account" class="card">
     <form id="login" class="login" hidden>
@@ -565,37 +556,6 @@ Ingrédients : …</pre>
   <script src="lib/dossier.js"></script>
   <script src="sidepanel.js"></script>
 
-  <div class="update-info-card">
-        <div class="update-ver-comparison">
-          <div class="ver-col">
-            <span class="muted small">Installée</span>
-            <strong id="update-cur-ver"></strong>
-          </div>
-          <div class="ver-arrow">➔</div>
-          <div class="ver-col">
-            <span class="muted small">Sur GitHub</span>
-            <strong id="update-latest-ver" class="highlight"></strong>
-          </div>
-        </div>
-        <p id="update-status-msg" class="small muted align-center" style="margin-top: 6px;"></p>
-      </div>
 
-      <div class="update-actions" style="display: grid; gap: 10px; margin-top: 8px;">
-        <button type="button" id="btn-update-auto" class="btn primary wide">
-          ⚡ Mettre à jour en 1 clic
-        </button>
-        <p class="small muted align-center" style="margin: -4px 0 2px; font-size: 11px;">
-          Télécharge et remplace les fichiers dans ton dossier <code>KappGen-Publish</code>.
-        </p>
-
-        <button type="button" id="btn-copy-command" class="btn secondary wide">
-          📋 Copier la commande Terminal / PowerShell
-        </button>
-        <p id="copy-toast" class="small ok align-center" hidden style="margin: 0; font-size: 11.5px;">
-          ✓ Commande copiée ! Ouvre le Terminal et colle (Cmd+V).
-        </p>
-      </div>
-    </div>
-  </div>
 </body>
 </html>
