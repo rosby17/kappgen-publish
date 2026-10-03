@@ -10,6 +10,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     mark: () => KappDossier.mark(message.path, message.status, message.data || {}),
     posts: () => KappDossier.facebookPosts({ times: message.times || '', net: message.net || 'facebook' }),
     markPost: () => KappDossier.markPost(message.path, message.patch || {}),
+    exportState: () => KappDossier.exportState(message.state || {}),
   };
   const handler = handlers[message.type];
   if (!handler) return false;

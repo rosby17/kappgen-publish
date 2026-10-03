@@ -275,6 +275,18 @@ const KappDossier = (() => {
     return out;
   }
 
+  // Bridge with the KappGen software: the extension's state (networks, per-channel settings, last activity) is
+  // written at the root of the chosen folder, so KappGen shows it without asking the user anything again.
+  const BRIDGE_FILE = '.kappgen-extension.json';
+  async function exportState(state) {
+    const dir = await root();
+    const handle = await dir.getFileHandle(BRIDGE_FILE, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(state, null, 2));
+    await writable.close();
+    return { written: BRIDGE_FILE };
+  }
+
   async function writeState(dir, state) {
     const handle = await dir.getFileHandle(STATE_FILE, { create: true });
     const writable = await handle.createWritable();
@@ -951,7 +963,7 @@ const KappDossier = (() => {
   }
 
   return { NETS, POST_NETS, saveRoot, loadRoot, access, folders, saveNetRoot, loadNetRoot, clearNetRoot,
-    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost,
+    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost, exportState,
     _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testNets.facebook = h; },
     _setTestNetRoot: (net, h) => { testNets[net] = h; } };
 })();

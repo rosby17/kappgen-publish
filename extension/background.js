@@ -1928,10 +1928,27 @@ async function ownPostNext(settings) {
   return true;
 }
 
+
+// Bridge with the KappGen software (see lib/dossier.js exportState): state written in the shared folder.
+async function exportState(etat) {
+  const { lastExport } = await chrome.storage.session.get('lastExport');
+  if (lastExport && lastExport.etat === etat && Date.now() - lastExport.at < 4 * 60 * 1000) return;
+  const settings = await folderSettings();
+  const { lastAutoPostAt, lastAutoTick } = await chrome.storage.local.get(['lastAutoPostAt', 'lastAutoTick']);
+  const state = {
+    source: 'KappGen Publish', version: chrome.runtime.getManifest().version, maj: new Date().toISOString(), etat,
+    pause: await isPaused(), reseaux: Object.fromEntries(['youtube', 'facebook', 'tiktok', 'instagram', 'x', 'linkedin'].map((n) => [n, networkOn(settings, n)])),
+    youtube: { visibilite: settings.visibility || 'UNLISTED', programmation: settings.schedule === 'times' ? 'heures' : 'tout-de-suite', heures: settings.times || '' },
+    chaines: settings.channels || {}, dernier_passage: lastAutoTick || null, dernier_post: lastAutoPostAt || null,
+  };
+  await folder('exportState', { state }).catch(() => {});
+  await chrome.storage.session.set({ lastExport: { etat, at: Date.now() } });
+}
+
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
   // « Pause » in the panel: nothing goes out on its own until « Reprendre ».
-  if (await isPaused()) { await autoState('paused'); return; }
+  if (await isPaused()) { await autoState('paused'); exportState('pause').catch(() => {}); return; }
   const { job } = await chrome.storage.session.get('job');
   if (job && job.running) {
     const { pending } = await chrome.storage.local.get('pending');
@@ -1976,6 +1993,7 @@ async function autoPass() {
   }
   chrome.action.setBadgeText({ text: '' });
   await autoState('ok');
+  exportState('ok').catch(() => {});
   await chrome.storage.session.remove('permissionNotified');
   if ((await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
   const { videos, sent } = await folderQueue();
