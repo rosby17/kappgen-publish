@@ -642,6 +642,30 @@ const markPostManual = (path, net) => (net === 'facebook'
   ? KappDossier.markPost(path, { statut: 'publie', published_at: nowIso(), erreur: null, manuel: true })
   : KappDossier.markPost(path, { [net]: { statut: 'publie', published_at: nowIso(), manuel: true } }));
 
+// « Retirer » : this publication must not go out (and is no longer listed).
+// Nothing is deleted from the folder; only its mark changes.
+const RETIRED = 'retire';
+const realId = (id) => (id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null);
+function retireButton(getItem, mark) {
+  const node = button('Retirer', 'btn ghost', async () => {
+    if (!confirm('Retirer cette publication ? Elle ne partira pas et ne s’affichera plus (aucun fichier n’est supprimé).')) return;
+    node.disabled = true;
+    try {
+      await mark();
+      getItem().say('ok', 'Retirée : elle ne partira pas.');
+      setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
+    } catch (error) {
+      node.disabled = false;
+      getItem().say('warn', String((error && error.message) || error));
+    }
+  });
+  node.title = 'Empêcher cette publication de partir et la retirer de la liste (le fichier reste dans le dossier).';
+  return node;
+}
+const retirePost = (path, net) => (net === 'facebook'
+  ? KappDossier.markPost(path, { statut: RETIRED, retire_le: nowIso() })
+  : KappDossier.markPost(path, { [net]: { statut: RETIRED, retire_le: nowIso() } }));
+
 // A video's Short (its vertical version, short.mp4): its own row, in « En
 // attente » until it is on YouTube, then in « Déjà publiés ».
 function shortItem(video) {
@@ -663,11 +687,12 @@ function shortItem(video) {
     go.title = video.short_error ? 'Renvoyer le Short sur YouTube' : 'Publier le Short sur YouTube';
     go.dataset.publish = '1';
     actions.push(go);
-    if (video.short_error) actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: 'manuel' })));
+    actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: 'manuel' })),
+      retireButton(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: RETIRED })));
   }
   item = mediaRow({
     path: video.relative_path, emptyLabel: 'Short',
-    vertical: { youtubeId: video.short_youtube_id === 'manuel' ? null : video.short_youtube_id, file: video.vertical_path },
+    vertical: { youtubeId: realId(video.short_youtube_id), file: video.vertical_path },
     title: String(video.title || video.relative_path.split('/').pop()).replace(/\s*[—-]\s*Short$/i, ''),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
     status, actions: actions.filter((x) => !(x.tagName === 'A' && /youtube\.com\/shorts/.test(x.href))),
@@ -920,7 +945,8 @@ function postRow(post) {
       { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
     go.dataset.publish = '1';
     acts.append(change, go);
-    if (post.statut === 'echec') acts.append(alreadyDone(() => item, () => markPostManual(post.path, 'facebook')));
+    acts.append(alreadyDone(() => item, () => markPostManual(post.path, 'facebook')),
+      retireButton(() => item, () => retirePost(post.path, 'facebook')));
   }
   item.append(when, mini, what, acts);
   item.say = (kind, text) => live.replaceChildren(pill(kind, text));
@@ -1337,11 +1363,12 @@ function facebookItem(video, page, as = 'video') {
       { type: 'facebook', path: video.relative_path, as }, 'Publication sur Facebook en cours…'));
     publish.dataset.publish = '1';
     actions.push(publish);
-    if (error) actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path,
-      reel ? { facebookReelAt: nowIso() } : { facebookPublishedAt: nowIso() })));
+    const field = reel ? 'facebookReelAt' : 'facebookPublishedAt';
+    actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path, { [field]: nowIso() })),
+      retireButton(() => item, () => markVideoManual(video.relative_path, { [field]: RETIRED })));
   }
   item = mediaRow({
-    path: video.relative_path, preview: video.preview_path, youtubeId: reel ? (video.short_youtube_id || video.youtube_id) : video.youtube_id,
+    path: video.relative_path, preview: video.preview_path, youtubeId: reel ? (realId(video.short_youtube_id) || video.youtube_id) : video.youtube_id,
     title: video.title || video.relative_path.split('/').pop(),
     detail: [reel ? 'Réel (Short)' : 'Vidéo', chan(video.channel_name)].filter(Boolean).join(' · '),
     status, actions,
@@ -1411,13 +1438,16 @@ async function renderShare(net) {
         { type: it.kind === 'video' ? k.video : k.post, path: it.path }, `Publication sur ${k.name} en cours…`));
       go.dataset.publish = '1';
       actions.push(go);
-      if (it.error) actions.push(alreadyDone(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { [`${net}PublishedAt`]: nowIso() }) : markPostManual(it.path, net))));
+      actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { [`${net}PublishedAt`]: nowIso() }) : markPostManual(it.path, net))),
+      retireButton(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { [`${net}PublishedAt`]: RETIRED }) : retirePost(it.path, net))));
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, emptyLabel: it.kind === 'video' ? 'Vidéo' : 'Post', title: it.title, detail: it.detail, status, actions });
     return item;
   };
   const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
+  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
   const waiting = items.filter((it) => !it.done).sort((a, b) => (a.at || 0) - (b.at || 0) || recent(a, b)).slice(0, 60);
   const done = items.filter((it) => it.done).sort(recent);
   $(`${net}-list`).replaceChildren(...waiting.map(card));
@@ -1455,8 +1485,10 @@ function renderTikTok() {
         { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
       go.dataset.publish = '1';
       actions.push(go);
-      if (it.error) actions.push(alreadyDone(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { tiktokPublishedAt: nowIso() }) : markPostManual(it.path, 'tiktok'))));
+      actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { tiktokPublishedAt: nowIso() }) : markPostManual(it.path, 'tiktok'))),
+      retireButton(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { tiktokPublishedAt: RETIRED }) : retirePost(it.path, 'tiktok'))));
       // The long version stays possible, as an option.
       if (it.kind === 'video' && it.vertical) {
         const long = button('Version longue', 'btn ghost', () => act(item, long,
@@ -1469,6 +1501,7 @@ function renderTikTok() {
     return item;
   };
   const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
+  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
   const waiting = items.filter((it) => !it.done).sort((a, b) => (b.vertical ? 1 : 0) - (a.vertical ? 1 : 0) || recent(a, b));
   const done = items.filter((it) => it.done).sort(recent);
   $('tiktok-list').replaceChildren(...waiting.map(tiktokCard));
@@ -1507,13 +1540,16 @@ function renderInstagram() {
         { type: it.kind === 'video' ? 'instagram' : 'instagramPost', path: it.path }, 'Publication sur Instagram en cours… (Instagram s’ouvre)'));
       go.dataset.publish = '1';
       actions.push(go);
-      if (it.error) actions.push(alreadyDone(() => item, () => (it.kind === 'video'
-        ? markVideoManual(it.path, { instagramPublishedAt: nowIso() }) : markPostManual(it.path, 'instagram'))));
+      actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { instagramPublishedAt: nowIso() }) : markPostManual(it.path, 'instagram'))),
+      retireButton(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { instagramPublishedAt: RETIRED }) : retirePost(it.path, 'instagram'))));
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
     return item;
   };
   const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
+  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
   const waiting = items.filter((it) => !it.done).sort(recent);
   const done = items.filter((it) => it.done).sort(recent);
   $('instagram-list').replaceChildren(...waiting.map(igCard));
@@ -1534,8 +1570,8 @@ async function renderFacebook(data) {
   // Each YouTube video: the long video, and its Short as a Reel when there is one.
   const rows = [];
   for (const v of [...data.sent].sort(recent)) {
-    rows.push({ v, as: 'video', done: !!v.facebook_published_at, failed: !!v.facebook_error && !v.facebook_published_at });
-    if (v.vertical_path) rows.push({ v, as: 'reel', done: !!v.facebook_reel_at, failed: !!v.facebook_reel_error && !v.facebook_reel_at });
+    if (v.facebook_published_at !== RETIRED) rows.push({ v, as: 'video', done: !!v.facebook_published_at, failed: !!v.facebook_error && !v.facebook_published_at });
+    if (v.vertical_path && v.facebook_reel_at !== RETIRED) rows.push({ v, as: 'reel', done: !!v.facebook_reel_at, failed: !!v.facebook_reel_error && !v.facebook_reel_at });
   }
   const kept = rows.filter((r) => !postFilter || (postFilter === 'echec' ? r.failed : r.as === postFilter));
   const waiting = kept.filter((r) => !r.done);
@@ -1557,7 +1593,7 @@ async function renderFacebook(data) {
 async function renderOnYoutube(data, config) {
   // The long video and its Short: two rows, one under the other.
   $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
-    .flatMap((v) => (v.short_youtube_id ? [sentItem(v), shortItem(v)] : [sentItem(v)])));
+    .flatMap((v) => (v.short_youtube_id && v.short_youtube_id !== RETIRED ? [sentItem(v), shortItem(v)] : [sentItem(v)])));
   applyYtFilter();
   applyJob();
   if (!data.sent.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';

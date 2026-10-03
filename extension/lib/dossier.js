@@ -885,6 +885,9 @@ const KappDossier = (() => {
       if (dirInfo.shared && due && due < new Date(now).setHours(0, 0, 0, 0)) continue;
       // A network's own post keeps its state under the network's name.
       const mine = net === 'facebook' ? info : (info[net] && typeof info[net] === 'object' ? info[net] : {});
+      // « Retirer » in the panel: never sent, never listed (statut "retire":
+      // top-level = on every network, under a network's name = that one only).
+      if (info.statut === 'retire' || mine.statut === 'retire') continue;
       let statut = mine.statut || 'a_publier';
       // Stuck « en cours » (tab closed, envoi débloqué à la main): offer to retry.
       if (statut === 'en_cours' && mine.started_at && now - Date.parse(mine.started_at) > 20 * 60000) {
