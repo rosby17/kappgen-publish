@@ -199,6 +199,8 @@ const RECIPE_TTL = 30 * 60 * 1000;
 const RECIPE_OFFLINE_TTL = 7 * 24 * 3600 * 1000;
 let recipeCache = null;
 
+const RECIPE_LABELS = ['version', 'mark'];
+
 function validateRecipe(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Recette de publication invalide.');
   let encoded;
@@ -222,6 +224,8 @@ function validateRecipe(data) {
   };
   visit(data);
   for (const [network, config] of Object.entries(data)) {
+    // Étiquettes du serveur (version de la recette, marque du compte) : de simples textes courts, pas des réglages.
+    if (RECIPE_LABELS.includes(network) && (typeof config === 'string' || typeof config === 'number') && String(config).length <= 100) continue;
     if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error(`Recette invalide (${network}).`);
     for (const selector of Object.values(config.sel || {})) {
       if (typeof selector !== 'string' || selector.length > 2000) throw new Error(`Sélecteur invalide (${network}).`);
@@ -240,8 +244,15 @@ async function publishRecipe({ fresh = false } = {}) {
   await requireAccess();
   let data;
   try {
-    data = validateRecipe(await api('/publish/recipe'));
+    const received = await api('/publish/recipe');
+    try {
+      data = validateRecipe(received);
+    } catch (invalid) {
+      // Le serveur a répondu : ce n'est pas un problème de connexion, on dit le vrai motif.
+      throw Object.assign(new Error(`KappGen a envoyé une recette de publication que cette version de l'extension refuse (${invalid.message}). Mets à jour KappGen Publish.`), { invalidRecipe: true });
+    }
   } catch (error) {
+    if (error.invalidRecipe) throw error;
     if (error.status === 401) throw new Error('Connecte-toi à ton compte KappGen.');
     if (error.status === 402) throw new Error('Ton abonnement KappGen Publish n’est pas actif : ouvre le panneau pour t’abonner.');
     if (error.status === 404) throw new Error('Le serveur KappGen n’est pas encore à jour pour cette version de KappGen Publish.');
