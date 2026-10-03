@@ -2442,8 +2442,9 @@ $('job-clear').addEventListener('click', async () => {
 });
 
 // Version next to the logo, and a button when a newer one is out on GitHub:
-// one click installs it into the extension's folder (lib/maj.js). Installed
-// some other way (Chrome Web Store), the button opens the update guide.
+// one click installs it and restarts the extension (lib/maj.js). Without the
+// update helper (installed by the install command), it says how to get it.
+const UPDATE_GUIDE = 'https://app.kappgen.com/extension#installer';
 const newerVersion = (a, b) => {
   const x = String(a).split('.').map(Number);
   const y = String(b).split('.').map(Number);
@@ -2465,28 +2466,32 @@ function renderVersion(releaseCheck) {
 }
 $('update-pill').addEventListener('click', async () => {
   const pill = $('update-pill');
-  if (updating) return;
-  if (!(await KappMaj.canUpdateHere())) {
-    chrome.tabs.create({ url: 'https://app.kappgen.com/extension#maj' });
-    return;
-  }
   const status = $('update-status');
+  if (updating) return;
   updating = true;
   pill.disabled = true;
   pill.classList.add('busy');
   pill.textContent = 'Mise à jour…';
   status.className = 'update-status';
-  status.textContent = 'Si Chrome demande un dossier, choisis celui de KappGen Publish (en général « KappGen-Publish » dans ton dossier personnel ; il est indiqué dans chrome://extensions → KappGen Publish → Détails → « Chargée depuis »). Une seule fois.';
   status.hidden = false;
   try {
-    await KappMaj.update((text) => { pill.textContent = text; status.textContent = text; });
+    const { waiting } = await KappMaj.update((text) => { status.textContent = text; });
+    pill.textContent = waiting ? 'Installée' : 'Redémarrage…';
   } catch (error) {
     updating = false;
     pill.disabled = false;
     pill.classList.remove('busy');
-    pill.textContent = 'Réessayer la mise à jour';
     status.className = 'update-status error';
-    status.textContent = `Mise à jour impossible : ${(error && error.message) || error}`;
+    status.textContent = '';
+    if (error instanceof KappMaj.NoHelper) {
+      pill.textContent = `Mettre à jour (${(await chrome.storage.local.get('releaseCheck')).releaseCheck?.latest || ''})`;
+      const link = Object.assign(document.createElement('a'), { href: UPDATE_GUIDE, target: '_blank', rel: 'noopener noreferrer', textContent: 'commande d’installation' });
+      status.append('Pour la mise à jour en 1 clic, relance une seule fois la ', link,
+        ' (elle installe l’assistant de mise à jour). Ensuite, ce bouton suffit à chaque nouvelle version.');
+    } else {
+      pill.textContent = 'Réessayer la mise à jour';
+      status.textContent = `Mise à jour impossible : ${(error && error.message) || error}`;
+    }
   }
 });
 chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));

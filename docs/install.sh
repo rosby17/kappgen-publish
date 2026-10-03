@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installe (ou met à jour) KappGen Publish sur Mac, dans TOUS les profils Chrome.
+# Installe (ou met à jour) KappGen Publish sur Mac et Linux, dans TOUS les profils Chrome.
 #   curl -fsSL https://app.kappgen.com/extension/install.sh | bash   (renvoie vers ce fichier)
 # Télécharge la dernière version dans ~/KappGen-Publish, puis :
 #  - met à jour l'extension dans chaque profil Chrome qui l'a déjà, quel que
@@ -21,21 +21,35 @@ case "$TAG" in
 esac
 SHA_URL="$ZIP_URL.sha256"
 DIR="$HOME/KappGen-Publish"
-CHROME_DATA="$HOME/Library/Application Support/Google/Chrome"
+OS=$(uname -s)
+if [ "$OS" = "Darwin" ]; then
+  CHROME_DATA="$HOME/Library/Application Support/Google/Chrome"
+  HELPER_DIR="$HOME/Library/Application Support/KappGen-Publish"
+else
+  CHROME_DATA="${XDG_CONFIG_HOME:-$HOME/.config}/google-chrome"
+  HELPER_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/KappGen-Publish"
+fi
+sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | awk '{ print $1 }'; }
 
 echo ""
 echo "  KappGen Publish : installation et mise à jour"
 echo "  ---------------------------------------------"
 
 CHROME=""
-for app in "/Applications/Google Chrome.app" "$HOME/Applications/Google Chrome.app"; do
-  [ -d "$app" ] && CHROME="$app"
-done
+if [ "$OS" = "Darwin" ]; then
+  for app in "/Applications/Google Chrome.app" "$HOME/Applications/Google Chrome.app"; do
+    [ -d "$app" ] && CHROME="$app"
+  done
+else
+  for bin in google-chrome google-chrome-stable; do
+    command -v "$bin" >/dev/null 2>&1 && { CHROME=$(command -v "$bin"); break; }
+  done
+fi
 if [ -z "$CHROME" ]; then
   echo "  ✗ Google Chrome n'est pas installé."
   echo "    Installe-le d'abord (gratuit) : https://www.google.com/chrome/"
   echo "    puis relance la même commande."
-  open "https://www.google.com/chrome/" 2>/dev/null || true
+  [ -n "$KAPPGEN_SILENCIEUX" ] || { open "https://www.google.com/chrome/" 2>/dev/null || xdg-open "https://www.google.com/chrome/" >/dev/null 2>&1 || true; }
   exit 1
 fi
 
@@ -45,10 +59,12 @@ trap 'rm -rf -- "$TMP"' EXIT
 curl -fsSL -o "$TMP/k.zip" "$ZIP_URL"
 curl -fsSL -o "$TMP/k.zip.sha256" "$SHA_URL"
 EXPECTED=$(awk 'NR == 1 { print $1 }' "$TMP/k.zip.sha256")
-ACTUAL=$(shasum -a 256 "$TMP/k.zip" | awk '{ print $1 }')
+ACTUAL=$(sha256 "$TMP/k.zip")
 [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo "  ✗ Signature SHA-256 invalide : téléchargement annulé."; exit 1; }
 mkdir -p "$TMP/x"
-unzip -q "$TMP/k.zip" -d "$TMP/x"
+if command -v unzip >/dev/null 2>&1; then unzip -q "$TMP/k.zip" -d "$TMP/x"
+else python3 -m zipfile -e "$TMP/k.zip" "$TMP/x" || { echo "  ✗ Installe « unzip » (sudo apt install unzip) puis relance la commande."; exit 1; }
+fi
 [ -f "$TMP/x/manifest.json" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"KappGen Publish"' "$TMP/x/manifest.json" \
   || { echo "  ✗ Archive téléchargée invalide, installation annulée."; exit 1; }
 VERSION=$(sed -n 's/.*"version"[^"]*"\([^"]*\)".*/\1/p' "$TMP/x/manifest.json" | head -1)
@@ -81,9 +97,80 @@ put_version() {
 echo "  2/3  Rangement dans $DIR"
 put_version "$DIR"
 
+# Assistant de mise à jour en 1 clic : le bouton « Mettre à jour » du panneau
+# demande à Chrome de lancer ce petit script (native messaging), qui relance
+# cet installateur sans rien demander. Déclaré pour tous les profils Chrome.
+HOST_JSON="$CHROME_DATA/NativeMessagingHosts/com.kappgen.publish.json"
+install_helper() {
+  mkdir -p "$HELPER_DIR" "$(dirname "$HOST_JSON")"
+  # Écrit à côté puis renommé : un assistant en cours d'exécution n'est jamais modifié.
+  cat > "$HELPER_DIR/.assistant-maj.sh.$$" <<'HELPER'
+#!/bin/bash
+# Assistant de mise à jour de KappGen Publish. Chrome le lance quand on clique
+# « Mettre à jour » dans le panneau : il relance l'installateur de la dernière
+# version sans rien demander, puis répond à l'extension, qui redémarre.
+export LC_ALL=C PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+LOG="$(cd "$(dirname "$0")" && pwd)/maj.log"
+REPO="rosby17/kappgen-publish"
+# Réponse au format de Chrome : longueur sur 4 octets, puis le JSON.
+reply() {
+  n=${#1}
+  printf "$(printf '\\%03o\\%03o\\%03o\\%03o' $((n & 255)) $(((n >> 8) & 255)) $(((n >> 16) & 255)) $(((n >> 24) & 255)))"
+  printf '%s' "$1"
+}
+# Message de Chrome lu octet par octet (dd), sans jamais attendre plus que sa longueur.
+LEN=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -dc '0-9')
+[ -n "$LEN" ] && [ "$LEN" -gt 0 ] && dd bs=1 count="$LEN" >/dev/null 2>&1
+TAG=$(curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+  | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+case "$TAG" in
+  v[0-9]*) ;;
+  *) reply '{"ok":false,"error":"GitHub ne répond pas : vérifie ta connexion Internet et réessaie."}'; exit 0 ;;
+esac
+SCRIPT=$(mktemp)
+if ! curl -fsSL -o "$SCRIPT" "https://raw.githubusercontent.com/$REPO/$TAG/docs/install.sh"; then
+  rm -f "$SCRIPT"
+  reply '{"ok":false,"error":"Téléchargement de l installateur impossible : réessaie dans un instant."}'
+  exit 0
+fi
+if KAPPGEN_SILENCIEUX=1 bash "$SCRIPT" </dev/null >"$LOG" 2>&1; then
+  VERSION=$(sed -n 's/.*Version \([0-9][0-9.]*\) en place.*/\1/p' "$LOG" | tail -1)
+  reply "{\"ok\":true,\"version\":\"$VERSION\"}"
+else
+  ERR=$(grep '✗' "$LOG" | tail -1 | sed 's/^[[:space:]]*✗[[:space:]]*//; s/[\"\\]/ /g' | tr -d '\000-\037')
+  reply "{\"ok\":false,\"error\":\"${ERR:-L installation a échoué (détails : $LOG).}\"}"
+fi
+rm -f "$SCRIPT"
+HELPER
+  chmod 755 "$HELPER_DIR/.assistant-maj.sh.$$"
+  mv -f "$HELPER_DIR/.assistant-maj.sh.$$" "$HELPER_DIR/assistant-maj.sh"
+  cat > "$HOST_JSON" <<EOF
+{
+  "name": "com.kappgen.publish",
+  "description": "KappGen Publish : mise à jour en 1 clic",
+  "path": "$HELPER_DIR/assistant-maj.sh",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://ohgfmmejmlbdpflenlkikbnebgfegkic/"]
+}
+EOF
+}
+install_helper || echo "  •  Assistant de mise à jour en 1 clic non installé (la commande reste possible)."
+
+# Inside a git work tree (a developer's copy)? Checked without the git command:
+# on a Mac without developer tools, it would open an installation prompt.
+in_git() {
+  d=$1
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    [ -e "$d/.git" ] && return 0
+    d=$(dirname "$d")
+  done
+  return 1
+}
+
 # Every Chrome profile: "dossier<TAB>nom<TAB>chemin de KappGen Publish (vide si absent)".
 # Read with JavaScript for Automation (built into macOS): Local State lists the
 # profiles, each profile's (Secure) Preferences lists its extensions.
+if [ "$OS" = "Darwin" ]; then
 PROFILES=$(osascript -l JavaScript <<'JXA' 2>/dev/null || true
 ObjC.import('Foundation');
 const read = (p) => { const s = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null); return s.isNil() ? null : ObjC.unwrap(s); };
@@ -105,6 +192,30 @@ for (const dir of Object.keys(cache)) {
 lines.join('\n');
 JXA
 )
+else
+PROFILES=$(CHROME_DATA="$CHROME_DATA" python3 - <<'PY' 2>/dev/null || true
+import json, os
+root = os.environ['CHROME_DATA']
+def load(path):
+    try:
+        with open(path, encoding='utf-8') as f: return json.load(f)
+    except Exception: return {}
+def manifest(path):
+    try:
+        with open(os.path.join(path, 'manifest.json'), encoding='utf-8') as f: return f.read()
+    except Exception: return ''
+cache = (load(os.path.join(root, 'Local State')).get('profile') or {}).get('info_cache') or {}
+for d, info in cache.items():
+    found = ''
+    for name in ('Secure Preferences', 'Preferences'):
+        settings = (load(os.path.join(root, d, name)).get('extensions') or {}).get('settings') or {}
+        for ext in settings.values():
+            path = (ext or {}).get('path') or ''
+            if not found and path.startswith('/') and 'KappGen Publish' in manifest(path): found = path
+    print('\t'.join([d, str(info.get('name') or d).replace('\t', ' ').replace('\n', ' '), found]))
+PY
+)
+fi
 
 UPDATED=()
 MISSING_DIRS=()
@@ -113,7 +224,7 @@ while IFS=$'\t' read -r PDIR PNAME PPATH; do
   [ -z "$PDIR" ] && continue
   if [ -n "$PPATH" ]; then
     if [ "$PPATH" != "$DIR" ]; then
-      if git -C "$PPATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      if in_git "$PPATH"; then
         echo "  •  $PNAME : dossier de développement ($PPATH), non touché."
         continue
       fi
@@ -137,6 +248,9 @@ if [ ${#UPDATED[@]} -gt 0 ]; then
   echo ""
 fi
 
+# Launched by the « Mettre à jour » button: updating is all it does.
+[ -z "$KAPPGEN_SILENCIEUX" ] || exit 0
+
 # No profile found (Chrome never opened…): the default one.
 if [ -z "$PROFILES" ]; then
   MISSING_DIRS=("Default")
@@ -148,9 +262,14 @@ clicks() {
   cat <<EOF
       1. En haut à droite, allume « Mode développeur » (il devient bleu).
       2. Clique « Charger l'extension non empaquetée ».
-      3. Appuie sur  Cmd + Maj + G , puis  Cmd + V  (le chemin est déjà copié),
-         puis  Entrée , puis clique « Sélectionner ».
 EOF
+  if [ "$OS" = "Darwin" ]; then
+    echo "      3. Appuie sur  Cmd + Maj + G , puis  Cmd + V  (le chemin est déjà copié),"
+    echo "         puis  Entrée , puis clique « Sélectionner »."
+  else
+    echo "      3. Appuie sur  Ctrl + L , colle ou tape  $DIR ,"
+    echo "         puis  Entrée , puis clique « Sélectionner »."
+  fi
 }
 
 # The command is piped into bash: answers are read from the keyboard (/dev/tty).
@@ -191,10 +310,15 @@ for idx in "${CHOSEN[@]}"; do
   PDIR="${MISSING_DIRS[$idx]}"
   PNAME="${MISSING_NAMES[$idx]}"
   k=$((k + 1))
-  printf '%s' "$DIR" | pbcopy
   echo ""
   echo "  ▶ Profil « $PNAME » ($k/${#CHOSEN[@]}) : Chrome s'ouvre sur ses extensions."
-  open -na "$CHROME" --args --profile-directory="$PDIR" "chrome://extensions/"
+  if [ "$OS" = "Darwin" ]; then
+    printf '%s' "$DIR" | pbcopy
+    open -na "$CHROME" --args --profile-directory="$PDIR" "chrome://extensions/"
+  else
+    printf '%s' "$DIR" | { wl-copy 2>/dev/null || xclip -selection clipboard 2>/dev/null || xsel -b 2>/dev/null || true; }
+    nohup "$CHROME" --profile-directory="$PDIR" "chrome://extensions/" >/dev/null 2>&1 &
+  fi
   clicks
   if [ -n "$ASK" ] && [ $k -lt ${#CHOSEN[@]} ]; then
     printf "  Appuie sur Entrée quand c'est fait pour passer au profil suivant : "
@@ -207,8 +331,8 @@ cat <<EOF
   La carte « KappGen Publish » apparaît dans le profil : c'est installé.
   Ensuite, dans chaque profil : pièce de puzzle en haut à droite de Chrome,
   épingle KappGen Publish, puis clique son logo pour te connecter.
-  Les prochaines mises à jour : relance juste cette commande, tous les
-  profils sont mis à jour d'un coup, sans clic.
+  Les prochaines mises à jour : bouton « Mettre à jour » dans le panneau
+  (ou relance cette commande) ; tous les profils suivent d'un coup.
 
   Ne supprime pas le dossier $DIR : Chrome s'en sert.
 
