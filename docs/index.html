@@ -213,10 +213,10 @@ details.plie ol{padding-left:20px}
       <div class="voie-tete"><span class="pastille"><svg class="i"><use href="#i-sparkles"/></svg></span><div><h3>Avec Claude</h3><span class="badge">Le plus simple</span></div></div>
       <p>Tu as l'application <b>Claude</b> ? Ouvre l'onglet <b>Code</b>, colle ce message et envoie-le. Claude installe tout et te guide pour les 3 clics.</p>
       <div class="bloc mac-seul" id="prompt-mac">Installe pour moi l'extension Chrome KappGen Publish. Je suis sur Mac. Lance cette commande :
-curl -fsSL https://rosby17.github.io/kappgen-uploader/install.sh | bash
+curl -fsSL https://rosby17.github.io/kappgen-publish/install.sh | bash
 Ensuite, explique-moi très simplement les 3 clics à faire dans Chrome, un seul à la fois, et attends que je te réponde « fait » avant de passer au suivant.<button type="button" data-copie="prompt-mac"><svg class="i"><use href="#i-copy"/></svg>Copier le message</button></div>
       <div class="bloc win-seul" id="prompt-win">Installe pour moi l'extension Chrome KappGen Publish. Je suis sur Windows. Lance cette commande dans PowerShell :
-irm https://rosby17.github.io/kappgen-uploader/install.ps1 | iex
+irm https://rosby17.github.io/kappgen-publish/install.ps1 | iex
 Ensuite, explique-moi très simplement les 3 clics à faire dans Chrome, un seul à la fois, et attends que je te réponde « fait » avant de passer au suivant.<button type="button" data-copie="prompt-win"><svg class="i"><use href="#i-copy"/></svg>Copier le message</button></div>
     </div>
 
@@ -230,21 +230,21 @@ Ensuite, explique-moi très simplement les 3 clics à faire dans Chrome, un seul
         <li>Clique sur <b>Démarrer</b>, tape <b>PowerShell</b>, puis <kbd>Entrée</kbd>.</li>
         <li>Copie la commande, colle-la (<kbd>Ctrl</kbd> + <kbd>V</kbd>), puis <kbd>Entrée</kbd>.</li>
       </ol>
-      <div class="bloc cmd mac-seul" id="cmd-mac">curl -fsSL https://rosby17.github.io/kappgen-uploader/install.sh | bash<button type="button" data-copie="cmd-mac"><svg class="i"><use href="#i-copy"/></svg>Copier la commande</button></div>
-      <div class="bloc cmd win-seul" id="cmd-win">irm https://rosby17.github.io/kappgen-uploader/install.ps1 | iex<button type="button" data-copie="cmd-win"><svg class="i"><use href="#i-copy"/></svg>Copier la commande</button></div>
+      <div class="bloc cmd mac-seul" id="cmd-mac">curl -fsSL https://rosby17.github.io/kappgen-publish/install.sh | bash<button type="button" data-copie="cmd-mac"><svg class="i"><use href="#i-copy"/></svg>Copier la commande</button></div>
+      <div class="bloc cmd win-seul" id="cmd-win">irm https://rosby17.github.io/kappgen-publish/install.ps1 | iex<button type="button" data-copie="cmd-win"><svg class="i"><use href="#i-copy"/></svg>Copier la commande</button></div>
     </div>
 
     <div class="voie">
       <div class="voie-tete"><span class="pastille"><svg class="i"><use href="#i-download"/></svg></span><div><h3>Télécharger moi-même</h3><span class="badge">Sans commande</span></div></div>
       <ol>
-        <li>Télécharge le fichier <b>kappgen-uploader.zip</b>.</li>
-        <li class="mac-seul">Double-clique dessus dans <b>Téléchargements</b> : un dossier <b>kappgen-uploader</b> apparaît.</li>
+        <li>Télécharge le fichier <b>kappgen-publish.zip</b>.</li>
+        <li class="mac-seul">Double-clique dessus dans <b>Téléchargements</b> : un dossier <b>kappgen-publish</b> apparaît.</li>
         <li class="win-seul">Clic droit dessus dans <b>Téléchargements</b> → <b>Extraire tout…</b> → <b>Extraire</b>.</li>
         <li>Range ce dossier dans tes <b>Documents</b> et ne le supprime plus.</li>
         <li>Ouvre <span class="code">chrome://extensions</span> et fais les 3 clics (en choisissant ce dossier).</li>
       </ol>
-      <a class="btn plein" href="https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip"><svg class="i"><use href="#i-download"/></svg>Télécharger kappgen-uploader.zip</a>
-      <p class="note">Toujours la dernière version · code ouvert sur <a href="https://github.com/rosby17/kappgen-uploader">GitHub</a></p>
+      <a class="btn plein" href="https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip"><svg class="i"><use href="#i-download"/></svg>Télécharger kappgen-publish.zip</a>
+      <p class="note">Toujours la dernière version · code ouvert sur <a href="https://github.com/rosby17/kappgen-publish">GitHub</a></p>
     </div>
   </div>
   <div class="bandeau info"><svg class="i"><use href="#i-info"/></svg><span>Pas encore de Google Chrome ? La commande te le dit et ouvre la page pour l'installer gratuitement (<a href="https://www.google.com/chrome/">google.com/chrome</a>). Relance-la ensuite.</span></div>
@@ -304,7 +304,7 @@ Ensuite, explique-moi très simplement les 3 clics à faire dans Chrome, un seul
     </div>
     <div class="carte">
       <h3><svg class="i"><use href="#i-shield"/></svg>Est-ce que c'est sûr ?</h3>
-      <p>Oui. Le code est public sur <a href="https://github.com/rosby17/kappgen-uploader">GitHub</a>, y compris celui de la commande d'installation (<a href="install.sh">Mac</a>, <a href="install.ps1">Windows</a>). Les installateurs vérifient l'empreinte SHA-256 publiée avec chaque version. KappGen Publish lit <b>uniquement les dossiers que tu choisis</b> et remet les contenus seulement aux réseaux que tu actives : YouTube, Facebook, TikTok, Instagram, X ou LinkedIn. Détails : <a href="https://github.com/rosby17/kappgen-uploader/blob/main/PRIVACY.md">politique de confidentialité</a>.</p>
+      <p>Oui. Le code est public sur <a href="https://github.com/rosby17/kappgen-publish">GitHub</a>, y compris celui de la commande d'installation (<a href="install.sh">Mac</a>, <a href="install.ps1">Windows</a>). Les installateurs vérifient l'empreinte SHA-256 publiée avec chaque version. KappGen Publish lit <b>uniquement les dossiers que tu choisis</b> et remet les contenus seulement aux réseaux que tu actives : YouTube, Facebook, TikTok, Instagram, X ou LinkedIn. Détails : <a href="https://github.com/rosby17/kappgen-publish/blob/main/PRIVACY.md">politique de confidentialité</a>.</p>
     </div>
   </div>
 </section>
@@ -315,12 +315,12 @@ Ensuite, explique-moi très simplement les 3 clics à faire dans Chrome, un seul
   <div class="faq">
     <details class="plie"><summary>Pourquoi Claude ne peut pas faire les 3 clics à ma place ?</summary><p>C'est une protection de Google Chrome : une extension qui ne vient pas de la boutique de Chrome ne peut être ajoutée que par la personne devant l'écran. Ça empêche les logiciels malveillants d'installer des extensions en cachette. Claude fait tout le reste.</p></details>
     <details class="plie"><summary>Je ne trouve pas « Charger l'extension non empaquetée »</summary><p>Le <b>Mode développeur</b> n'est pas allumé : regarde tout en haut à droite de la page des extensions et clique sur l'interrupteur pour qu'il soit bleu.</p></details>
-    <details class="plie"><summary>Chrome dit « Fichier manifeste manquant ou illisible »</summary><p>Le mauvais dossier a été choisi. Il faut le dossier <b>kappgen-uploader</b> lui-même (pas le .zip, pas un dossier à l'intérieur). Relance la commande, puis refais le clic 3 en collant le chemin.</p></details>
+    <details class="plie"><summary>Chrome dit « Fichier manifeste manquant ou illisible »</summary><p>Le mauvais dossier a été choisi. Il faut le dossier <b>kappgen-publish</b> lui-même (pas le .zip, pas un dossier à l'intérieur). Relance la commande, puis refais le clic 3 en collant le chemin.</p></details>
     <details class="plie"><summary>Le Terminal dit « command not found » ou PowerShell affiche une erreur rouge</summary><p>La commande a été mal copiée. Utilise le bouton <b>« Copier la commande »</b> plutôt que de la sélectionner à la main, puis colle-la en entier. Sur Windows, ouvre bien <b>PowerShell</b> (pas « Invite de commandes »).</p></details>
     <details class="plie"><summary>Chrome affiche « Désactiver les extensions en mode développeur »</summary><p>C'est un simple rappel de Chrome au démarrage. Clique sur la <b>croix</b> pour le fermer, <b>ne clique pas sur « Désactiver »</b>.</p></details>
     <details class="plie"><summary>Rien n'est publié</summary><ol><li>Chrome doit rester <b>ouvert</b> : KappGen regarde ton dossier toutes les 5 minutes.</li><li>Tu dois être <b>connecté à ta chaîne YouTube</b> dans ce même Chrome.</li><li>Chaque vidéo doit avoir son <b>fichier texte</b> (titre + description) dans son dossier.</li><li>Les vidéos présentes avant le choix du dossier attendent un clic sur « Publier maintenant » : seules les nouvelles partent toutes seules.</li></ol></details>
     <details class="plie"><summary>J'ai plusieurs chaînes YouTube</summary><p>Utilise un <b>profil Chrome par chaîne</b> (menu Chrome → Profils → Ajouter), connecté au bon compte YouTube. Dans chaque profil, ouvre la page des extensions et refais les 3 clics (le chemin à coller est le même).</p></details>
-    <details class="plie"><summary>L'extension a disparu ou affiche une erreur</summary><p>Le dossier <b>kappgen-uploader</b> a sans doute été supprimé ou déplacé. Relance la commande (ou retélécharge le fichier), puis clique <b>↻</b> sur sa carte dans <span class="code">chrome://extensions</span> ; si elle n'y est plus, refais les 3 clics.</p></details>
+    <details class="plie"><summary>L'extension a disparu ou affiche une erreur</summary><p>Le dossier <b>kappgen-publish</b> a sans doute été supprimé ou déplacé. Relance la commande (ou retélécharge le fichier), puis clique <b>↻</b> sur sa carte dans <span class="code">chrome://extensions</span> ; si elle n'y est plus, refais les 3 clics.</p></details>
   </div>
 </section>
 

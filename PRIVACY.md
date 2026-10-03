@@ -51,6 +51,6 @@ Les données de compte, d’abonnement, de paiement et les bilans envoyés à Ka
 
 ## Contact
 
-Pour toute question, demande d’accès ou suppression : [ouvrir une demande GitHub](https://github.com/rosby17/kappgen-uploader/issues) ou utiliser le contact disponible sur [app.kappgen.com](https://app.kappgen.com).
+Pour toute question, demande d’accès ou suppression : [ouvrir une demande GitHub](https://github.com/rosby17/kappgen-publish/issues) ou utiliser le contact disponible sur [app.kappgen.com](https://app.kappgen.com).
 
 KappGen Publish applique les exigences d’utilisation limitée des données utilisateur du Chrome Web Store.

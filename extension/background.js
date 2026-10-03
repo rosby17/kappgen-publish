@@ -2322,8 +2322,8 @@ async function heartbeat() {
 
 // Installed from the zip, the extension cannot replace its own files: when a
 // newer version is out on GitHub, tell the creator once (notification + badge).
-const RELEASES_URL = 'https://api.github.com/repos/rosby17/kappgen-uploader/releases/latest';
-const UPDATE_GUIDE = 'https://rosby17.github.io/kappgen-uploader/#maj';
+const RELEASES_URL = 'https://api.github.com/repos/rosby17/kappgen-publish/releases/latest';
+const UPDATE_GUIDE = 'https://rosby17.github.io/kappgen-publish/#maj';
 const newer = (a, b) => {
   const x = String(a).split('.').map(Number);
   const y = String(b).split('.').map(Number);

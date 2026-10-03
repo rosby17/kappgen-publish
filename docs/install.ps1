@@ -1,5 +1,5 @@
 # Installe (ou met a jour) KappGen Publish sur Windows, dans TOUS les profils Chrome.
-#   irm https://rosby17.github.io/kappgen-uploader/install.ps1 | iex
+#   irm https://rosby17.github.io/kappgen-publish/install.ps1 | iex
 # Telecharge la derniere version dans %USERPROFILE%\KappGen-Publish, puis :
 #  - met a jour l'extension dans chaque profil Chrome qui l'a deja, quel que
 #    soit le dossier d'ou ce profil la charge (aucun clic) ;
@@ -9,7 +9,7 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$zipUrl = 'https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip'
+$zipUrl = 'https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip'
 $shaUrl = $zipUrl + '.sha256'
 $dir = Join-Path $env:USERPROFILE 'KappGen-Publish'
 

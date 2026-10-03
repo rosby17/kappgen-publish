@@ -36,10 +36,10 @@ find "$DIST" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT
 
-(cd extension && zip -rqX "$DIST/kappgen-uploader.zip" . -x ".*" -x "*/.DS_Store")
-unzip -q "$DIST/kappgen-uploader.zip" -d "$TMP/store"
+(cd extension && zip -rqX "$DIST/kappgen-publish.zip" . -x ".*" -x "*/.DS_Store")
+unzip -q "$DIST/kappgen-publish.zip" -d "$TMP/store"
 node -e "const fs=require('fs');const p='$TMP/store/manifest.json';const m=JSON.parse(fs.readFileSync(p));delete m.key;fs.writeFileSync(p,JSON.stringify(m,null,2)+'\\n')"
-(cd "$TMP/store" && zip -rqX "$DIST/kappgen-uploader-chrome-web-store.zip" . -x ".*" -x "*/.DS_Store")
+(cd "$TMP/store" && zip -rqX "$DIST/kappgen-publish-chrome-web-store.zip" . -x ".*" -x "*/.DS_Store")
 
 hash_file() {
   if command -v shasum >/dev/null; then shasum -a 256 "$1"
@@ -47,16 +47,16 @@ hash_file() {
   else echo "Aucun outil SHA-256 disponible." >&2; return 1
   fi
 }
-(cd "$DIST" && hash_file kappgen-uploader.zip > kappgen-uploader.zip.sha256
-  hash_file kappgen-uploader-chrome-web-store.zip > kappgen-uploader-chrome-web-store.zip.sha256)
+(cd "$DIST" && hash_file kappgen-publish.zip > kappgen-publish.zip.sha256
+  hash_file kappgen-publish-chrome-web-store.zip > kappgen-publish-chrome-web-store.zip.sha256)
 
 git push --quiet origin HEAD
 gh release create "$TAG" \
-  "$DIST/kappgen-uploader.zip" \
-  "$DIST/kappgen-uploader.zip.sha256" \
-  "$DIST/kappgen-uploader-chrome-web-store.zip" \
-  "$DIST/kappgen-uploader-chrome-web-store.zip.sha256" \
+  "$DIST/kappgen-publish.zip" \
+  "$DIST/kappgen-publish.zip.sha256" \
+  "$DIST/kappgen-publish-chrome-web-store.zip" \
+  "$DIST/kappgen-publish-chrome-web-store.zip.sha256" \
   --target "$(git rev-parse HEAD)" --title "KappGen Publish $VERSION" \
   --notes "${1:-Version $VERSION}" --latest
 
-echo "Publiée : https://github.com/rosby17/kappgen-uploader/releases/tag/$TAG"
+echo "Publiée : https://github.com/rosby17/kappgen-publish/releases/tag/$TAG"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Installe (ou met à jour) KappGen Publish sur Mac, dans TOUS les profils Chrome.
-#   curl -fsSL https://rosby17.github.io/kappgen-uploader/install.sh | bash
+#   curl -fsSL https://rosby17.github.io/kappgen-publish/install.sh | bash
 # Télécharge la dernière version dans ~/KappGen-Publish, puis :
 #  - met à jour l'extension dans chaque profil Chrome qui l'a déjà, quel que
 #    soit le dossier d'où ce profil la charge (aucun clic : elle se recharge
@@ -9,7 +9,7 @@
 #    profil après l'autre. Chrome interdit d'ajouter une extension sans un
 #    clic de l'utilisateur : 3 clics par nouveau profil.
 set -e
-ZIP_URL="https://github.com/rosby17/kappgen-uploader/releases/latest/download/kappgen-uploader.zip"
+ZIP_URL="https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip"
 SHA_URL="$ZIP_URL.sha256"
 DIR="$HOME/KappGen-Publish"
 CHROME_DATA="$HOME/Library/Application Support/Google/Chrome"
