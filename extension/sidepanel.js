@@ -682,6 +682,96 @@ for (const chip of document.querySelectorAll('#yt-filters .chip')) {
   });
 }
 
+// « ⋮ » : the secondary actions of a row (Déjà publié, Retirer, Changer
+// l'heure…) in a small menu, written out in full; only « Publier » stays on
+// the row. entries: { label, icon, run, danger }.
+function closeMenus(except) {
+  for (const m of document.querySelectorAll('.more-menu')) if (m !== except) m.hidden = true;
+}
+document.addEventListener('click', () => closeMenus());
+function moreMenu(entries = []) {
+  const wrap = el('div', 'more');
+  const menu = el('div', 'more-menu');
+  menu.hidden = true;
+  const open = el('button', 'btn ghost icon-btn icon-only more-btn');
+  open.type = 'button';
+  open.append(icon('dots'));
+  open.title = 'Autres actions';
+  open.setAttribute('aria-label', 'Autres actions');
+  open.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeMenus(menu);
+    menu.hidden = !menu.hidden;
+  });
+  wrap.add = (entry) => {
+    if (!entry) return;
+    const row = el('button', `more-item${entry.danger ? ' danger' : ''}`);
+    row.type = 'button';
+    if (entry.icon) row.append(icon(entry.icon));
+    row.append(el('span', null, entry.label));
+    if (entry.title) row.title = entry.title;
+    row.addEventListener('click', (event) => {
+      event.stopPropagation();
+      menu.hidden = true;
+      entry.run();
+    });
+    menu.append(row);
+  };
+  entries.forEach(wrap.add);
+  wrap.append(open, menu);
+  return wrap;
+}
+// A button built elsewhere (time picker, action) offered in the menu.
+const entryOf = (node, label, iconName, extra = {}) => ({ label, icon: iconName, run: () => node.click(), title: node.title, ...extra });
+
+// « Déjà publié » on a failed row: the creator published it by hand. It is
+// marked as published on that network, so it is neither sent again nor shown
+// as a failure (nothing else changes).
+const nowIso = () => new Date().toISOString();
+function alreadyDone(getItem, mark) {
+  return {
+    label: 'Déjà publié (fait à la main)', icon: 'check',
+    title: 'Tu l’as publié à la main : le marquer comme publié, sans le renvoyer.',
+    run: async () => {
+      try {
+        await mark();
+        getItem().say('ok', 'Marqué comme déjà publié.');
+        setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
+      } catch (error) {
+        getItem().say('warn', String((error && error.message) || error));
+      }
+    },
+  };
+}
+const markVideoManual = (path, data) => KappDossier.mark(path, 'manual', data);
+const markPostManual = (path, net) => (net === 'facebook'
+  ? KappDossier.markPost(path, { statut: 'publie', published_at: nowIso(), erreur: null, manuel: true })
+  : KappDossier.markPost(path, { [net]: { statut: 'publie', published_at: nowIso(), manuel: true } }));
+
+// « Retirer » : this publication must not go out (and is no longer listed).
+// Nothing is deleted from the folder; only its mark changes.
+const RETIRED = 'retire';
+const realId = (id) => (id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null);
+function retireButton(getItem, mark) {
+  return {
+    label: 'Retirer (ne pas publier)', icon: 'trash', danger: true,
+    title: 'Cette publication ne partira pas et disparaît de la liste (le fichier reste dans le dossier).',
+    run: async () => {
+      if (!confirm('Retirer cette publication ? Elle ne partira pas et ne s’affichera plus (aucun fichier n’est supprimé).')) return;
+      try {
+        await mark();
+        getItem().say('ok', 'Retirée : elle ne partira pas.');
+        setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
+      } catch (error) {
+        getItem().say('warn', String((error && error.message) || error));
+      }
+    },
+  };
+}
+const retirePost = (path, net) => (net === 'facebook'
+  ? KappDossier.markPost(path, { statut: RETIRED, retire_le: nowIso() })
+  : KappDossier.markPost(path, { [net]: { statut: RETIRED, retire_le: nowIso() } }));
+
 function sentItem(video) {
   const actions = [];
   const extra = [];

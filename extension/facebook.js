@@ -15,7 +15,11 @@
   // What a button says: its visible text, or its accessible name (icons).
   const labelsOf = (node) => [textOf(node), (node.getAttribute('aria-label') || '').trim()].filter(Boolean);
   const enabled = (node) => node.getAttribute('aria-disabled') !== 'true' && !node.disabled;
-  const click = (node) => { node.scrollIntoView({ block: 'center' }); node.click(); };
+  const click = (node) => {
+    if (!node || typeof node.click !== 'function') throw new Error('Facebook : élément à cliquer introuvable. Termine l’action dans l’onglet Facebook resté ouvert.');
+    if (node.scrollIntoView) node.scrollIntoView({ block: 'center' });
+    node.click();
+  };
   const waitFor = async (finder, timeout = 30000, what = 'élément') => {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -654,7 +658,7 @@
     // Critical distinction: « Terminé » validates the group choices, whereas
     // « Enregistrer » on the settings screen creates a draft.  Search only in
     // the group dialog and never accept « Enregistrer » / “Save” here.
-    const done = await waitFor(() => { const button = byText(GROUPS_DONE_BUTTON, { needEnabled: true, root: list }); return button && onTop(button); },
+    const done = await waitFor(() => { const button = byText(GROUPS_DONE_BUTTON, { needEnabled: true, root: list }); return button && onTop(button) ? button : null; },
       15000, 'le bouton « Terminé » de la sélection des groupes');
     click(done);
     // Back on the settings screen when « Publier » is reachable by a click.
