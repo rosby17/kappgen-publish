@@ -10,6 +10,51 @@
   --ok: #7ee2a8;
   --card: rgba(255, 255, 255, 0.06);
   --border: rgba(255, 255, 255, 0.12);
+  /* Thème : sombre par défaut, clair au choix (bouton de l'en-tête), couleurs de app.kappgen.com en clair. */
+  --ink: 255, 255, 255;          /* voiles clairs posés sur le fond */
+  --shade: 0, 0, 0;              /* fond des champs */
+  --accent-rgb: 0, 194, 255;
+  --ok-rgb: 126, 226, 168;
+  --warn-rgb: 255, 207, 110;
+  --danger-rgb: 255, 138, 138;
+  --overlay: 3, 8, 20;
+  --on-accent: #06121f;
+  --panel: #16233f;              /* menus et fenêtres */
+  --scheme: dark;
+  /* Page de connexion, comme app.kappgen.com/login */
+  --login-surface: rgba(255, 255, 255, 0.04);
+  --login-field: rgba(0, 0, 0, 0.25);
+  --login-cta: #f1f5ff;
+  --login-cta-text: #0b1224;
+  color-scheme: dark;
+}
+[data-theme="clair"] {
+  --bg-top: #f6f6f4;
+  --bg-bottom: #f6f6f4;
+  --text: #1b1a18;
+  --muted: #7b7871;
+  --accent: #2f5bea;
+  --accent-strong: #1e45c9;
+  --danger: #d92d20;
+  --warn: #c27803;
+  --ok: #16803c;
+  --card: #ffffff;
+  --border: #e6e5e1;
+  --ink: 27, 26, 24;
+  --shade: 255, 255, 255;
+  --accent-rgb: 47, 91, 234;
+  --ok-rgb: 22, 128, 60;
+  --warn-rgb: 194, 120, 3;
+  --danger-rgb: 217, 45, 32;
+  --overlay: 27, 26, 24;
+  --on-accent: #ffffff;
+  --panel: #ffffff;
+  --scheme: light;
+  --login-surface: #ffffff;
+  --login-field: #ffffff;
+  --login-cta: #1b1a18;
+  --login-cta-text: #f6f6f4;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
