@@ -618,13 +618,39 @@ function sentItem(video) {
   return item;
 }
 
+// « Déjà publié » on a failed row: the creator published it by hand. It is
+// marked as published on that network, so it is neither sent again nor shown
+// as a failure (nothing else changes).
+const nowIso = () => new Date().toISOString();
+function alreadyDone(getItem, mark) {
+  const node = button('Déjà publié', 'btn ghost', async () => {
+    node.disabled = true;
+    try {
+      await mark();
+      getItem().say('ok', 'Marqué comme déjà publié.');
+      setTimeout(() => { renderFolder(); renderPosts(); renderNetworks(); }, 400);
+    } catch (error) {
+      node.disabled = false;
+      getItem().say('warn', String((error && error.message) || error));
+    }
+  });
+  node.title = 'Tu l’as publié à la main : le marquer comme publié, sans le renvoyer.';
+  return node;
+}
+const markVideoManual = (path, data) => KappDossier.mark(path, 'manual', data);
+const markPostManual = (path, net) => (net === 'facebook'
+  ? KappDossier.markPost(path, { statut: 'publie', published_at: nowIso(), erreur: null, manuel: true })
+  : KappDossier.markPost(path, { [net]: { statut: 'publie', published_at: nowIso(), manuel: true } }));
+
 // A video's Short (its vertical version, short.mp4): its own row, in « En
 // attente » until it is on YouTube, then in « Déjà publiés ».
 function shortItem(video) {
   const actions = [];
   let status;
   let item;
-  if (video.short_youtube_id) {
+  if (video.short_youtube_id === 'manuel') {
+    status = pill('ok', 'Short publié à la main sur YouTube.');
+  } else if (video.short_youtube_id) {
     status = pill('ok', 'Short publié sur YouTube.');
     actions.push(iconLink('link', 'Voir', `https://youtube.com/shorts/${video.short_youtube_id}`));
   } else {
@@ -637,10 +663,11 @@ function shortItem(video) {
     go.title = video.short_error ? 'Renvoyer le Short sur YouTube' : 'Publier le Short sur YouTube';
     go.dataset.publish = '1';
     actions.push(go);
+    if (video.short_error) actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path, { shortYoutubeId: 'manuel' })));
   }
   item = mediaRow({
     path: video.relative_path, emptyLabel: 'Short',
-    vertical: { youtubeId: video.short_youtube_id, file: video.vertical_path },
+    vertical: { youtubeId: video.short_youtube_id === 'manuel' ? null : video.short_youtube_id, file: video.vertical_path },
     title: String(video.title || video.relative_path.split('/').pop()).replace(/\s*[—-]\s*Short$/i, ''),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
     status, actions: actions.filter((x) => !(x.tagName === 'A' && /youtube\.com\/shorts/.test(x.href))),
@@ -893,6 +920,7 @@ function postRow(post) {
       { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
     go.dataset.publish = '1';
     acts.append(change, go);
+    if (post.statut === 'echec') acts.append(alreadyDone(() => item, () => markPostManual(post.path, 'facebook')));
   }
   item.append(when, mini, what, acts);
   item.say = (kind, text) => live.replaceChildren(pill(kind, text));
@@ -1309,6 +1337,8 @@ function facebookItem(video, page, as = 'video') {
       { type: 'facebook', path: video.relative_path, as }, 'Publication sur Facebook en cours…'));
     publish.dataset.publish = '1';
     actions.push(publish);
+    if (error) actions.push(alreadyDone(() => item, () => markVideoManual(video.relative_path,
+      reel ? { facebookReelAt: nowIso() } : { facebookPublishedAt: nowIso() })));
   }
   item = mediaRow({
     path: video.relative_path, preview: video.preview_path, youtubeId: reel ? (video.short_youtube_id || video.youtube_id) : video.youtube_id,
@@ -1381,6 +1411,8 @@ async function renderShare(net) {
         { type: it.kind === 'video' ? k.video : k.post, path: it.path }, `Publication sur ${k.name} en cours…`));
       go.dataset.publish = '1';
       actions.push(go);
+      if (it.error) actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { [`${net}PublishedAt`]: nowIso() }) : markPostManual(it.path, net))));
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, emptyLabel: it.kind === 'video' ? 'Vidéo' : 'Post', title: it.title, detail: it.detail, status, actions });
     return item;
@@ -1423,6 +1455,8 @@ function renderTikTok() {
         { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
       go.dataset.publish = '1';
       actions.push(go);
+      if (it.error) actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { tiktokPublishedAt: nowIso() }) : markPostManual(it.path, 'tiktok'))));
       // The long version stays possible, as an option.
       if (it.kind === 'video' && it.vertical) {
         const long = button('Version longue', 'btn ghost', () => act(item, long,
@@ -1473,6 +1507,8 @@ function renderInstagram() {
         { type: it.kind === 'video' ? 'instagram' : 'instagramPost', path: it.path }, 'Publication sur Instagram en cours… (Instagram s’ouvre)'));
       go.dataset.publish = '1';
       actions.push(go);
+      if (it.error) actions.push(alreadyDone(() => item, () => (it.kind === 'video'
+        ? markVideoManual(it.path, { instagramPublishedAt: nowIso() }) : markPostManual(it.path, 'instagram'))));
     }
     item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
     return item;

@@ -684,6 +684,20 @@ const KappDossier = (() => {
       const record = state[relativePath] || {};
       if (data.at) record.scheduleAt = data.at; else delete record.scheduleAt;
       state[relativePath] = record;
+    } else if (status === 'manual') {
+      // « Déjà publié » : published by hand on a network. Only that network's
+      // mark is written; the video's own date and state stay as they are (a
+      // new date would make other networks think it is a new video).
+      const record = state[relativePath] || {};
+      const errors = { shortYoutubeId: 'shortError', facebookPublishedAt: 'facebookError', facebookReelAt: 'facebookReelError',
+        xPublishedAt: 'xError', linkedinPublishedAt: 'linkedinError', tiktokPublishedAt: 'tiktokError', instagramPublishedAt: 'instagramError' };
+      for (const [key, value] of Object.entries(data)) {
+        if (!errors[key]) continue;
+        record[key] = value;
+        delete record[errors[key]];
+        record.manual = { ...(record.manual || {}), [key]: new Date(now).toISOString() };
+      }
+      state[relativePath] = record;
     } else if (status === 'reset') {
       delete state[relativePath];
     } else {
