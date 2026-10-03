@@ -2406,16 +2406,31 @@ async function ensureAlarms() {
 // code it loaded until someone clicks ↻. When the files on disk carry a newer
 // version, reload by ourselves (never in the middle of an upload).
 async function selfUpdate() {
+  const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
+  const waiting = disk.version && disk.version !== chrome.runtime.getManifest().version ? disk.version : '';
+  // The side panel shows « Redémarrer » while a new version waits (installed
+  // on disk, not running yet).
+  const { restartPending } = await chrome.storage.local.get('restartPending');
+  if ((restartPending || '') !== waiting) await chrome.storage.local.set({ restartPending: waiting });
+  if (!waiting) return;
   // Never in the middle of a publication; but one with no news for 30 min is
   // dead (it would otherwise block every update forever), and an upload being
   // followed is picked up again after the reload (resume()).
   const { job } = await chrome.storage.session.get('job');
   const quiet = job && job.running ? Date.now() - (job.updatedAt || job.startedAt || 0) : Infinity;
-  if (quiet < STALE_JOB_MS) return;
   const { pending } = await chrome.storage.local.get('pending');
-  if (pending && resuming) return;
-  const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
-  if (disk.version && disk.version !== chrome.runtime.getManifest().version) chrome.runtime.reload();
+  if (quiet >= STALE_JOB_MS && !(pending && resuming)) { chrome.runtime.reload(); return; }
+  // Held back by a publication: say it once per version, with how to apply it now.
+  const { restartNotified } = await chrome.storage.local.get('restartNotified');
+  if (restartNotified === waiting) return;
+  await chrome.storage.local.set({ restartNotified: waiting });
+  chrome.notifications.create('kappgen-restart', {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: `KappGen Publish ${waiting} est installée`,
+    message: 'Elle s’activera à la fin de la publication en cours. Pour l’activer tout de suite : ouvre le panneau et clique « Redémarrer », ou quitte Chrome et rouvre-le (tous tes profils d’un coup).',
+    priority: 1,
+  });
 }
 // YouTube → Facebook switch: on by default, for videos published from now on
 // (never the whole older catalogue at once).
@@ -2437,7 +2452,13 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 // on the panel instead of just dismissing a toast — same one-click re-grant
 // as clicking the extension icon itself.
 chrome.notifications.onClicked.addListener(async (id) => {
-  if (id === 'kappgen-update') { chrome.tabs.create({ url: UPDATE_GUIDE }); return; }
+  if (id === 'kappgen-update' || id === 'kappgen-restart') {
+    // Straight to the panel and its button; the guide if Chrome refuses.
+    const win = await chrome.windows.getLastFocused().catch(() => null);
+    const opened = win && await chrome.sidePanel.open({ windowId: win.id }).then(() => true).catch(() => false);
+    if (!opened && id === 'kappgen-update') chrome.tabs.create({ url: UPDATE_GUIDE });
+    return;
+  }
   if (id !== 'kappgen-folder-access') return;
   await askAccess({ force: true }).catch(() => {});
 });

@@ -398,6 +398,10 @@ li.row .acts .btn { height: 26px; }
 .update-status { margin: 0 0 10px; padding: 8px 11px; border-radius: 10px; font-size: 12px; line-height: 1.45; color: var(--muted);
   background: rgba(var(--accent-rgb), 0.07); border: 1px solid rgba(var(--accent-rgb), 0.3); }
 .update-status.error { color: var(--warn); background: rgba(var(--warn-rgb), 0.1); border-color: rgba(var(--warn-rgb), 0.45); }
+.restart-notice { margin: 0 0 10px; padding: 10px 12px; border-radius: 10px; display: grid; gap: 8px;
+  background: rgba(var(--accent-rgb), 0.09); border: 1px solid rgba(var(--accent-rgb), 0.45); }
+.restart-notice p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text); }
+.restart-notice button { justify-self: start; }
 .update-pill:disabled { cursor: progress; opacity: 0.85; }
 .update-pill.busy { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); border-color: rgba(var(--accent-rgb), 0.45); }
 /* ------------------------------------------------------- first-run guide */
@@ -687,7 +691,11 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .help-liens { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .help-liens a, .panel-foot a { color: var(--accent-strong); text-decoration: none; font-weight: 600; }
 .help-liens a:hover, .panel-foot a:hover { text-decoration: underline; }
-.panel-foot { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 14px 0 6px; font-size: 12px; }
+/* Footer: always at the very bottom of the panel, never closer than 40px to
+   the content above it; longer content pushes it further down. */
+body { display: flex; flex-direction: column; }
+body > * { flex: none; }
+.panel-foot { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: auto; padding: 40px 0 6px; font-size: 12px; }
 .panel-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted, var(--text)); font-weight: 500; }
 .panel-foot img { border-radius: 3px; }
 

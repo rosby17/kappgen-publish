@@ -2475,8 +2475,9 @@ $('update-pill').addEventListener('click', async () => {
   status.className = 'update-status';
   status.hidden = false;
   try {
-    const { waiting } = await KappMaj.update((text) => { status.textContent = text; });
+    const { waiting, version } = await KappMaj.update((text) => { status.textContent = text; });
     pill.textContent = waiting ? 'Installée' : 'Redémarrage…';
+    if (waiting) renderRestart(version);
   } catch (error) {
     updating = false;
     pill.disabled = false;
@@ -2494,6 +2495,24 @@ $('update-pill').addEventListener('click', async () => {
     }
   }
 });
+// A new version installed on disk but not running yet (held back by a
+// publication, or by Chrome): say so, with a button to restart now.
+const IS_MAC = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+function renderRestart(version) {
+  const box = $('restart-notice');
+  box.hidden = !version || version === chrome.runtime.getManifest().version;
+  if (box.hidden) return;
+  $('restart-text').textContent = `La version ${version} est installée mais pas encore active. Elle s’activera toute seule à la fin de la publication en cours. Pour l’activer tout de suite, clique « Redémarrer » (une publication en cours reprendra après). Pour tous tes profils Chrome d’un coup : ${IS_MAC ? 'quitte Chrome (Cmd + Q)' : 'ferme Chrome complètement'} et rouvre-le.`;
+  $('update-pill').hidden = true;
+  $('update-status').hidden = true;
+}
+$('restart-now').addEventListener('click', () => chrome.runtime.reload());
+chrome.storage.local.get('restartPending').then(({ restartPending }) => renderRestart(restartPending));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.restartPending) renderRestart(changes.restartPending.newValue);
+});
+fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' }).then((r) => r.json())
+  .then((disk) => { if (disk.version !== chrome.runtime.getManifest().version) renderRestart(disk.version); }).catch(() => {});
 chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.releaseCheck) renderVersion(changes.releaseCheck.newValue);
