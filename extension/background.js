@@ -2415,6 +2415,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     consumeBridgeGrant: () => consumeBridgeGrant(message.token, sender),
     account: () => api('/auth/session').catch((error) => { if (error.status === 401) return null; throw error; }),
     login: () => api('/auth/login', { method: 'POST', body: JSON.stringify({ email: message.email, password: message.password }) }),
+    // Thème choisi dans l'extension : enregistré aussi sur le compte KappGen (« » = automatique), comme sur le site et le logiciel.
+    setTheme: () => api('/profil/theme', { method: 'POST', body: JSON.stringify({ theme: ['clair', 'sombre'].includes(message.theme) ? message.theme : '' }) }),
     logout: async () => { await chrome.storage.local.remove(['publishAccess', 'pendingOrder']); return api('/auth/logout', { method: 'POST' }); },
     status: () => api('/studio-upload/status'),
     queue: async () => (await isLocalApp() ? api('/studio-upload/queue') : { videos: [], host_storage_configured: false }),

@@ -2057,6 +2057,7 @@ async function renderSubscription({ fresh = false } = {}) {
     : forever ? 'Premium · accès à vie'
       : state.kind === 'trial' ? `Essai gratuit : ${state.days_left} jour(s) restant(s)` : `Premium · jusqu’au ${until}`;
   $('account-plan').classList.toggle('free', !active);
+  $('renew').hidden = active && forever;          // accès à vie : plus rien à payer, pas de bouton « Abonnement »
   if (active && waitingPayment) { waitingPayment = false; stopPaymentWatch(); }
   // Small badge on the title line: the trial, or a subscription ending soon.
   const pill = $('plan-pill');
@@ -2166,19 +2167,34 @@ document.addEventListener('visibilitychange', async () => {
 
 // ----------------------------------------------------------------- theme
 
-// Sombre par défaut, clair au choix ; le choix reste dans ce profil Chrome.
+// Thème : celui de l'ordinateur par défaut ; le bouton de l'en-tête et le menu du compte permettent de choisir clair ou sombre
+// à tout moment. Le choix reste dans ce profil Chrome et s'enregistre aussi sur le compte KappGen (même thème que le site).
+const themeAuto = () => (matchMedia('(prefers-color-scheme: light)').matches ? 'clair' : 'sombre');
+function applyTheme(choice, save) {
+  if (choice === 'clair' || choice === 'sombre') localStorage.setItem('kgTheme', choice); else localStorage.removeItem('kgTheme');
+  document.documentElement.dataset.theme = choice || themeAuto();
+  showThemeButton();
+  if (save) send({ type: 'setTheme', theme: choice || '' }).catch(() => {});
+}
+// Thème réglé sur le compte KappGen (site ou logiciel) : appliqué quand il a changé depuis la dernière fois, pour ne pas écraser
+// un choix fait ensuite ici.
+function themeFromAccount(theme) {
+  const value = theme === 'clair' || theme === 'sombre' ? theme : '';
+  if (localStorage.getItem('kgThemeCompte') === (value || 'auto')) return;
+  localStorage.setItem('kgThemeCompte', value || 'auto');
+  applyTheme(value, false);
+}
+for (const b of document.querySelectorAll('[data-theme-choice]')) b.addEventListener('click', (event) => { event.stopPropagation(); applyTheme(b.dataset.themeChoice, true); });
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (!localStorage.getItem('kgTheme')) applyTheme('', false); });
 function showThemeButton() {
+  const choice = localStorage.getItem('kgTheme') || '';
+  for (const b of document.querySelectorAll('[data-theme-choice]')) b.setAttribute('aria-checked', String(b.dataset.themeChoice === choice));
   const light = document.documentElement.dataset.theme === 'clair';
   const label = light ? 'Passer en thème sombre' : 'Passer en thème clair';
   $('theme-toggle').title = label;
   $('theme-toggle').setAttribute('aria-label', label);
 }
-$('theme-toggle').addEventListener('click', () => {
-  const next = document.documentElement.dataset.theme === 'clair' ? 'sombre' : 'clair';
-  document.documentElement.dataset.theme = next;
-  localStorage.setItem('kgTheme', next);
-  showThemeButton();
-});
+$('theme-toggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'clair' ? 'sombre' : 'clair', true));
 showThemeButton();
 
 // --------------------------------------------------------------- account
@@ -2202,7 +2218,8 @@ async function renderAccount() {
   $('account-email').textContent = email || 'Compte KappGen';
   $('pw-account-email').textContent = email || 'Compte KappGen'; // shown on the paywall: the right account?
   $('account-name').textContent = name || email.split('@')[0] || 'Compte KappGen';
-  // Profile photo (Google account), otherwise the first letter.
+  if (typeof user.theme === 'string') themeFromAccount(user.theme);
+  // Profile photo (the one of the KappGen account, from Google), otherwise the first letter.
   const avatar = $('avatar');
   avatar.replaceChildren();
   if (user.picture_url) {

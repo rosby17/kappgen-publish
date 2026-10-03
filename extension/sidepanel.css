@@ -683,3 +683,9 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .panel-foot { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 14px 0 6px; font-size: 12px; }
 .panel-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted, var(--text)); font-weight: 500; }
 .panel-foot img { border-radius: 3px; }
+
+/* Thème dans le menu du compte : Auto (comme l'ordinateur), Clair, Sombre. */
+.profile-theme { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.theme-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; border: 1px solid var(--border); }
+.theme-seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+.theme-seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
