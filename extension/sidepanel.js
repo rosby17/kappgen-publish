@@ -2582,6 +2582,41 @@ async function unzipToDirectoryHandle(zipArrayBuffer, dirHandle) {
     offset = dataOffset + compSize;
   }
 }
+async function isExtensionDir(handle) {
+  if (!handle) return false;
+  try {
+    const file = await handle.getFileHandle('manifest.json');
+    const blob = await file.getFile();
+    const text = await blob.text();
+    const manifest = JSON.parse(text);
+    return manifest && manifest.name === 'KappGen Publish';
+  } catch (e) {
+    return false;
+  }
+}
+
+async function findExtensionHandle() {
+  const ext = await loadExtHandle();
+  if (ext && (await isExtensionDir(ext))) return ext;
+
+  try {
+    const root = await KappDossier.loadRoot();
+    if (root && (await isExtensionDir(root))) {
+      await saveExtHandle(root);
+      return root;
+    }
+  } catch (e) {}
+
+  try {
+    const yt = await KappDossier.loadNetRoot('youtube');
+    if (yt && (await isExtensionDir(yt))) {
+      await saveExtHandle(yt);
+      return yt;
+    }
+  } catch (e) {}
+
+  return null;
+}
 
 async function triggerHeaderUpdate() {
   const pill = $('update-pill');
@@ -2600,7 +2635,7 @@ async function triggerHeaderUpdate() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const zipArrayBuffer = await res.arrayBuffer();
 
-    let dirHandle = await loadExtHandle();
+    let dirHandle = await findExtensionHandle();
     if (dirHandle) {
       try {
         let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
@@ -2622,7 +2657,7 @@ async function triggerHeaderUpdate() {
     pill.textContent = '✓ Mis à jour !';
     setTimeout(() => {
       chrome.runtime.reload();
-    }, 800);
+    }, 600);
 
   } catch (err) {
     pill.disabled = false;
