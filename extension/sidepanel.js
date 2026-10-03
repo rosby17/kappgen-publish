@@ -1143,6 +1143,93 @@ function postRow(post) {
   return item;
 }
 
+// The extension's own history (lib/historique.js): what was published,
+// even when its folder was changed, moved or cleaned up since. Shown in each
+// « Déjà publiés » list after what the folders still hold.
+let historyEntries = [];
+async function loadHistory() {
+  historyEntries = await KappHistorique.list().catch(() => []);
+  return historyEntries;
+}
+const HISTORY_KINDS = { video: 'Vidéo', short: 'Short', reel: 'Réel', photo: 'Photo', texte: 'Texte', post: 'Post' };
+function historyFor(net, known = []) {
+  const seen = new Set(known);
+  return historyEntries.filter((entry) => entry.net === net && !seen.has(entry.path));
+}
+function historyRow(entry) {
+  const d = new Date(entry.at);
+  const when = `${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} à ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const actions = [];
+  if (entry.url) {
+    const link = el('a', 'btn ghost', 'Voir');
+    link.href = entry.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    actions.push(link);
+  }
+  const item = mediaRow({ emptyLabel: HISTORY_KINDS[entry.kind] || 'Post', title: entry.title,
+    detail: [HISTORY_KINDS[entry.kind], when, entry.channel].filter(Boolean).join(' · '),
+    status: pill('ok', entry.manual ? 'Publié (marqué à la main)' : 'Publié'), actions });
+  if (entry.thumb) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = entry.thumb;
+    item.querySelector('.mini').replaceChildren(img);
+  }
+  item.classList.add('from-history');
+  item.dataset.ytKinds = entry.kind === 'short' ? 'short' : 'video';
+  return item;
+}
+// Adds the history rows of a network to one of its « Déjà … » lists.
+function appendHistory(net, known, listId, boxId, titleId, label, count) {
+  const extra = historyFor(net, known);
+  $(listId).append(...extra.map(historyRow));
+  const total = count + extra.length;
+  $(boxId).hidden = !total;
+  $(titleId).textContent = `${label} (${total})`;
+}
+// What the folders already mark as published goes into the history too
+// (once per item), so it survives a later folder change or clean-up.
+const backfilled = new Set();
+async function backfillHistory(items) {
+  const have = new Set(historyEntries.map((e) => `${e.net}|${e.kind}|${e.path}`));
+  let added = false;
+  for (const it of items) {
+    const key = `${it.net}|${it.kind}|${it.path}`;
+    if (have.has(key) || backfilled.has(key)) continue;
+    backfilled.add(key);
+    const thumbFile = it.thumb ? await KappDossier.fileAt(it.thumb).catch(() => null) : null;
+    await KappHistorique.add({ ...it, thumbFile }).catch(() => {});
+    added = true;
+  }
+  if (added) await loadHistory();
+  return added;
+}
+const postHistoryItems = (posts) => posts.flatMap((p) => {
+  const base = { kind: p.type, path: p.path, title: (p.text || '').split('\n')[0] || p.path.split('/').pop(), thumb: p.image_path, channel: p.channel_name };
+  const out = [];
+  if (p.statut === 'publie') out.push({ ...base, net: 'facebook', at: Date.parse(p.published_at || '') || p.due_at || Date.now() });
+  for (const net of ['x', 'linkedin', 'tiktok', 'instagram']) if (p[`${net}_statut`] === 'publie') out.push({ ...base, net, at: Date.parse(p.published_at || '') || Date.now() });
+  return out;
+});
+const videoHistoryItems = (sent) => sent.flatMap((v) => {
+  const base = { path: v.relative_path, title: v.title, thumb: v.thumbnail_path || v.preview_path, channel: v.channel_name };
+  const at = (value) => (typeof value === 'number' ? value : Date.parse(value || '')) || Date.parse(v.date || '') || Date.now();
+  const out = [];
+  if (v.youtube_id) out.push({ ...base, net: 'youtube', kind: 'video', at: at(v.published_at), url: `https://youtu.be/${v.youtube_id}` });
+  if (v.short_youtube_id) out.push({ ...base, net: 'youtube', kind: 'short', at: at(v.published_at), url: `https://www.youtube.com/shorts/${v.short_youtube_id}` });
+  if (v.facebook_published_at) out.push({ ...base, net: 'facebook', kind: 'video', at: at(v.facebook_published_at) });
+  if (v.tiktok_published_at) out.push({ ...base, net: 'tiktok', kind: 'video', at: at(v.tiktok_published_at) });
+  if (v.instagram_published_at) out.push({ ...base, net: 'instagram', kind: 'reel', at: at(v.instagram_published_at) });
+  if (v.x_published_at) out.push({ ...base, net: 'x', kind: 'video', at: at(v.x_published_at) });
+  if (v.linkedin_published_at) out.push({ ...base, net: 'linkedin', kind: 'video', at: at(v.linkedin_published_at) });
+  return out;
+});
+KappHistorique.onChange(() => loadHistory().then(() => {
+  renderPosts();
+  if (lastScan) renderOnYoutube(lastScan).catch(() => {});
+}));
+
 // Posts grouped by day, each day folded (today open): a long list (hundreds
 // of posts a day) stays readable. Rows of a day are built when it is opened.
 let postFilter = '';
@@ -1157,7 +1244,7 @@ function dayLabel(key) {
   const name = diff === 0 ? 'Aujourd’hui' : diff === 1 ? 'Demain' : diff === -1 ? 'Hier' : d.toLocaleDateString('fr-FR', { weekday: 'long' });
   return `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${date}`;
 }
-function dayGroups(list, timeOf, scope, { openToday = false, openFirst = false } = {}) {
+function dayGroups(list, timeOf, scope, { openToday = false, openFirst = false, row = postRow } = {}) {
   const groups = new Map();
   for (const post of list) {
     const key = dayKey(timeOf(post));
@@ -1175,7 +1262,7 @@ function dayGroups(list, timeOf, scope, { openToday = false, openFirst = false }
     const invalid = posts.filter((p) => p.configuration_error).length;
     summary.append(el('span', 'day-name', dayLabel(key)), el('span', 'day-count', `${posts.length} post${posts.length > 1 ? 's' : ''}${verify ? ` · ${verify} à vérifier` : ''}${failed ? ` · ${failed} en échec` : ''}${invalid ? ` · ${invalid} à corriger` : ''}`));
     const list = el('ul', 'rows');
-    const fill = () => { if (!list.childElementCount) list.replaceChildren(...posts.map(postRow)); };
+    const fill = () => { if (!list.childElementCount) list.replaceChildren(...posts.map(row)); };
     if (box.open) fill();
     box.addEventListener('toggle', () => {
       if (box.open) { openDays.add(id); openDays.delete(`${id}:closed`); fill(); applyJob(); }
@@ -1407,7 +1494,13 @@ async function renderPostsOnce() {
   const rank = { en_cours: 0, a_verifier: 1, echec: 2, a_publier: 3 };
   const toCome = posts.filter((p) => p.statut !== 'publie')
     .sort((a, b) => (rank[a.statut] ?? 3) - (rank[b.statut] ?? 3) || (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
-  const done = posts.filter((p) => p.statut === 'publie')
+  // Published: what the folder still holds, then the extension's own history.
+  await loadHistory();
+  backfillHistory(postHistoryItems(posts)).catch(() => {});
+  const known = [...posts.map((p) => p.path), ...((lastScan && lastScan.sent) || []).map((v) => v.relative_path)];
+  const fromHistory = historyFor('facebook', known).map((entry) => ({ path: entry.path, statut: 'publie', type: entry.kind,
+    published_at: new Date(entry.at).toISOString(), history: entry }));
+  const done = [...posts.filter((p) => p.statut === 'publie'), ...fromHistory]
     .sort((a, b) => Date.parse(b.published_at || 0) - Date.parse(a.published_at || 0));
   const summary = $('fb-summary');
   if (reply && !reply.ok) { summary.className = 'warn'; summary.textContent = reply.error; }
@@ -1426,7 +1519,8 @@ async function renderPostsOnce() {
   const doneShown = done.filter(shown);
   $('fb-done-box').hidden = !doneShown.length;
   $('fb-done-title').textContent = `Déjà publiés (${doneShown.length})`;
-  $('fb-done-days').replaceChildren(...dayGroups(doneShown, (p) => Date.parse(p.published_at || 0) || p.due_at, 'done', { openFirst: true }));
+  $('fb-done-days').replaceChildren(...dayGroups(doneShown, (p) => Date.parse(p.published_at || 0) || p.due_at, 'done',
+    { openFirst: true, row: (p) => (p.history ? historyRow(p.history) : postRow(p)) }));
   $('no-posts').hidden = !(posts.length && !upcoming.length);
   applyJob();
   await refreshNetworkData();
@@ -1720,6 +1814,7 @@ async function renderShare(net) {
   $(`${net}-done-box`).hidden = !done.length;
   $(`${net}-done-title`).textContent = `Déjà sur ${k.name} (${done.length})`;
   $(`${net}-done`).replaceChildren(...done.map(card));
+  appendHistory(net, items.map((it) => it.path), `${net}-done`, `${net}-done-box`, `${net}-done-title`, `Déjà sur ${k.name}`, done.length);
   applyJob();
 }
 
@@ -1776,6 +1871,7 @@ function renderTikTok() {
   $('tiktok-done-box').hidden = !done.length;
   $('tiktok-done-title').textContent = `Déjà sur TikTok (${done.length})`;
   $('tiktok-done').replaceChildren(...done.map(tiktokCard));
+  appendHistory('tiktok', items.map((it) => it.path), 'tiktok-done', 'tiktok-done-box', 'tiktok-done-title', 'Déjà sur TikTok', done.length);
   applyJob();
 }
 
@@ -1824,6 +1920,7 @@ function renderInstagram() {
   $('instagram-done-box').hidden = !done.length;
   $('instagram-done-title').textContent = `Déjà sur Instagram (${done.length})`;
   $('instagram-done').replaceChildren(...done.map(igCard));
+  appendHistory('instagram', items.map((it) => it.path), 'instagram-done', 'instagram-done-box', 'instagram-done-title', 'Déjà sur Instagram', done.length);
   settings().then((config) => { $('instagram-auto').checked = !!config.instagramAuto; });
   applyJob();
 }
@@ -1861,9 +1958,13 @@ async function renderOnYoutube(data, config) {
   // The long video and its Short: two rows, one under the other.
   $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
     .flatMap((v) => (v.short_youtube_id ? [sentItem(v), shortItem(v)] : [sentItem(v)])));
+  await loadHistory();
+  backfillHistory(videoHistoryItems(data.sent)).catch(() => {});
+  const oldOnes = historyFor('youtube', data.sent.map((v) => v.relative_path));
+  $('sent').append(...oldOnes.map(historyRow));
   applyYtFilter();
   applyJob();
-  if (!data.sent.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';
+  if (!data.sent.length && !oldOnes.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';
 }
 
 function youtubeItem(video) {

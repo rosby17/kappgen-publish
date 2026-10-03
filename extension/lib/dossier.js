@@ -701,10 +701,76 @@ const KappDossier = (() => {
       }
     }
     videos.sort((a, b) => a.channel_key.localeCompare(b.channel_key) || a.relative_path.localeCompare(b.relative_path));
+    for (const v of [...videos, ...sent]) {
+      scanInfo.set(v.relative_path, { title: v.title, thumb: v.thumbnail_path || v.preview_path || null, channel: v.channel_name || null });
+    }
     return { folder: tree.name, videos, sent, excluded, channels: [...channels.values()].sort((a, b) => a.key.localeCompare(b.key)) };
   }
 
   // --------------------------------------------------------------- state
+
+  // ------------------------------------------------------------ history
+  //
+  // Every publication written below also goes into the extension's own
+  // history (lib/historique.js), with a title, a thumbnail and a link.
+  const scanInfo = new Map(); // relative_path → { title, thumb, channel } of the last scan
+  const history = () => (typeof KappHistorique !== 'undefined' ? KappHistorique : null);
+  // What a video record gained: [field, network, kind, link].
+  const VIDEO_MARKS = [
+    ['youtubeId', 'youtube', 'video', (id) => `https://youtu.be/${id}`],
+    ['shortYoutubeId', 'youtube', 'short', (id) => `https://www.youtube.com/shorts/${id}`],
+    ['facebookPublishedAt', 'facebook', 'video'], ['facebookReelAt', 'facebook', 'reel'],
+    ['xPublishedAt', 'x', 'video'], ['linkedinPublishedAt', 'linkedin', 'video'],
+    ['tiktokPublishedAt', 'tiktok', 'video'], ['instagramPublishedAt', 'instagram', 'reel'],
+  ];
+  async function fileIn(dir, name) {
+    try { return await (await dir.getFileHandle(name)).getFile(); } catch { return null; }
+  }
+  async function recordVideo(relativePath, videoDir, videoName, before, after, manual) {
+    const h = history();
+    if (!h || !after) return;
+    const gained = VIDEO_MARKS.filter(([key]) => after[key] && after[key] !== (before || {})[key]);
+    if (!gained.length) return;
+    const info = scanInfo.get(relativePath) || {};
+    let thumbFile = null;
+    if (info.thumb) thumbFile = await fileAt(info.thumb).catch(() => null);
+    if (!thumbFile) {
+      const images = [];
+      for await (const [name, handle] of videoDir.entries()) if (handle.kind === 'file' && IMAGE_EXT.test(name)) images.push(name);
+      images.sort((a, b) => Number(!/miniature|thumb/i.test(a)) - Number(!/miniature|thumb/i.test(b)) || a.localeCompare(b));
+      thumbFile = images.length ? await fileIn(videoDir, images[0]) : await fileIn(videoDir, videoName);
+    }
+    const title = info.title || stem(videoName).replace(/[-_]+/g, ' ');
+    for (const [key, net, kind, link] of gained) {
+      const value = after[key];
+      const at = typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : Date.now();
+      await h.add({ net, kind, path: relativePath, title, at, url: link ? link(value) : null, channel: info.channel, manual, thumbFile });
+    }
+  }
+  async function recordPost(path, dir, info, patch) {
+    const h = history();
+    if (!h) return;
+    const nets = [];
+    if (patch.statut === 'publie') nets.push(['facebook', patch]);
+    for (const net of POST_NETS) if (patch[net] && patch[net].statut === 'publie') nets.push([net, patch[net]]);
+    if (!nets.length) return;
+    const files = [];
+    for await (const [name, handle] of dir.entries()) if (handle.kind === 'file') files.push(name);
+    const textName = (typeof info.texte === 'string' && files.includes(info.texte) && info.texte)
+      || files.filter((f) => /\.(txt|md)$/i.test(f) && f !== MARKER_FILE && !NOT_A_SHEET.test(norm(stem(f))))
+        .sort((x, y) => Number(!/^texte/i.test(x)) - Number(!/^texte/i.test(y)) || x.localeCompare(y))[0];
+    const textFile = textName ? await fileIn(dir, textName) : null;
+    const text = textFile && textFile.size <= 64 * 1024 ? (await textFile.text()).trim() : '';
+    const image = (typeof info.image === 'string' && files.includes(info.image) && info.image) || files.filter((f) => IMAGE_EXT.test(f)).sort()[0];
+    const video = files.filter((f) => VIDEO_EXT.test(f)).sort()[0];
+    const thumbFile = image ? await fileIn(dir, image) : video ? await fileIn(dir, video) : null;
+    const kind = video ? 'reel' : image ? 'photo' : 'texte';
+    for (const [net, state] of nets) {
+      const at = Date.parse(state.published_at || '') || Date.now();
+      await h.add({ net, kind, path, title: text.split('\n')[0] || dir.name, at, url: state.url || state.lien || null,
+        manual: !!state.manuel, thumbFile });
+    }
+  }
 
   // status: started | published | failed | ignored | excluded | reset
   async function mark(relativePath, status, data = {}) {
@@ -717,6 +783,7 @@ const KappDossier = (() => {
     const side = await readSide(videoDir);
     // The video's own record wins; an older root record is carried over.
     if (side[videoName]) state[relativePath] = side[videoName];
+    const before = state[relativePath] ? { ...state[relativePath] } : null;
     const now = Date.now();
     if (status === 'applied') {
       // Re-applied to YouTube after the sheet/thumbnail changed (status stays "published").
@@ -800,6 +867,7 @@ const KappDossier = (() => {
     else delete side[videoName];
     await writeSide(videoDir, side);
     await writeMarker(videoDir, side).catch(() => {});
+    await recordVideo(relativePath, videoDir, videoName, before, state[relativePath], status === 'manual').catch(() => {});
     return state[relativePath] || null;
   }
 
@@ -1097,6 +1165,7 @@ const KappDossier = (() => {
     const writable = await handle.createWritable();
     await writable.write(JSON.stringify(info, null, 2));
     await writable.close();
+    await recordPost(path, dir, info, patch).catch(() => {});
     return info;
   }
 

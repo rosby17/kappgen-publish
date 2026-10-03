@@ -319,3 +319,53 @@ test('an uncertain Facebook submission stays blocked pending human verification'
   assert.equal(item.ready, false);
   assert.match(item.error, /parcours publicitaire/);
 });
+
+// The extension's own history (lib/historique.js) receives every publication.
+function libraryWithHistory() {
+  const added = [];
+  const context = vm.createContext({ console, DOMException, indexedDB: {}, KappHistorique: { add: async (entry) => { added.push(entry); } } });
+  const fiches = readFileSync(join(root, 'extension/lib/fiches.js'), 'utf8');
+  const dossier = readFileSync(join(root, 'extension/lib/dossier.js'), 'utf8');
+  vm.runInContext(`${fiches}\n${dossier}\nthis.KappDossier = KappDossier;`, context);
+  return { KappDossier: context.KappDossier, added };
+}
+
+test('a published Facebook post and its X copy go into the history', async () => {
+  const { KappDossier, added } = libraryWithHistory();
+  const disk = new MemoryDirectory('VIDEOS');
+  const facebook = new MemoryDirectory('FACEBOOK');
+  const post = facebook.dir('2026-10-02-1200-zidane');
+  post.file('texte.txt', 'Zidane : « On méritait mieux »\nLe reste du texte');
+  post.file('publication.json', '{}');
+  KappDossier._setTestRoot(disk);
+  KappDossier._setTestFbRoot(facebook);
+  const path = 'fb:2026-10-02-1200-zidane';
+
+  await KappDossier.markPost(path, { statut: 'en_cours', started_at: new Date().toISOString() });
+  assert.equal(added.length, 0, 'a post being sent is not published yet');
+  await KappDossier.markPost(path, { statut: 'publie', published_at: '2026-10-02T12:01:00.000Z' });
+  await KappDossier.markPost(path, { x: { statut: 'publie', published_at: '2026-10-02T12:05:00.000Z' } });
+  assert.deepEqual(added.map((e) => [e.net, e.kind, e.path, e.title, e.at]), [
+    ['facebook', 'texte', path, 'Zidane : « On méritait mieux »', Date.parse('2026-10-02T12:01:00.000Z')],
+    ['x', 'texte', path, 'Zidane : « On méritait mieux »', Date.parse('2026-10-02T12:05:00.000Z')],
+  ]);
+});
+
+test('a YouTube video, its Short and its Reel go into the history with their links', async () => {
+  const { KappDossier, added } = libraryWithHistory();
+  const disk = new MemoryDirectory('VIDEOS');
+  project(disk.dir('CHAINE'), 'Episode', 'episode.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+  const path = 'CHAINE/Episode/episode.mp4';
+
+  await KappDossier.mark(path, 'started');
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk', shortYoutubeId: 'shortshort1' });
+  await KappDossier.mark(path, 'published', { facebookReelAt: '2026-10-02T13:00:00.000Z' });
+  await KappDossier.mark(path, 'published', { facebookReelAt: '2026-10-02T13:00:00.000Z' }); // nothing new
+  assert.deepEqual(added.map((e) => [e.net, e.kind, e.url]), [
+    ['youtube', 'video', 'https://youtu.be/abcdefghijk'],
+    ['youtube', 'short', 'https://www.youtube.com/shorts/shortshort1'],
+    ['facebook', 'reel', null],
+  ]);
+  assert.ok(added.every((e) => e.path === path && e.title));
+});
