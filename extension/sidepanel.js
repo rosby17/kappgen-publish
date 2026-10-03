@@ -2318,7 +2318,7 @@ $('save-url').addEventListener('click', async () => {
   const input = $('app-url');
   const value = normalizedServerUrl(input.value);
   if (input.value.trim() && !value) {
-    input.setCustomValidity('Utilise https://api.kappgen.com ou un serveur local http://localhost…');
+    input.setCustomValidity('Utilise https://app.kappgen.com ou un serveur local http://localhost…');
     input.reportValidity();
     return;
   }

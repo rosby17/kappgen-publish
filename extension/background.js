@@ -23,7 +23,7 @@ importScripts('lib/schedule.js');
 
 // The user's KappGen account (session cookie of kappgen.com). The local
 // Docker version is chosen in the panel's Help tab (http://localhost:8080).
-const DEFAULT_APP_URL = 'https://api.kappgen.com';
+const DEFAULT_APP_URL = 'https://app.kappgen.com';   // KappGen 2.0 : compte, abonnement et recette sont sur le même site (api.kappgen.com est abandonné)
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function normalizeAppUrl(value) {
@@ -50,6 +50,8 @@ function safeRedirectUrl(value) {
 
 async function appUrl() {
   const { appUrl: saved } = await chrome.storage.local.get('appUrl');
+  // Les profils déjà configurés sur l'ancienne API passent d'office sur le nouveau site.
+  if (saved && /^https:\/\/api\.kappgen\.com\/?$/.test(saved)) return normalizeAppUrl(DEFAULT_APP_URL);
   return normalizeAppUrl(saved || DEFAULT_APP_URL);
 }
 
