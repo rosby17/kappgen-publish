@@ -690,34 +690,7 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .theme-seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
 .theme-seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
 
-/* ------------------------------------------- modal de mise à jour (1.20.10) */
-.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
-.modal-close { background: none; border: 0; color: var(--muted); font-size: 18px; font-weight: 700; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
-.modal-close:hover { color: var(--text); background: rgba(var(--ink), 0.1); }
-.update-info-card { padding: 12px; border-radius: 10px; background: rgba(var(--shade), 0.25); border: 1px solid var(--border); }
-.update-ver-comparison { display: flex; align-items: center; justify-content: space-around; text-align: center; }
-.ver-col { display: flex; flex-direction: column; gap: 2px; }
-.ver-arrow { font-size: 16px; color: var(--muted); }
-.highlight { color: var(--ok); }
-.highlight.newer { color: var(--warn); }
-.align-center { text-align: center; }
-.update-pill { cursor: pointer; border: 1px solid rgba(var(--warn-rgb), 0.45); background: rgba(var(--warn-rgb), 0.14); color: var(--warn); font-family: inherit; }
+/* ------------------------------------------------- update pill (1.20.13) */
+.update-pill { cursor: pointer; border: 1px solid rgba(var(--warn-rgb), 0.45); background: rgba(var(--warn-rgb), 0.14); color: var(--warn); font-family: inherit; transition: opacity 0.15s; }
 .update-pill:hover { opacity: 0.85; filter: brightness(1.1); }
-
-/* ------------------------------------------- bandeau de mise à jour (1.20.12) */
-.update-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  margin: 10px 0 6px;
-  border-radius: 10px;
-  background: rgba(var(--warn-rgb, 255, 170, 0), 0.15);
-  border: 1px solid rgba(var(--warn-rgb, 255, 170, 0), 0.5);
-  color: var(--text);
-}
-.update-banner-icon { font-size: 20px; flex: none; }
-.update-banner-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.update-banner-text strong { font-size: 13px; color: var(--warn); line-height: 1.2; }
-.update-banner-text .small { font-size: 11.5px; opacity: 0.9; }
-.small-btn { padding: 6px 12px; font-size: 12px; font-weight: 700; white-space: nowrap; flex: none; cursor: pointer; }
+.update-pill:disabled { opacity: 0.6; cursor: wait; }

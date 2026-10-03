@@ -2443,14 +2443,15 @@ $('job-clear').addEventListener('click', async () => {
 
 // Version next to the logo, and a notice when a newer one is out on GitHub
 // (the zip install cannot update itself: the link explains how).
+// ------------------------------------------------- version, update notice (1.20.13)
 const newerVersion = (a, b) => {
   const x = String(a).split('.').map(Number);
   const y = String(b).split('.').map(Number);
   for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
   return false;
 };
-let cachedLatestRelease = null;
 
+let cachedLatestRelease = null;
 async function fetchLatestTagFromGitHub() {
   if (cachedLatestRelease) return cachedLatestRelease;
   try {
@@ -2471,78 +2472,49 @@ async function fetchLatestTagFromGitHub() {
 function renderVersion(releaseCheck) {
   const current = chrome.runtime.getManifest().version;
   $('version').textContent = `v${current}`;
-  if ($('settings-version-tag')) $('settings-version-tag').textContent = `v${current}`;
-
   const latest = (releaseCheck && releaseCheck.latest) || cachedLatestRelease;
   const hasNewer = latest && newerVersion(latest, current);
-
   const pill = $('update-pill');
   if (pill) {
     pill.hidden = !hasNewer;
     if (hasNewer) {
-      pill.textContent = `Mise à jour v${latest}`;
-      pill.title = `Version v${latest} disponible. Cliquer pour mettre à jour en 1 clic.`;
-    }
-  }
-
-  const banner = $('update-banner');
-  if (banner) {
-    banner.hidden = !hasNewer;
-    if (hasNewer && $('banner-version')) {
-      $('banner-version').textContent = latest;
+      pill.textContent = `⚡ Mise à jour v${latest}`;
+      pill.title = `Cliquer pour installer la version v${latest} en 1 clic.`;
     }
   }
 }
 
-function openUpdateModal() {
-  const current = chrome.runtime.getManifest().version;
-  const modal = $('update-modal');
-  if (!modal) return;
-  modal.hidden = false;
-  if ($('update-cur-ver')) $('update-cur-ver').textContent = `v${current}`;
-  if ($('update-latest-ver')) {
-    $('update-latest-ver').textContent = 'Vérification...';
-    $('update-latest-ver').className = 'highlight';
-  }
-  if ($('update-status-msg')) $('update-status-msg').textContent = 'Recherche de la dernière version sur GitHub...';
-  if ($('copy-toast')) $('copy-toast').hidden = true;
+chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.releaseCheck) renderVersion(changes.releaseCheck.newValue);
+});
+send({ type: 'checkRelease' }).catch(() => {});
 
-  fetchLatestTagFromGitHub().then((latestTag) => {
-    const newest = latestTag || current;
-    if ($('update-latest-ver')) $('update-latest-ver').textContent = `v${newest}`;
-    if (newerVersion(newest, current)) {
-      if ($('update-latest-ver')) $('update-latest-ver').className = 'highlight newer';
-      if ($('update-status-msg')) $('update-status-msg').textContent = `Une nouvelle version (v${newest}) est disponible !`;
-      renderVersion({ latest: newest });
-    } else {
-      if ($('update-latest-ver')) $('update-latest-ver').className = 'highlight';
-      if ($('update-status-msg')) $('update-status-msg').textContent = `Ton extension est déjà à jour (v${current}).`;
-    }
+function getExtDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('kappgen-dossier', 1);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
   });
 }
-
-function closeUpdateModal() {
-  const modal = $('update-modal');
-  if (modal) modal.hidden = true;
+async function saveExtHandle(handle) {
+  try {
+    const base = await getExtDb();
+    const tx = base.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(handle, 'ext_handle');
+  } catch (e) {}
 }
-
-$('update-modal-close')?.addEventListener('click', closeUpdateModal);
-$('version')?.addEventListener('click', openUpdateModal);
-$('update-pill')?.addEventListener('click', openUpdateModal);
-$('btn-open-update-settings')?.addEventListener('click', openUpdateModal);
-$('banner-update-btn')?.addEventListener('click', triggerAutoUpdate);
-
-$('btn-copy-command')?.addEventListener('click', () => {
-  const isWin = /win/i.test(navigator.platform || navigator.userAgent);
-  const cmd = isWin
-    ? `$repo = 'rosby17/kappgen-publish'; $tag = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ Accept = 'application/vnd.github+json' } -UseBasicParsing).tag_name; $zipUrl = "https://github.com/$repo/releases/download/$tag/kappgen-publish.zip"; irm https://app.kappgen.com/extension/install.ps1 | iex`
-    : `curl -fsSL https://app.kappgen.com/extension/install.sh | bash`;
-
-  navigator.clipboard.writeText(cmd).then(() => {
-    const toast = $('copy-toast');
-    if (toast) toast.hidden = false;
-  }).catch(() => {});
-});
+async function loadExtHandle() {
+  try {
+    const base = await getExtDb();
+    return new Promise((resolve) => {
+      const tx = base.transaction('kv', 'readonly');
+      const req = tx.objectStore('kv').get('ext_handle');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) { return null; }
+}
 
 async function unzipToDirectoryHandle(zipArrayBuffer, dirHandle) {
   const view = new DataView(zipArrayBuffer);
@@ -2611,39 +2583,12 @@ async function unzipToDirectoryHandle(zipArrayBuffer, dirHandle) {
   }
 }
 
-function getExtDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('kappgen-dossier', 1);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function saveExtHandle(handle) {
-  try {
-    const base = await getExtDb();
-    const tx = base.transaction('kv', 'readwrite');
-    tx.objectStore('kv').put(handle, 'ext_handle');
-  } catch (e) {}
-}
-async function loadExtHandle() {
-  try {
-    const base = await getExtDb();
-    return new Promise((resolve) => {
-      const tx = base.transaction('kv', 'readonly');
-      const req = tx.objectStore('kv').get('ext_handle');
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-    });
-  } catch (e) { return null; }
-}
-
-async function triggerAutoUpdate() {
-  const btn = $('btn-update-auto');
-  const msg = $('update-status-msg');
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Téléchargement de la dernière version...';
-  if (msg) msg.textContent = 'Téléchargement de l’archive depuis GitHub...';
+async function triggerHeaderUpdate() {
+  const pill = $('update-pill');
+  if (!pill) return;
+  const originalText = pill.textContent;
+  pill.disabled = true;
+  pill.textContent = '⏳ Téléchargement...';
 
   try {
     const latestTag = await fetchLatestTagFromGitHub();
@@ -2652,7 +2597,7 @@ async function triggerAutoUpdate() {
       : `https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip`;
 
     const res = await fetch(zipUrl);
-    if (!res.ok) throw new Error(`Impossible de télécharger l'archive (HTTP ${res.status})`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const zipArrayBuffer = await res.arrayBuffer();
 
     let dirHandle = await loadExtHandle();
@@ -2661,227 +2606,30 @@ async function triggerAutoUpdate() {
         let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
         if (perm !== 'granted') perm = await dirHandle.requestPermission({ mode: 'readwrite' });
         if (perm !== 'granted') dirHandle = null;
-      } catch (e) {
-        dirHandle = null;
-      }
+      } catch (e) { dirHandle = null; }
     }
 
     if (!dirHandle) {
-      btn.textContent = '📂 Sélection du dossier KappGen-Publish...';
-      if (msg) msg.textContent = 'Sélectionne le dossier de l’extension (KappGen-Publish) pour autoriser la mise à jour...';
-      try {
-        dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-        await saveExtHandle(dirHandle);
-      } catch (e) {
-        throw new Error('Sélection du dossier annulée.');
-      }
+      pill.disabled = false;
+      pill.textContent = originalText;
+      chrome.tabs.create({ url: chrome.runtime.getURL('autorisation.html?action=update') });
+      return;
     }
 
-    btn.textContent = '⚙️ Remplacement des fichiers...';
-    if (msg) msg.textContent = 'Installation des nouveaux fichiers en cours...';
-
+    pill.textContent = '⚙️ Installation...';
     await unzipToDirectoryHandle(zipArrayBuffer, dirHandle);
 
-    btn.textContent = '✓ Mis à jour ! Redémarrage...';
-    if (msg) msg.textContent = 'Extension mise à jour avec succès ! Redémarrage de Chrome...';
-
+    pill.textContent = '✓ Mis à jour !';
     setTimeout(() => {
       chrome.runtime.reload();
-    }, 1000);
+    }, 800);
 
   } catch (err) {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
-    if (msg) msg.textContent = `❌ Erreur : ${err.message || err}`;
+    pill.disabled = false;
+    pill.textContent = originalText;
+    console.error('Update failed:', err);
+    chrome.tabs.create({ url: chrome.runtime.getURL('autorisation.html?action=update') });
   }
 }
 
-$('btn-update-auto')?.addEventListener('click', triggerAutoUpdate);
-chrome.storage.local.get('releaseCheck').then(({ releaseCheck }) => renderVersion(releaseCheck));
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.releaseCheck) renderVersion(changes.releaseCheck.newValue);
-});
-send({ type: 'checkRelease' }).catch(() => {});
-
-// One line under the title: is the automatic publishing running, when did it
-// last look, what is next, and on which clock (this computer's).
-const clock = (t) => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-function timeZoneLabel() {
-  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'heure locale';
-  const offset = -new Date().getTimezoneOffset();
-  const sign = offset >= 0 ? '+' : '-';
-  const h = Math.floor(Math.abs(offset) / 60);
-  const m = Math.abs(offset) % 60;
-  return `${zone.replace(/_/g, ' ')}, UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
-}
-async function renderAutoStatus() {
-  const { autoStatus, lastAutoTick, nextDueAt, catchUp, autoPaused } = await chrome.storage.local.get(['autoStatus', 'lastAutoTick', 'nextDueAt', 'catchUp', 'autoPaused']);
-  const box = $('auto-status');
-  const now = Date.now();
-  // Folder access closed by Chrome: a card with one button instead of a sentence.
-  const paused = !!(autoStatus && autoStatus.state === 'folder');
-  $('paused').hidden = !paused;
-  let tone = '';
-  let text;
-  if (paused) {
-    box.hidden = true;
-    return;
-  } else if (autoPaused) {
-    tone = 'warn'; text = 'Tout est en pause : rien ne part automatiquement. Clique « Reprendre » pour relancer.';
-  } else if (autoStatus && autoStatus.state === 'nofolder') {
-    tone = 'warn'; text = 'Publication automatique en attente : choisis d’abord le dossier de tes vidéos (Réglages).';
-  } else if (!lastAutoTick) {
-    text = 'Publication automatique : démarrage…';
-  } else if (autoStatus && autoStatus.state === 'subscription') {
-    tone = 'warn'; text = 'Publication automatique en pause : ton abonnement n’est plus actif.';
-  } else if (now - lastAutoTick > 12 * 60000) {
-    tone = 'warn'; text = `Pas de vérification depuis ${clock(lastAutoTick)} (Chrome fermé ou ordinateur en veille). Ce qui était prévu part maintenant.`;
-  } else {
-    tone = autoStatus && autoStatus.state === 'busy' ? 'busy' : '';
-    const later = nextDueAt && new Date(nextDueAt).toDateString() !== new Date().toDateString()
-      ? ` le ${new Date(nextDueAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : '';
-    text = catchUp && catchUp.count > 1
-      ? `Rattrapage : ${catchUp.count} posts en retard, un toutes les ${Math.round(catchUp.gap / 60000 * 10) / 10} min (prochain à ${clock(catchUp.next)})`
-      : `Publication automatique active${nextDueAt ? ` · prochain post à ${clock(nextDueAt)}${later}` : ''} · heure de ton ordinateur : ${clock(now)} (${timeZoneLabel().split(',')[0].split('/').pop()})`;
-  }
-  box.className = `auto-status ${tone}`.trim();
-  $('auto-status-text').textContent = text;
-  box.title = `Les heures de publication suivent l’horloge de cet ordinateur (${timeZoneLabel()}). Dernière vérification : ${lastAutoTick ? clock(lastAutoTick) : '—'}.`;
-  box.hidden = false;
-}
-// « Reprendre les publications »: Chrome's own prompt, for the videos folder
-// (and the posts folder if there is one), straight from the click.
-$('auto-resume').addEventListener('click', async () => {
-  const main = rootHandle || await KappDossier.loadRoot();
-  if (!main) {
-    // No folder remembered: choose it (Réglages, first card).
-    $('paused').hidden = true;
-    $('setup-folder').click();
-    return;
-  }
-  const state = await main.requestPermission({ mode: 'readwrite' }).catch(() => 'denied');
-  if (state !== 'granted') {
-    $('auto-resume').textContent = 'Accès refusé : clique de nouveau puis « Autoriser à chaque visite »';
-    setTimeout(() => { $('auto-resume').textContent = 'Reprendre les publications'; }, 6000);
-    return;
-  }
-  for (const handle of Object.values(netHandles)) {
-    if (handle && await handle.queryPermission({ mode: 'readwrite' }).catch(() => 'granted') !== 'granted') {
-      await handle.requestPermission({ mode: 'readwrite' }).catch(() => {});
-    }
-  }
-  await send({ type: 'autoNow' });
-  renderFolder();
-  setTimeout(renderAutoStatus, 1500);
-});
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt || changes.catchUp || changes.autoPaused)) { renderAutoStatus(); renderPauseButton(); }
-});
-setInterval(() => { if (!document.hidden) renderAutoStatus(); }, 30000);
-
-// Evening summary e-mail: off unless the creator ticks it. Ticking it never
-// sends the past days, only from today on.
-async function renderDailyReport() {
-  const { dailyReport } = await chrome.storage.local.get('dailyReport');
-  $('daily-report').checked = !!dailyReport;
-}
-$('daily-report').addEventListener('change', async () => {
-  const on = $('daily-report').checked;
-  const d = new Date(Date.now() - 86400000);
-  const yesterday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  await chrome.storage.local.set(on ? { dailyReport: true, reportedDays: [yesterday] } : { dailyReport: false });
-});
-
-// Only the partners chosen by KappGen see this card: their link and earnings.
-const money = (n) => `${(n || 0).toLocaleString('fr-FR')} F`;
-async function renderPartner() {
-  const reply = await send({ type: 'referrals' });
-  const data = reply && reply.ok ? reply.data : null;
-  $('partner-card').hidden = !(data && data.partner);
-  if (!data || !data.partner) return;
-  $('partner-rate').textContent = `${Math.round(data.rate * 100)} % par vente`;
-  $('partner-link').value = data.links.guide;
-  $('partner-code').textContent = data.code;
-  $('partner-referred').textContent = data.referred;
-  $('partner-sales').textContent = data.sales;
-  $('partner-due').textContent = money(data.due_fcfa);
-  $('partner-paid').textContent = money(data.paid_fcfa);
-}
-$('partner-copy').addEventListener('click', async () => {
-  const link = $('partner-link').value;
-  try { await navigator.clipboard.writeText(link); } catch { $('partner-link').select(); document.execCommand('copy'); }
-  $('partner-copy').textContent = 'Copié';
-  setTimeout(() => { $('partner-copy').textContent = 'Copier'; }, 1800);
-});
-
-// Pause / Lecture: stops every automatic publication (YouTube, Facebook,
-// groups, TikTok, Instagram) until clicked again. « Publier » buttons still work.
-const PAUSE_ICON = '<svg class="ico" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
-const PLAY_ICON = '<svg class="ico" viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5Z"/></svg>';
-async function renderPauseButton() {
-  const { autoPaused } = await chrome.storage.local.get('autoPaused');
-  const b = $('pause-all');
-  b.classList.toggle('paused', !!autoPaused);
-  b.innerHTML = `${autoPaused ? PLAY_ICON : PAUSE_ICON}<span>${autoPaused ? 'Reprendre' : 'Pause'}</span>`;
-  b.title = autoPaused ? 'Tout est en pause : cliquer pour reprendre les publications automatiques'
-    : 'Mettre en pause toutes les publications automatiques';
-}
-$('pause-all').addEventListener('click', async () => {
-  const { autoPaused } = await chrome.storage.local.get('autoPaused');
-  await chrome.storage.local.set({ autoPaused: !autoPaused });
-  if (autoPaused) send({ type: 'autoNow' }); // play: start again now
-  renderPauseButton();
-  renderAutoStatus();
-});
-renderPauseButton();
-
-let startPromise = null;
-let startQueued = false;
-function start() {
-  if (startPromise) {
-    startQueued = true;
-    return startPromise;
-  }
-  startPromise = startOnce().catch((error) => {
-    const target = $('main').hidden ? $('login-error') : $('folder-status');
-    target.hidden = false;
-    target.className = target === $('folder-status') ? 'status error' : target.className;
-    target.textContent = String(error.message || error);
-  }).finally(() => {
-    startPromise = null;
-    if (startQueued) {
-      startQueued = false;
-      queueMicrotask(start);
-    }
-  });
-  return startPromise;
-}
-
-async function startOnce() {
-  if (!(await renderAccount())) { watchLogin(); return; }
-  if (!(await renderSubscription({ fresh: true }))) return;
-  const { job } = await chrome.storage.session.get('job');
-  renderJob(job);
-  renderPublishSettings();
-  renderNetworks();
-  applyNetworks();
-  renderFolder();
-  renderApp();
-  renderPosts();
-  renderAutoStatus();
-  renderDailyReport();
-  renderPartner().catch(() => {});
-}
-start();
-
-// The background worker applies updates by itself: keep the lists current.
-setInterval(() => { if (!document.hidden && !jobRunning) renderFolder(); }, 60000);
-
-function bindInstagramAuto() {
-  const box = document.getElementById('instagram-auto');
-  if (box) box.addEventListener('change', () => send({ type: 'instagramAuto', on: box.checked }));
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindInstagramAuto);
-else bindInstagramAuto();
+$('update-pill')?.addEventListener('click', triggerHeaderUpdate);
