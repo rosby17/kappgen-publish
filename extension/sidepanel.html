@@ -35,15 +35,10 @@
     <form id="login" hidden>
       <h2>Connecte-toi à KappGen</h2>
       <button id="login-google" class="primary" type="button">Se connecter avec Google</button>
-      <p class="muted">Connecte-toi sur app.kappgen.com (Google ou mot de passe) : ce panneau le voit tout seul et passe à la suite, rien d'autre à cliquer.</p>
-      <p id="login-waiting" class="small muted" hidden>En attente de ta connexion sur app.kappgen.com…</p>
-      <button id="login-recheck" class="link" type="button">Déjà connecté ? Vérifier maintenant</button>
-      <details>
-        <summary>Ou avec un mot de passe</summary>
-        <input id="login-email" type="email" placeholder="E-mail" autocomplete="username" required>
-        <input id="login-password" type="password" placeholder="Mot de passe" autocomplete="current-password" required>
-        <button class="primary" type="submit">Se connecter</button>
-      </details>
+      <p class="muted center">ou avec ton e-mail</p>
+      <input id="login-email" type="email" placeholder="E-mail" autocomplete="username" required>
+      <input id="login-password" type="password" placeholder="Mot de passe" autocomplete="current-password" required>
+      <button class="primary" type="submit">Se connecter</button>
       <p id="login-error" class="warn" role="alert" hidden></p>
       <p class="muted">Pas encore de compte ? <a href="https://app.kappgen.com" target="_blank" rel="noopener noreferrer">Créer un compte</a></p>
     </form>

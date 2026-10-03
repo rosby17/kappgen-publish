@@ -2083,7 +2083,7 @@ async function renderAccount() {
   $('profile').hidden = !user;
   $('account').hidden = !!user; // the login card only when signed out
   $('login').hidden = !!user;
-  if (!user) { $('main').hidden = true; $('paywall').hidden = true; }
+  if (!user) { $('main').hidden = true; $('paywall').hidden = true; watchLogin(); }
   $('server').hidden = !!user; // the local-server setting only matters before signing in
   if (!user) {
     const error = $('login-error');
@@ -2136,26 +2136,13 @@ $('login-google').addEventListener('click', () => {
   chrome.tabs.create({ url: 'https://app.kappgen.com/login' });
 });
 
+// Signed in on app.kappgen.com in this Chrome (Google or password)? The panel
+// notices on its own, with no button: it looks every few seconds while the
+// login card is shown, and as soon as the panel is visible again.
 let recheckingLogin = false;
-$('login-recheck').addEventListener('click', async () => {
-  if (recheckingLogin) return;
-  recheckingLogin = true;
-  $('login-recheck').textContent = 'Vérification…';
-  try {
-    if (await renderAccount()) start();
-  } finally {
-    recheckingLogin = false;
-    $('login-recheck').textContent = "J'ai fini, vérifier";
-  }
-});
-
-// The side panel stays visible while the creator signs in on app.kappgen.com
-// in a tab next to it, so no visibility event comes: look every few seconds
-// while the login card is shown.
 let loginPoll = null;
 function watchLogin() {
   if (loginPoll) return;
-  $('login-waiting').hidden = false;
   loginPoll = setInterval(async () => {
     if ($('login').hidden) { clearInterval(loginPoll); loginPoll = null; return; }
     if (document.hidden || recheckingLogin) return;
@@ -2167,7 +2154,6 @@ function watchLogin() {
     }
   }, 3000);
 }
-$('login-google').addEventListener('click', watchLogin);
 
 // Catches the common case on its own: the panel was already open on the
 // login screen, the user signs in on app.kappgen.com in another tab, then
