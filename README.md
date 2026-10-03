@@ -12,7 +12,7 @@ Prérequis : Google Chrome 116 ou plus récent et un compte KappGen avec un essa
 4. Ouvre `chrome://extensions`, active le mode développeur, puis choisis « Charger l’extension non empaquetée ».
 5. Ouvre KappGen Publish, connecte-toi et sélectionne le dossier principal. Dans la boîte de dialogue Chrome, choisis « Autoriser à chaque visite ».
 
-Les installateurs guidés sont disponibles sur la [page d’installation](https://rosby17.github.io/kappgen-publish/). Ils vérifient l’empreinte SHA-256 et remplacent une version existante de manière atomique.
+Les installateurs guidés sont disponibles sur la [page d’installation](https://app.kappgen.com/extension) du site KappGen. Ils vérifient l’empreinte SHA-256 et remplacent une version existante de manière atomique.
 
 > L’édition Chrome Web Store et l’édition installée manuellement peuvent avoir des identifiants différents. Le stockage Chrome et les autorisations de dossiers ne migrent pas automatiquement entre ces éditions. N’active pas les automatisations dans les deux en même temps.
 

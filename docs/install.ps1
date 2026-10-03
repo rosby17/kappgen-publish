@@ -1,5 +1,5 @@
 # Installe (ou met a jour) KappGen Publish sur Windows, dans TOUS les profils Chrome.
-#   irm https://rosby17.github.io/kappgen-publish/install.ps1 | iex
+#   irm https://app.kappgen.com/extension/install.ps1 | iex   (renvoie vers ce fichier)
 # Telecharge la derniere version dans %USERPROFILE%\KappGen-Publish, puis :
 #  - met a jour l'extension dans chaque profil Chrome qui l'a deja, quel que
 #    soit le dossier d'ou ce profil la charge (aucun clic) ;

@@ -672,3 +672,14 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 .more-item:hover { background: var(--card); }
 .more-item.danger { color: var(--danger); }
 .more-item .ico { width: 14px; height: 14px; }
+
+/* Liens vers le site KappGen : l'extension et le site vont ensemble. */
+.profile-link { display: block; padding: 7px 8px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px; }
+.profile-link:hover { background: var(--card); color: var(--accent-strong); }
+.help-site { border-color: var(--accent); }
+.help-liens { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.help-liens a, .panel-foot a { color: var(--accent-strong); text-decoration: none; font-weight: 600; }
+.help-liens a:hover, .panel-foot a:hover { text-decoration: underline; }
+.panel-foot { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 14px 0 6px; font-size: 12px; }
+.panel-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted, var(--text)); font-weight: 500; }
+.panel-foot img { border-radius: 3px; }
