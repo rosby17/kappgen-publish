@@ -274,16 +274,30 @@ async function publishRecipe({ fresh = false } = {}) {
 }
 
 // Puts the recipe in the page, then the network's scripts.
+// Injects extension files into a tab. While an update is being written to the extension's folder (the files are swapped in place), a file
+// can be missing for a moment: « Could not load file ». It comes back within seconds, so the injection is tried again instead of failing the post.
+async function injectFiles(tabId, files) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files });
+      return;
+    } catch (error) {
+      if (attempt >= 5 || !/Could not load file|Cannot access contents of the extension|file.*not.*found/i.test(String(error && error.message))) throw error;
+      await sleep(1500 * attempt);
+    }
+  }
+}
+
 async function injectScripts(tabId, files) {
   // Facebook is autonomous, but publishing still requires a valid account.
   if (files.length === 1 && files[0] === 'facebook.js') {
     await requireAccess();
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/facebook-flow.js', ...files] });
+    await injectFiles(tabId, ['lib/facebook-flow.js', ...files]);
     return;
   }
   const recipe = await publishRecipe();
   await chrome.scripting.executeScript({ target: { tabId }, func: (data) => { window.__kappgenRecipe = data; }, args: [recipe] });
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/recette.js', ...files] });
+  await injectFiles(tabId, ['lib/recette.js', ...files]);
 }
 
 async function recipeSelector(network, key) {
@@ -2357,7 +2371,7 @@ async function postYoutubeComment(item) {
       if (current.status === 'complete') break;
       await sleep(700);
     }
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['youtube-watch.js'] });
+    await injectFiles(tab.id, ['youtube-watch.js']);
     return await whileShown(tab.id, () => stepIn(tab.id, '__kappgenWatch', 'commentVideo', { comment: item.text, pin: item.pin !== false }));
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
