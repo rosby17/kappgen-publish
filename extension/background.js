@@ -92,6 +92,9 @@ async function api(path, options = {}) {
 async function setJob(patch) {
   if (patch.running === false) workTabId = null;
   const { job } = await chrome.storage.session.get('job');
+  // A publication ends: whatever tab it left open (error, timeout) is closed shortly after. A new one starts: tabs left by earlier ones too.
+  if (patch.running === false && job && job.running) setTimeout(() => sweepOwnTabs({ minAge: 15000 }).catch(() => {}), 20000);
+  if (patch.running === true && !(job && job.running)) sweepOwnTabs({ minAge: 60000 }).catch(() => {});
   const next = { ...(job || {}), ...patch, updatedAt: Date.now() };
   await chrome.storage.session.set({ job: next });
   // Every publication that ends (sent or failed) goes into the day's log,
@@ -552,12 +555,41 @@ async function setBorrowed(tabId, on) {
   await chrome.storage.session.set({ borrowed: [...tabs] });
 }
 
+// Tabs the extension opened itself (never the creator's own): each one must be closed once its publication ends, even after an
+// error, otherwise automatic publications pile up dozens of Facebook / X / Instagram tabs. The registry survives a sleeping worker.
+const OWN_TABS_KEY = 'ownTabs';
+async function ownTabs() {
+  const { ownTabs: own } = await chrome.storage.session.get(OWN_TABS_KEY);
+  return own || {};
+}
+async function setOwnTab(tabId, on) {
+  const own = await ownTabs();
+  if (on) own[tabId] = Date.now(); else delete own[tabId];
+  await chrome.storage.session.set({ [OWN_TABS_KEY]: own });
+}
+async function createWorkTab(url) {
+  const tab = await chrome.tabs.create({ url, active: false });
+  await setOwnTab(tab.id, true);
+  return tab;
+}
+// Closes the tabs opened by the extension that nothing uses any more (older than minAge, not the one a publication is working in).
+async function sweepOwnTabs({ minAge = 60000 } = {}) {
+  const [own, borrowed] = [await ownTabs(), await borrowedTabs()];
+  for (const [id, since] of Object.entries(own)) {
+    const tabId = Number(id);
+    if (tabId === workTabId || borrowed.has(tabId) || Date.now() - since < minAge) continue;
+    await chrome.tabs.remove(tabId).catch(() => {});
+    await setOwnTab(tabId, false);
+  }
+}
+
 // Closes a Studio tab the extension opened by itself (automatic uploads),
 // leaves the creator's own tab open.
 async function closeStudioTab(tabId) {
   if (workTabId === tabId) workTabId = null;
   if ((await borrowedTabs()).has(tabId)) return;
   await chrome.tabs.remove(tabId).catch(() => {});
+  await setOwnTab(tabId, false).catch(() => {});
 }
 
 // An already open tab of the site is used (the one in front first, then one
@@ -587,7 +619,7 @@ async function reuseOrOpen(findTab, url, { sameIfStartsWith = null, normalize = 
     if (!(sameIfStartsWith && current.startsWith(sameIfStartsWith))) tab = await chrome.tabs.update(tab.id, { url });
     await setBorrowed(tab.id, true);
   } else {
-    tab = await chrome.tabs.create({ url, active: false });
+    tab = await createWorkTab(url);
   }
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
@@ -600,7 +632,7 @@ async function reuseOrOpen(findTab, url, { sameIfStartsWith = null, normalize = 
 async function openStudioUpload(channelId, active = true, { reuse = false } = {}) {
   const url = channelId ? `https://studio.youtube.com/channel/${channelId}/videos/upload?d=ud` : 'https://www.youtube.com/upload';
   const tab = reuse ? await reuseOrOpen(studioTabToReuse, url)
-    : await chrome.tabs.create({ url, active: false });
+    : await createWorkTab(url);
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   if (reuse || active) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
@@ -665,6 +697,7 @@ async function publicationSleep(ms) {
 }
 chrome.tabs.onRemoved.addListener((tabId) => {
   setBorrowed(tabId, false).catch(() => {});
+  setOwnTab(tabId, false).catch(() => {});
   if (workTabId === tabId) workTabId = null;
 });
 async function whileShown(tabId, fn) {
@@ -799,7 +832,7 @@ async function openFacebookReel(pageUrl, { reuse = true } = {}) {
   const safePage = facebookWww(pageUrl);
   const tab = reuse
     ? await reuseOrOpen(facebookTabToReuse, safePage, { sameIfStartsWith: safePage.replace(/\/+$/, ''), normalize: facebookWww })
-    : await chrome.tabs.create({ url: safePage, active: false });
+    : await createWorkTab(safePage);
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
@@ -1383,7 +1416,7 @@ async function publishFacebookOnly(relativePath, { auto = false, as = null } = {
 // TikTok Studio's upload page, in the TikTok tab already open if there is one.
 async function openTikTok({ reuse = true } = {}) {
   const url = 'https://www.tiktok.com/tiktokstudio/upload?from=webapp';
-  const tab = reuse ? await reuseOrOpen(tiktokTabToReuse, url) : await chrome.tabs.create({ url, active: false });
+  const tab = reuse ? await reuseOrOpen(tiktokTabToReuse, url) : await createWorkTab(url);
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
@@ -1448,7 +1481,7 @@ async function publishTikTokVideo(relativePath, { auto = false, long = false } =
 // X's « new post » window, in the X tab already open if there is one.
 async function openX({ reuse = true } = {}) {
   const tab = reuse ? await reuseOrOpen(xTabToReuse, 'https://x.com/compose/post')
-    : await chrome.tabs.create({ url: 'https://x.com/compose/post', active: false });
+    : await createWorkTab('https://x.com/compose/post');
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
@@ -1539,7 +1572,7 @@ async function publishXPost(postPath, { auto = false } = {}) {
 const LINKEDIN_COMPOSE = 'https://www.linkedin.com/feed/?shareActive=true';
 async function openLinkedin({ reuse = true } = {}) {
   const tab = reuse ? await reuseOrOpen(linkedinTabToReuse, LINKEDIN_COMPOSE)
-    : await chrome.tabs.create({ url: LINKEDIN_COMPOSE, active: false });
+    : await createWorkTab(LINKEDIN_COMPOSE);
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
@@ -1625,7 +1658,7 @@ async function publishLinkedinPost(postPath, { auto = false } = {}) {
 // Instagram home, in the Instagram tab already open if there is one.
 async function openInstagram({ reuse = true } = {}) {
   const tab = reuse ? await reuseOrOpen(instagramTabToReuse, 'https://www.instagram.com/')
-    : await chrome.tabs.create({ url: 'https://www.instagram.com/', active: false });
+    : await createWorkTab('https://www.instagram.com/');
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
@@ -2302,7 +2335,7 @@ async function postFacebookComment(item) {
   }
 }
 async function postYoutubeComment(item) {
-  const tab = await chrome.tabs.create({ url: `https://www.youtube.com/watch?v=${encodeURIComponent(item.youtubeId)}`, active: false });
+  const tab = await createWorkTab(`https://www.youtube.com/watch?v=${encodeURIComponent(item.youtubeId)}`);
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   try {
