@@ -10,10 +10,10 @@ Envoie uniquement `dist/kappgen-publish-chrome-web-store.zip`, produite par `./p
 
 Nom : `KappGen Publish`
 
-Résumé :
+Résumé (= champ `description` du manifest ; jamais de liste de réseaux ni de marques : refusé le 04/10 pour « spam dans les mots clés », cas Yellow Argon) :
 
 ```text
-Publie vidéos et posts sur YouTube, Facebook, Instagram, TikTok, X et LinkedIn depuis un dossier local.
+Publie automatiquement sur tes réseaux sociaux les vidéos et posts rangés dans un dossier de ton ordinateur.
 ```
 
 Description :
