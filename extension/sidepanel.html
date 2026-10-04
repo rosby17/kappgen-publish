@@ -360,6 +360,36 @@
       <ul id="net-folders" class="net-folders"></ul>
       <p id="net-folders-status" class="status error" role="alert" hidden></p>
     </section>
+    <section class="card" id="set-pace">
+      <div class="field-head"><h2>Rythme de publication</h2></div>
+      <p class="small">Pour tous les réseaux. Chaque envoi sur un réseau compte pour une publication ; les envois faits à la main ne sont jamais retardés.</p>
+      <div class="set-row">
+        <span class="set-text"><strong>Comment publier ?</strong></span>
+        <select id="pace-mode" aria-label="Rythme de publication">
+          <option value="auto">Automatique : KappGen décide</option>
+          <option value="interval">À intervalle régulier</option>
+          <option value="random">Aléatoire, comme une personne</option>
+          <option value="asap">Dès que c’est prêt</option>
+        </select>
+      </div>
+      <div class="set-row" id="pace-interval-row" hidden>
+        <span class="set-text"><strong>Une publication toutes les</strong></span>
+        <span class="pace-inline"><input id="pace-interval-n" type="number" min="1" max="1440" aria-label="Intervalle"> <select id="pace-interval-unit" aria-label="Unité"><option value="1">minutes</option><option value="60">heures</option></select></span>
+      </div>
+      <div class="set-row" id="pace-perday-row" hidden>
+        <span class="set-text"><strong>Publications par jour</strong></span>
+        <span class="pace-inline"><input id="pace-per-day" type="number" min="1" max="200" aria-label="Nombre de publications par jour"></span>
+      </div>
+      <div class="set-row" id="pace-window-row" hidden>
+        <span class="set-text"><strong>Entre</strong></span>
+        <span class="pace-inline"><input id="pace-from" type="time" aria-label="De"> et <input id="pace-to" type="time" aria-label="À"></span>
+      </div>
+      <div class="set-row" id="pace-gap-row" hidden>
+        <span class="set-text"><strong>Écart minimal (min)</strong></span>
+        <span class="pace-inline"><input id="pace-gap" type="number" min="1" max="600" aria-label="Écart minimal en minutes"></span>
+      </div>
+      <p id="pace-help" class="small"></p>
+    </section>
     <section class="card catchup-card" id="set-catchup">
       <div class="set-row" id="catchup-row">
         <span class="set-text"><strong>Rattrapage des retards (min)</strong></span>
@@ -563,6 +593,7 @@ Ingrédients : …</pre>
 
   <script src="lib/fiches.js"></script>
   <script src="lib/schedule.js"></script>
+  <script src="lib/rythme.js"></script>
   <script src="lib/historique.js"></script>
   <script src="lib/dossier.js"></script>
   <script src="lib/maj.js"></script>

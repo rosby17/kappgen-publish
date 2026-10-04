@@ -1339,6 +1339,46 @@ function groupsSaid(text, warn = false) {
   clearTimeout(groupsSaid.timer);
   groupsSaid.timer = setTimeout(() => { saved.hidden = true; }, 5000);
 }
+// Réglages → « Rythme de publication » : automatique (KappGen décide), intervalle régulier, aléatoire comme une personne, ou dès que c'est prêt.
+const PACE_HELP = {
+  auto: 'KappGen choisit pour toi : environ 8 publications par jour, de 8 h à 22 h, à des heures irrégulières qui changent chaque jour, jamais à intervalle fixe.',
+  interval: 'Une publication à intervalle fixe, uniquement pendant la plage horaire choisie.',
+  random: 'Tu choisis combien de publications par jour : KappGen tire des heures différentes chaque jour dans la plage horaire, avec un écart minimal entre deux.',
+  asap: 'Chaque publication part dès qu’elle est prête, sans attente (comportement d’origine).',
+};
+async function renderPace() {
+  const pace = KappPace.normalize((await settings()).pace);
+  const raw = (await settings()).pace || {};
+  const set = (id, value) => { if (document.activeElement !== $(id)) $(id).value = value; };
+  set('pace-mode', pace.mode);
+  const hours = pace.intervalMinutes % 60 === 0 && pace.intervalMinutes >= 60;
+  set('pace-interval-n', hours ? pace.intervalMinutes / 60 : pace.intervalMinutes);
+  set('pace-interval-unit', hours ? '60' : '1');
+  set('pace-per-day', raw.perDay || KappPace.DEFAULTS.perDay);
+  set('pace-from', pace.mode === 'auto' ? (raw.from || KappPace.DEFAULTS.from) : pace.from);
+  set('pace-to', pace.mode === 'auto' ? (raw.to || KappPace.DEFAULTS.to) : pace.to);
+  set('pace-gap', raw.minGapMinutes || KappPace.DEFAULTS.minGapMinutes);
+  $('pace-interval-row').hidden = pace.mode !== 'interval';
+  $('pace-perday-row').hidden = pace.mode !== 'random';
+  $('pace-gap-row').hidden = pace.mode !== 'random';
+  $('pace-window-row').hidden = !['interval', 'random'].includes(pace.mode);
+  $('pace-help').textContent = PACE_HELP[pace.mode];
+}
+async function savePace() {
+  const current = await settings();
+  const mode = $('pace-mode').value;
+  const unit = Number($('pace-interval-unit').value) || 1;
+  const values = KappPace.normalize({
+    mode: mode === 'auto' ? 'random' : mode, intervalMinutes: (Number($('pace-interval-n').value) || 1) * unit, perDay: $('pace-per-day').value,
+    from: $('pace-from').value, to: $('pace-to').value, minGapMinutes: $('pace-gap').value,
+  });
+  current.pace = { ...values, mode };      // « Automatique » : les valeurs de la personne sont gardées, l'extension en choisit d'autres tant que ce mode est actif
+  await chrome.storage.local.set({ folder: current });
+  await renderPace();
+}
+for (const id of ['pace-mode', 'pace-interval-n', 'pace-interval-unit', 'pace-per-day', 'pace-from', 'pace-to', 'pace-gap']) $(id).addEventListener('change', () => savePace().catch(() => {}));
+renderPace().catch(() => {});
+
 // Réglages → « Rythme du rattrapage » : minutes entre deux posts en retard (vide ou 0 = automatique).
 let catchUpChosenMs = 0;
 const CATCH_UP_STEPS = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
@@ -2666,6 +2706,10 @@ async function renderAutoStatus() {
     tone = 'warn'; text = 'Publication automatique en pause : ton abonnement n’est plus actif.';
   } else if (now - lastAutoTick > 12 * 60000) {
     tone = 'warn'; text = `Pas de vérification depuis ${clock(lastAutoTick)} (Chrome fermé ou ordinateur en veille). Ce qui était prévu part maintenant.`;
+  } else if (autoStatus && autoStatus.state === 'paced' && autoStatus.next) {
+    const later = new Date(autoStatus.next).toDateString() !== new Date().toDateString()
+      ? ` le ${new Date(autoStatus.next).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : '';
+    text = `Rythme de publication : prochaine publication possible à ${clock(autoStatus.next)}${later}`;
   } else {
     tone = autoStatus && autoStatus.state === 'busy' ? 'busy' : '';
     const later = nextDueAt && new Date(nextDueAt).toDateString() !== new Date().toDateString()
