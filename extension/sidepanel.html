@@ -268,10 +268,22 @@
   </div>
 
   <div id="tab-tiktok" class="tab" hidden>
-    <section class="card">
-      <div class="field-head"><h2>TikTok</h2><span class="pill ok">Disponible</span></div>
-      <p class="small muted">Le format vertical passe en premier : la version verticale <code>short.mp4</code> de chaque vidéo publiée sur YouTube, et les vidéos de ton dossier de posts. La version longue reste possible, en option. Reste connecté à TikTok dans ce Chrome.</p>
-    </section>
+    <details class="card tab-settings net-settings" data-net="tiktok">
+      <summary>Réglages TikTok <span class="pill neutral net-state"></span></summary>
+      <label class="set-row">
+        <span class="set-text"><strong>Mes vidéos YouTube</strong><small>Sa version verticale (short.mp4) si elle existe, sinon la vidéo entière, avec le titre en légende</small></span>
+        <span class="switch"><input type="checkbox" data-key="tiktokFromYoutube" data-default="off"><span></span></span>
+      </label>
+      <label class="set-row">
+        <span class="set-text"><strong>Les vidéos de mes posts Facebook</strong><small>Juste après Facebook : la vidéo du post et son texte</small></span>
+        <span class="switch"><input type="checkbox" data-key="tiktokFromFacebook" data-default="off"><span></span></span>
+      </label>
+      <div class="set-row">
+        <span class="set-text"><strong>Posts pour TikTok seulement</strong><small class="net-folder-line"></small></span>
+        <button type="button" class="btn ghost small-btn net-folder-btn">Dossier</button>
+      </div>
+      <p class="small muted net-note">Publié sur le compte TikTok ouvert dans ce Chrome (TikTok Studio). Désactivé par défaut : rien ne part avant que tu coches.</p>
+    </details>
     <h2>À publier sur TikTok</h2>
     <details id="tiktok-done-box" class="done-box" hidden><summary id="tiktok-done-title"></summary><ul id="tiktok-done" class="rows"></ul></details>
     <ul id="tiktok-list" class="rows"></ul>
@@ -279,11 +291,22 @@
   </div>
 
   <div id="tab-instagram" class="tab" hidden>
-    <section class="card">
-      <div class="field-head"><h2>Instagram</h2><span class="pill ok">Nouveau</span></div>
-      <p class="small muted">Tes vidéos partent en Reels depuis ton compte Instagram ouvert dans ce Chrome : la version verticale <code>short.mp4</code> de chaque vidéo publiée sur YouTube, et les vidéos de ton dossier de posts. Reste connecté à Instagram dans ce Chrome.</p>
-      <label class="small"><input type="checkbox" id="instagram-auto"> Publier automatiquement les nouvelles vidéos (celles publiées sur YouTube à partir de maintenant)</label>
-    </section>
+    <details class="card tab-settings net-settings" data-net="instagram">
+      <summary>Réglages Instagram <span class="pill neutral net-state"></span></summary>
+      <label class="set-row">
+        <span class="set-text"><strong>Mes vidéos YouTube</strong><small>En Reel : sa version verticale (short.mp4), avec le titre en légende</small></span>
+        <span class="switch"><input type="checkbox" data-key="instagramFromYoutube" data-default="off"><span></span></span>
+      </label>
+      <label class="set-row">
+        <span class="set-text"><strong>Les vidéos de mes posts Facebook</strong><small>Juste après Facebook : la vidéo du post (en Reel) et son texte</small></span>
+        <span class="switch"><input type="checkbox" data-key="instagramFromFacebook" data-default="off"><span></span></span>
+      </label>
+      <div class="set-row">
+        <span class="set-text"><strong>Posts pour Instagram seulement</strong><small class="net-folder-line"></small></span>
+        <button type="button" class="btn ghost small-btn net-folder-btn">Dossier</button>
+      </div>
+      <p class="small muted net-note">Publié sur le compte Instagram ouvert dans ce Chrome. Instagram n’accepte ici que les vidéos. Désactivé par défaut : rien ne part avant que tu coches.</p>
+    </details>
     <h2>À publier sur Instagram</h2>
     <details id="instagram-done-box" class="done-box" hidden><summary id="instagram-done-title"></summary><ul id="instagram-done" class="rows"></ul></details>
     <ul id="instagram-list" class="rows"></ul>
@@ -339,9 +362,13 @@
     <section class="card" id="set-folder">
       <h2>Dossier principal</h2>
       <p class="small muted folder-what" title="Dans ce dossier, les posts de chaque réseau sont dans son sous-dossier A-PUBLIER (FACEBOOK/A-PUBLIER, X/A-PUBLIER…), à côté des vidéos YouTube. KappGen les range ainsi tout seul. Un réseau qui a son propre dossier (plus bas) accepte n’importe quel rangement.">Sert à tous tes réseaux. KappGen y range tout seul tes vidéos et tes posts.</p>
-      <div id="folder-chosen" class="chosen" hidden>
-        <span class="check">✓</span>
-        <button id="pick-change" class="chosen-name" title="Cliquer pour choisir un autre dossier"><strong id="folder-name"></strong><span class="chosen-edit">changer</span></button>
+      <div id="folder-chosen" class="folder-tile" hidden>
+        <span class="ft-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2h8.8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></span>
+        <div class="ft-body">
+          <strong id="folder-name"></strong>
+          <span class="ft-meta"><i class="ft-dot"></i>Accès autorisé · utilisé par tous tes réseaux</span>
+        </div>
+        <button id="pick-change" class="btn secondary ft-change" type="button" title="Choisir un autre dossier principal"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h13l-3-3"/><path d="M20 17H7l3 3"/></svg>Changer</button>
       </div>
       <p id="folder-status" class="status" role="status" aria-live="polite" hidden></p>
       <div id="folder-actions" class="actions">

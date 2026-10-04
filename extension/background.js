@@ -2229,8 +2229,13 @@ async function spreadNext(settings, sent, own) {
     settings.facebookFromYoutubeSince = Date.now() - 7 * 24 * 3600000;
     await chrome.storage.local.set({ folder: settings });
   }
-  // X / LinkedIn ticked before their start date was kept: from now on.
-  for (const net of ['x', 'linkedin']) {
+  // TikTok / Instagram : « Mes vidéos YouTube » et « Les vidéos de mes posts Facebook » sont désactivés par défaut
+  // (anciens réglages tiktokAuto / instagramAuto repris).
+  const fromYt = (net) => (settings[`${net}FromYoutube`] ?? settings[`${net}Auto`]) === true;
+  const fromFb = (net) => settings[`${net}FromFacebook`] === true;
+  // X / LinkedIn ticked before their start date was kept: from now on (TikTok / Instagram as soon as one source is on).
+  for (const net of ['x', 'linkedin', 'tiktok', 'instagram']) {
+    if (['tiktok', 'instagram'].includes(net) && !fromYt(net) && !fromFb(net)) continue;
     if (on(net) && !settings[`${net}Since`]) {
       settings[`${net}Since`] = Date.now();
       await chrome.storage.local.set({ folder: settings });
@@ -2254,9 +2259,9 @@ async function spreadNext(settings, sent, own) {
       // The Reel once the Short is on YouTube (or when YouTube's Short failed / is not used).
       [fb && v.vertical_path && (v.short_youtube_id || v.short_error || !on('youtube')) && !v.facebook_reel_at && !v.facebook_reel_error,
         () => publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' })],
-      [on('tiktok') && settings.tiktokAuto && !own('tiktok') && !v.tiktok_published_at && !v.tiktok_error && after(v, settings.tiktokSince),
+      [on('tiktok') && fromYt('tiktok') && !own('tiktok') && !v.tiktok_published_at && !v.tiktok_error && after(v, settings.tiktokSince),
         () => publishTikTokVideo(v.relative_path, { auto: true })],
-      [on('instagram') && settings.instagramAuto && !own('instagram') && v.vertical_path && !v.instagram_published_at && !v.instagram_error
+      [on('instagram') && fromYt('instagram') && !own('instagram') && v.vertical_path && !v.instagram_published_at && !v.instagram_error
         && after(v, settings.instagramSince), () => publishInstagramVideo(v.relative_path, { auto: true })],
       [on('x') && !own('x') && settings.xFromYoutube !== false && !v.x_published_at && !v.x_error && after(v, settings.xSince),
         () => publishXVideo(v.relative_path, { auto: true })],
@@ -2274,8 +2279,10 @@ async function spreadNext(settings, sent, own) {
   const posts = (await postsList().catch(() => []))
     .sort((a, b) => (Date.parse(a.published_at || 0) || a.due_at || 0) - (Date.parse(b.published_at || 0) || b.due_at || 0));
   find: for (const p of posts) {
-    for (const [net, send] of [['x', publishXPost], ['linkedin', publishLinkedinPost]]) {
-      if (!on(net) || own(net) || settings[`${net}FromFacebook`] === false || p[`${net}_statut`]) continue;
+    for (const [net, send] of [['x', publishXPost], ['linkedin', publishLinkedinPost], ['tiktok', publishTikTokPost], ['instagram', publishInstagramPost]]) {
+      const videoOnly = net === 'tiktok' || net === 'instagram';
+      if (!on(net) || own(net) || p[`${net}_statut`]) continue;
+      if (videoOnly ? (!fromFb(net) || !p.video_path) : settings[`${net}FromFacebook`] === false) continue;
       const savedSince = settings[`${net}Since`];
       const since = typeof savedSince === 'number' ? savedSince : Date.parse(savedSince || '') || Infinity;
       const due = p.statut === 'publie' ? p.published_at && Date.parse(p.published_at) >= since

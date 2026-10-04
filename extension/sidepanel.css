@@ -747,3 +747,54 @@ li.row > .post-editor { grid-column: 1 / -1; display: grid; gap: 6px; margin-top
 .media-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .media-line .small { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-line .btn { height: 28px; flex: none; }
+
+/* ---------- 1.20.28 : coche bien centrée, menus déroulants aux couleurs de KappGen (plus ceux du navigateur) */
+input[type="checkbox"]::after {
+  width: 12px; height: 12px; border: 0; background: var(--on-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: scale(0);
+}
+input[type="checkbox"]:checked::after { transform: scale(1); }
+.networks input[type="checkbox"], .network-row input { margin: 0; align-self: center; }
+
+select, .select, .small-select {
+  -webkit-appearance: none; appearance: none; height: 34px; padding: 0 32px 0 12px; border-radius: 9px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text);
+  background-color: rgba(var(--ink), 0.06); border: 1px solid var(--border);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f8bff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 14px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+select:hover, .select:hover { border-color: var(--accent); }
+select:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2); }
+.small-select { height: 28px; font-size: 12px; padding: 0 28px 0 10px; background-position: right 8px center; background-size: 12px; }
+select option { background: #16233f; color: #fff; font-weight: 500; }
+[data-theme="clair"] select option { background: #fff; color: #111; }
+
+/* ---------- 1.20.28 : dossiers au design « fichier » */
+.folder-tile { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 14px; margin-bottom: 4px;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.16), rgba(var(--accent-rgb), 0.03) 60%);
+  border: 1px solid rgba(var(--accent-rgb), 0.38); box-shadow: inset 0 1px 0 rgba(var(--ink), 0.06), 0 6px 18px -10px rgba(var(--accent-rgb), 0.6); }
+.ft-icon { flex: none; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+  background: linear-gradient(140deg, #6fb6ff, #1f8bff 55%, #0a5fd0); box-shadow: 0 6px 14px -6px rgba(31, 139, 255, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.ft-icon svg { width: 22px; height: 22px; fill: rgba(255, 255, 255, 0.95); stroke: none; }
+.ft-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.ft-body strong { font-size: 15px; font-weight: 800; letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-meta { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ft-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(126, 226, 168, 0.18); }
+.ft-change { flex: none; height: 32px; padding: 0 12px; gap: 6px; border-radius: 9px; }
+.ft-change .ico { width: 14px; height: 14px; }
+
+.net-folders > li.net-folder { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 3px 10px; padding: 9px 0; }
+.nf-logo { grid-column: 1; grid-row: 1 / 3; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+  background: rgba(var(--ink), 0.06); border: 1px solid var(--border); }
+.net-folders .net-folder-name { grid-column: 2; grid-row: 1; }
+.net-folders .net-folder-where { grid-column: 2; grid-row: 2; padding-left: 0; justify-self: start; max-width: 100%;
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px;
+  background: rgba(var(--ink), 0.05); border: 1px solid var(--border); color: var(--muted); }
+.net-folders .net-folder-where .ico { width: 11px; height: 11px; }
+.net-folders .net-folder-where.custom { color: var(--accent-strong); background: rgba(var(--accent-rgb), 0.12); border-color: rgba(var(--accent-rgb), 0.4); }
+.net-folders .net-folder-acts { grid-column: 3; grid-row: 1 / 3; display: flex; align-items: center; gap: 4px; }
+.nf-change { height: 28px; padding: 0 12px; border-radius: 8px; }
+.net-folders > li.net-folder.own .nf-logo { border-color: rgba(var(--accent-rgb), 0.5); background: rgba(var(--accent-rgb), 0.1); }

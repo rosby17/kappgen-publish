@@ -2114,7 +2114,7 @@ function renderInstagram() {
   $('instagram-done-title').textContent = `Déjà sur Instagram (${done.length})`;
   $('instagram-done').replaceChildren(...done.map(igCard));
   appendHistory('instagram', items.map((it) => it.path), 'instagram-done', 'instagram-done-box', 'instagram-done-title', 'Déjà sur Instagram', done.length);
-  settings().then((config) => { $('instagram-auto').checked = !!config.instagramAuto; });
+  // (ancienne case « instagram-auto » remplacée par les Réglages Instagram)
   applyJob();
 }
 
@@ -2262,18 +2262,23 @@ function renderNetFolders(all) {
   $('net-folders').replaceChildren(...FOLDER_NETS.map(([net, label, what]) => {
     const info = all[net] || { state: 'none' };
     const row = el('li', `net-folder${info.own ? ' own' : ''}`);
+    const tile = el('span', 'nf-logo');
+    tile.append(logo(net, 16));
     const name = el('div', 'net-folder-name');
-    name.append(logo(net, 14), el('strong', null, label), el('small', null, what));
-    const where = el('div', 'net-folder-where');
-    if (info.own) where.append(icon('folder'), el('span', null, info.name));
-    else if (info.shared === 'facebook') where.append(icon('folder'), el('span', null, `${info.name} (même dossier que Facebook)`));
-    else where.append(el('span', 'muted', all.main && all.main.state !== 'none' ? 'Dossier principal' : '—'));
+    name.append(el('strong', null, label), el('small', null, what));
+    // Puce du dossier : grise = dossier principal, bleue = dossier à lui.
+    const where = el('div', `net-folder-where${info.own || info.shared === 'facebook' ? ' custom' : ''}`);
+    where.append(icon('folder'));
+    if (info.own) where.append(el('span', null, info.name));
+    else if (info.shared === 'facebook') where.append(el('span', null, `${info.name} · même dossier que Facebook`));
+    else where.append(el('span', null, all.main && all.main.state !== 'none' ? 'Dossier principal' : 'Aucun dossier'));
+    row.append(tile);
     const acts = el('div', 'net-folder-acts');
     if (info.own && info.state === 'prompt') {
       const grant = button('Autoriser', 'btn primary small-btn', () => grantNetFolder(net));
       acts.append(grant);
     }
-    const change = button(info.own ? 'Changer' : 'Choisir', 'btn ghost small-btn', () => pickNetFolder(net));
+    const change = button(info.own ? 'Changer' : 'Choisir', 'btn secondary small-btn nf-change', () => pickNetFolder(net));
     change.title = info.own ? 'Choisir un autre dossier pour ce réseau' : `Un dossier rien que pour ${label}`;
     acts.append(change);
     if (info.own) {
@@ -2297,12 +2302,15 @@ async function renderNetSettings() {
     const net = box.dataset.net;
     const own = all[net] && all[net].own;
     for (const input of box.querySelectorAll('input[data-key]')) {
-      input.checked = config[input.dataset.key] !== false;
+      // TikTok / Instagram : désactivés tant qu'on ne coche pas (data-default="off") ; X / LinkedIn : activés par défaut.
+      const legacy = { instagramFromYoutube: config.instagramAuto, tiktokFromYoutube: config.tiktokAuto }[input.dataset.key];
+      const value = config[input.dataset.key] ?? legacy;
+      input.checked = input.dataset.default === 'off' ? value === true : value !== false;
       // A network with its own folder only takes that folder's posts.
       input.disabled = !!own;
       input.closest('.set-row').classList.toggle('off', !!own);
     }
-    const dirName = { x: 'X', linkedin: 'LINKEDIN' }[net];
+    const dirName = { x: 'X', linkedin: 'LINKEDIN', tiktok: 'TIKTOK', instagram: 'INSTAGRAM' }[net];
     box.querySelector('.net-folder-line').textContent = own
       ? `Dossier « ${all[net].name} » : seuls ses posts partent.`
       : all[net] && all[net].shared === 'facebook'
@@ -2319,6 +2327,9 @@ for (const box of document.querySelectorAll('.net-settings')) {
     input.addEventListener('change', async () => {
       const current = await settings();
       current[input.dataset.key] = input.checked;
+      // Coché maintenant : seules les vidéos et posts publiés à partir de maintenant partent (jamais tout l'historique d'un coup).
+      const net = box.dataset.net;
+      if (input.checked && !current[`${net}Since`]) current[`${net}Since`] = Date.now();
       await chrome.storage.local.set({ folder: current });
       send({ type: 'autoNow' });
     });
