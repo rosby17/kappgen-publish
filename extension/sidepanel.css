@@ -809,3 +809,16 @@ details.tab-settings > summary { display: flex; align-items: center; gap: 6px; f
 .sum-chip.off span { text-decoration: line-through; text-decoration-thickness: 1px; opacity: 0.85; }
 details.tab-settings[open] .set-summary { display: none; }
 #fb-groups-state { display: none; }
+
+/* Onglet sélectionné : logo en blanc sur le fond bleu */
+.tabs button.active .net-logo { color: var(--on-accent) !important; }
+
+/* Résumé des réglages : icônes seules quand le panneau est étroit, le mot revient en l'élargissant */
+.sum-chip { position: relative; }
+details.tab-settings > summary { container-type: inline-size; }
+@container (max-width: 470px) {
+  .sum-chip { width: 22px; padding: 0; justify-content: center; }
+  .sum-chip > span { display: none; }
+  .sum-chip .ico { width: 12px; height: 12px; }
+  .sum-chip.off::after { content: ""; position: absolute; width: 15px; height: 1.5px; border-radius: 1px; background: currentColor; transform: rotate(-45deg); }
+}
