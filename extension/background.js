@@ -2764,7 +2764,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     checkPayment: async () => {
       const { pendingOrder } = await chrome.storage.local.get('pendingOrder');
       if (pendingOrder) {
-        const result = await api(`/billing/verify?order_id=${encodeURIComponent(pendingOrder)}`).catch(() => ({ status: 'pending' }));
+        const result = await api('/publish/verify', { method: 'POST', body: JSON.stringify({ order_id: pendingOrder }) }).catch(() => ({ status: 'pending' }));
         if (result.status === 'success') await chrome.storage.local.remove('pendingOrder');
       }
       const state = await publishAccess({ fresh: true });
