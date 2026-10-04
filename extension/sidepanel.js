@@ -1123,36 +1123,6 @@ function postRow(post) {
     });
     acts.append(accept, unlock);
   }
-  if (post.statut === 'echec' || post.statut === RETIRED) {
-    // Échec : l'utilisateur choisit. Archiver = rangé en bas comme « non publié » (ne part plus, libère la liste) ; Effacer = dossier supprimé.
-    if (post.statut === 'echec') {
-      const archive = button('Archiver', 'btn ghost', async () => {
-        await KappDossier.markPost(post.path, { statut: RETIRED, retire_le: nowIso() });
-        item.say('ok', 'Archivé : il ne partira pas (voir « Archivés, non publiés » en bas).');
-        setTimeout(renderPosts, 400);
-      });
-      archive.title = 'Ne pas publier ce post : il est rangé en bas, dans « Archivés, non publiés », et libère la file';
-      acts.append(archive);
-    } else {
-      const back = button('Remettre en file', 'btn ghost', async () => {
-        await KappDossier.markPost(post.path, { statut: 'a_publier', erreur: null, retire_le: null });
-        setTimeout(renderPosts, 200);
-      });
-      acts.append(back);
-    }
-    const erase = button('Effacer', 'btn ghost danger', async () => {
-      if (!confirm('Effacer ce post ? Son dossier (texte, image, vidéo) est supprimé de ton ordinateur. C’est définitif.')) return;
-      try {
-        await KappDossier.deletePost(post.path);
-        item.say('ok', 'Post effacé.');
-        setTimeout(renderPosts, 400);
-      } catch (error) {
-        item.say('warn', String((error && error.message) || error));
-      }
-    });
-    erase.title = 'Supprimer définitivement le dossier de ce post';
-    acts.append(erase);
-  }
   if (post.statut === 'a_publier' || post.statut === 'echec') {
     const change = timeButton(() => item, post.due_at, async (at) => {
       const d = new Date(at);
@@ -1168,7 +1138,12 @@ function postRow(post) {
     go.dataset.publish = '1';
     acts.append(go);
     acts.append(moreMenu([entryOf(change, 'Changer l’heure', 'clock'), alreadyDone(() => item, () => markPostManual(post.path, 'facebook')),
-      retireButton(() => item, () => retirePost(post.path, 'facebook'))]));
+      archiveEntry(item, post), eraseEntry(item, post)]));
+  }
+  if (post.statut === RETIRED) {
+    acts.append(moreMenu([{ label: 'Remettre en file', icon: 'clock', title: 'Le post repart dans la file, à son heure',
+      run: async () => { await KappDossier.markPost(post.path, { statut: 'a_publier', erreur: null, retire_le: null }); setTimeout(renderPosts, 200); } },
+    eraseEntry(item, post)]));
   }
   if (!post.history) {
     // Ouvrir / Modifier : lire tout le post, corriger le texte et le commentaire, et toutes les actions au même endroit.
@@ -1185,6 +1160,29 @@ function postRow(post) {
   item.append(when, mini, what, acts);
   item.say = (kind, text) => live.replaceChildren(pill(kind, text));
   return item;
+}
+
+// Menu ⋯ d'un post. Archiver = ne pas publier, rangé en bas (le dossier reste) ; Effacer = le dossier est supprimé.
+function archiveEntry(item, post) {
+  return { label: 'Archiver (ne pas publier)', icon: 'check', title: 'Le post ne partira pas : il est rangé en bas, dans « Archivés, non publiés » (rien n’est supprimé)',
+    run: async () => {
+      await KappDossier.markPost(post.path, { statut: RETIRED, retire_le: nowIso() });
+      item.say('ok', 'Archivé : il ne partira pas (voir « Archivés, non publiés » en bas).');
+      setTimeout(renderPosts, 400);
+    } };
+}
+function eraseEntry(item, post) {
+  return { label: 'Effacer définitivement', icon: 'trash', danger: true, title: 'Supprime le dossier du post (texte, image, vidéo) de ton ordinateur',
+    run: async () => {
+      if (!confirm('Effacer ce post ? Son dossier (texte, image, vidéo) est supprimé de ton ordinateur. C’est définitif.')) return;
+      try {
+        await KappDossier.deletePost(post.path);
+        item.say('ok', 'Post effacé.');
+        setTimeout(renderPosts, 400);
+      } catch (error) {
+        item.say('warn', String((error && error.message) || error));
+      }
+    } };
 }
 
 const POST_STATE_TEXT = { a_publier: 'Programmé', en_cours: 'Publication en cours', publie: 'Publié', echec: 'Échec', a_verifier: 'À vérifier sur Facebook', retire: 'Archivé, non publié' };
