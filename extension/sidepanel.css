@@ -709,3 +709,7 @@ body > * { flex: none; }
 .theme-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; border: 1px solid var(--border); }
 .theme-seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
 .theme-seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
+
+.pace-inline { display: inline-flex; align-items: center; gap: 6px; }
+.pace-inline input[type=number] { width: 72px; }
+#set-pace select { max-width: 220px; }

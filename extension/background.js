@@ -20,6 +20,7 @@
 // reopened at any time.
 
 importScripts('lib/schedule.js');
+importScripts('lib/rythme.js');
 
 // The user's KappGen account (session cookie of kappgen.com). The local
 // Docker version is chosen in the panel's Help tab (http://localhost:8080).
@@ -2150,8 +2151,9 @@ async function planNextDue() {
   let next = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at > Date.now())
     .reduce((min, p) => Math.min(min, p.due_at), Infinity);
   // Catching up late posts: wake up for the next one of them.
-  const { catchUp } = await chrome.storage.local.get('catchUp');
+  const { catchUp, paceNext } = await chrome.storage.local.get(['catchUp', 'paceNext']);
   if (catchUp && catchUp.next > Date.now()) next = Math.min(next, catchUp.next);
+  if (paceNext && paceNext > Date.now()) next = Math.min(next, paceNext); // the rhythm chosen in Réglages: the next moment allowed
   await chrome.storage.local.set({ nextDueAt: Number.isFinite(next) ? next : null });
   if (Number.isFinite(next)) await chrome.alarms.create('due', { when: next + 5000 });
   else await chrome.alarms.clear('due');
@@ -2172,6 +2174,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
     await planNextDue();
   })().catch(() => {});
+});
+
+// « Rythme de publication » changed in Réglages: the new rule applies at once.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.folder) return;
+  const was = JSON.stringify((changes.folder.oldValue || {}).pace || null);
+  const now = JSON.stringify((changes.folder.newValue || {}).pace || null);
+  if (was !== now) autoTick();
 });
 
 async function autoTick() {
@@ -2398,6 +2408,30 @@ async function commentNext() {
   return true;
 }
 
+// ---------------------------------------------------------------- rythme de publication (Réglages → « Rythme de publication »)
+// Global to all networks: as soon as ready (default), at a regular interval, or at irregular times like a person (lib/rythme.js).
+// Each automatic send on a network counts as one publication. Manual sends are never held back or counted.
+async function paceGate(settings) {
+  const pace = KappPace.normalize(settings && settings.pace);
+  if (pace.mode === 'asap') { await chrome.storage.local.remove('paceNext'); return { ok: true }; }
+  const { paceLog, pacePlans } = await chrome.storage.local.get(['paceLog', 'pacePlans']);
+  const plans = pacePlans || {};
+  const planFor = (dayStart) => {
+    const key = `${dayStart}|${pace.perDay}|${pace.from}|${pace.to}|${pace.minGapMinutes}`;
+    if (!plans[key]) plans[key] = KappPace.buildPlan(pace, dayStart);
+    return plans[key];
+  };
+  const result = KappPace.gate(pace, Date.now(), paceLog || [], planFor);
+  const oldest = KappPace.dayStartOf(Date.now()) - 2 * 24 * 3600000;
+  for (const key of Object.keys(plans)) if (Number(key.split('|')[0]) < oldest) delete plans[key];
+  await chrome.storage.local.set({ pacePlans: plans, paceNext: result.ok ? null : result.next });
+  return result;
+}
+async function paceRecord() {
+  const { paceLog } = await chrome.storage.local.get('paceLog');
+  await chrome.storage.local.set({ paceLog: [...(paceLog || []), Date.now()].slice(-300), lastAutoPostAt: Date.now() });
+}
+
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
   // « Pause » in the panel: nothing goes out on its own until « Reprendre ».
@@ -2455,21 +2489,25 @@ async function autoPass() {
   // A comment whose time has come goes under its post/video first.
   const commentAt = Date.now();
   if (await commentNext()) { await chainIfDone(commentAt); return; }
+  // Pace chosen in Réglages: outside the allowed moments nothing is published (comments and the sheet updates below still go).
+  const gate = await paceGate(settings);
+  const paced = !gate.ok;
+  if (paced) await autoState('paced', { next: gate.next });
   // What is already out somewhere goes on to the other networks first: one
   // publication on all its networks, then the next one.
-  if (await spreadNext(settings, sent, own)) { await chainIfDone(passAt); return; }
+  if (!paced && await spreadNext(settings, sent, own)) { await paceRecord(); await chainIfDone(passAt); return; }
   // A post whose time has come: it has a time, a new video has not.
-  const duePost = networkOn(settings, 'facebook') ? await nextDuePost() : null;
+  const duePost = !paced && networkOn(settings, 'facebook') ? await nextDuePost() : null;
   if (duePost) {
-    await chrome.storage.local.set({ lastAutoPostAt: Date.now() });
+    await paceRecord();
     await publishFacebookPost(duePost, { auto: true });
     await chainIfDone(passAt); // then the same post on the other networks
     return;
   }
   // Each network's own posts (its folder, or <NETWORK>/A-PUBLIER), at their time.
-  if (await ownPostNext(settings)) { await chainIfDone(passAt); return; }
+  if (!paced && await ownPostNext(settings)) { await paceRecord(); await chainIfDone(passAt); return; }
   let next = null;
-  for (const candidate of networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
+  for (const candidate of !paced && networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
       await folder('mark', { path: candidate.relative_path, status: 'ignored', data: { reason: 'déjà sur la chaîne (même titre)' } }).catch(() => {});
       continue;
@@ -2481,6 +2519,7 @@ async function autoPass() {
     // Per channel: unlisted by default (the creator makes it public himself),
     // or straight to public for news channels where timing matters.
     const visibility = channelVisibility(ownOf(settings, next));
+    await paceRecord();
     await publish('folder', next.id, visibility, { auto: true });
     autoTick(); // more may be waiting
     return;
