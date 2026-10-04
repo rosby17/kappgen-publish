@@ -3029,3 +3029,61 @@ $('open-help').addEventListener('click', () => {
   toggleProfile(false);
   document.querySelector('.topbar [data-tab="help"]').click();
 });
+
+// ------------------------------------------------ résumé des réglages (titres repliés)
+// Petites puces à icône à côté de « Réglages … » : on voit d'un coup d'œil ce qui est actif, et ce qui est désactivé (barré)
+// rappelle qu'on peut l'activer en ouvrant le panneau.
+const SUM_ICONS = {
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  comment: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12Z"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
+  play: '<rect x="2.5" y="5" width="19" height="14" rx="4"/><path d="m10 9.5 5 2.5-5 2.5z"/>',
+  post: '<rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2h8.8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
+};
+function sumChip(iconName, text, on, title) {
+  const chip = el('span', `sum-chip${on ? '' : ' off'}`);
+  chip.innerHTML = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${SUM_ICONS[iconName]}</svg>`;
+  chip.append(el('span', null, text));
+  chip.title = `${title} : ${on ? 'activé' : 'désactivé (ouvre les réglages pour l’activer)'}`;
+  return chip;
+}
+const checkedOf = (sel) => { const n = document.querySelector(sel); return !!(n && n.checked); };
+function renderSettingSummaries() {
+  for (const box of document.querySelectorAll('.set-summary')) {
+    const net = box.dataset.for;
+    const chips = [];
+    if (net === 'youtube') {
+      const vis = document.querySelector('#yt-visibility button.active, #yt-visibility [aria-checked="true"]');
+      const visText = vis ? vis.textContent.trim() : 'Non répertoriée';
+      chips.push(sumChip('eye', visText, true, `Visibilité : ${visText}`));
+      const when = document.querySelector('input[name="yt-when"]:checked');
+      const fixed = when && when.value === 'times';
+      chips.push(sumChip(fixed ? 'clock' : 'bolt', fixed ? 'Heures fixes' : 'Dès que prêt', true, fixed ? 'Publication à heures fixes' : 'Publication dès que c’est prêt'));
+      chips.push(sumChip('comment', 'Épinglé', checkedOf('#yt-comment'), 'Commentaire épinglé'));
+    } else if (net === 'facebook') {
+      chips.push(sumChip('play', 'YouTube', checkedOf('#fb-from-yt'), 'Mes vidéos YouTube sur ma Page'));
+      chips.push(sumChip('comment', 'Commentaire', checkedOf('#fb-comment'), 'Commentaire sous mes posts'));
+      chips.push(sumChip('users', 'Groupes', checkedOf('#fb-groups-on'), 'Partage dans les groupes'));
+    } else {
+      const details = box.closest('details');
+      const own = details && details.querySelector('.set-row.off');
+      const yt = details && details.querySelector('input[data-key$="FromYoutube"]');
+      const fb = details && details.querySelector('input[data-key$="FromFacebook"]');
+      if (own) chips.push(sumChip('folder', 'Son dossier', true, 'Dossier rien que pour ce réseau'));
+      else {
+        chips.push(sumChip('play', 'YouTube', !!(yt && yt.checked), 'Mes vidéos YouTube'));
+        chips.push(sumChip('post', 'Posts FB', !!(fb && fb.checked), 'Mes posts Facebook'));
+      }
+    }
+    box.replaceChildren(...chips);
+  }
+}
+let summaryFrame = 0;
+const scheduleSummaries = () => { cancelAnimationFrame(summaryFrame); summaryFrame = requestAnimationFrame(renderSettingSummaries); };
+document.addEventListener('change', scheduleSummaries, true);
+document.addEventListener('click', () => setTimeout(scheduleSummaries, 300), true);
+setInterval(() => { if (!document.hidden) renderSettingSummaries(); }, 3000);
+setTimeout(renderSettingSummaries, 800);
