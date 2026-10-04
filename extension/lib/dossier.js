@@ -1081,7 +1081,7 @@ const KappDossier = (() => {
       // A network's own post keeps its state under the network's name. Every
       // stored state is checked even while the Facebook view is being built:
       // a typo such as "publiee" must not silently suppress a destination.
-      const allowedStates = new Set(['a_publier', 'en_cours', 'publie', 'echec', 'a_verifier']);
+      const allowedStates = new Set(['a_publier', 'en_cours', 'publie', 'echec', 'a_verifier', 'retire']);   // retire = archivé, non publié
       const validateNetworkState = (state, label) => {
         if (!state || typeof state !== 'object' || Array.isArray(state)) {
           invalidate(`Le champ ${label} doit contenir un objet JSON.`);
@@ -1134,6 +1134,7 @@ const KappDossier = (() => {
         page,
         type: video ? 'reel' : image ? 'photo' : 'texte',
         text: text.slice(0, 63000),
+        text_file: textName || null,
         comment: comment.slice(0, 8000) || null,
         comment_delay: info.commentaire_delai != null && Number.isFinite(Number(info.commentaire_delai)) ? Math.min(1440, Math.max(0, Number(info.commentaire_delai))) : null,
         comment_statut: info.commentaire_statut || null,
@@ -1191,8 +1192,30 @@ const KappDossier = (() => {
     return info;
   }
 
+  // « Modifier » un post depuis le panneau : réécrit son fichier texte (celui qu'il lisait déjà, sinon texte.txt).
+  async function writePostText(path, text, fileName) {
+    let [dir, inside] = await dirFor(path);
+    for (const part of inside.split('/').filter(Boolean)) dir = await dir.getDirectoryHandle(part);
+    const name = fileName && /\.(txt|md)$/i.test(fileName) && !fileName.includes('/') ? fileName : 'texte.txt';
+    const handle = await dir.getFileHandle(name, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(String(text || '').trim() + '\n');
+    await writable.close();
+    return name;
+  }
+
+  // « Effacer » un post : son dossier est supprimé pour de bon (le panneau demande confirmation avant).
+  async function deletePost(path) {
+    const [rootDir, inside] = await dirFor(path);
+    const parts = inside.split('/').filter(Boolean);
+    if (!parts.length) throw new Error('Impossible d’effacer le dossier racine.');
+    let dir = rootDir;
+    for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
+    await dir.removeEntry(parts[parts.length - 1], { recursive: true });
+  }
+
   return { NETS, POST_NETS, saveRoot, loadRoot, access, folders, saveNetRoot, loadNetRoot, clearNetRoot,
-    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost, exportState,
+    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost, deletePost, writePostText, exportState,
     _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testNets.facebook = h; },
     _setTestNetRoot: (net, h) => { testNets[net] = h; } };
 })();

@@ -82,6 +82,7 @@ function liveRegion() {
 
 // Small line icons (no emoji): clock, link, play, refresh.
 const ICON_PATHS = {
+  pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2h8.8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   link: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
@@ -1122,6 +1123,36 @@ function postRow(post) {
     });
     acts.append(accept, unlock);
   }
+  if (post.statut === 'echec' || post.statut === RETIRED) {
+    // Échec : l'utilisateur choisit. Archiver = rangé en bas comme « non publié » (ne part plus, libère la liste) ; Effacer = dossier supprimé.
+    if (post.statut === 'echec') {
+      const archive = button('Archiver', 'btn ghost', async () => {
+        await KappDossier.markPost(post.path, { statut: RETIRED, retire_le: nowIso() });
+        item.say('ok', 'Archivé : il ne partira pas (voir « Archivés, non publiés » en bas).');
+        setTimeout(renderPosts, 400);
+      });
+      archive.title = 'Ne pas publier ce post : il est rangé en bas, dans « Archivés, non publiés », et libère la file';
+      acts.append(archive);
+    } else {
+      const back = button('Remettre en file', 'btn ghost', async () => {
+        await KappDossier.markPost(post.path, { statut: 'a_publier', erreur: null, retire_le: null });
+        setTimeout(renderPosts, 200);
+      });
+      acts.append(back);
+    }
+    const erase = button('Effacer', 'btn ghost danger', async () => {
+      if (!confirm('Effacer ce post ? Son dossier (texte, image, vidéo) est supprimé de ton ordinateur. C’est définitif.')) return;
+      try {
+        await KappDossier.deletePost(post.path);
+        item.say('ok', 'Post effacé.');
+        setTimeout(renderPosts, 400);
+      } catch (error) {
+        item.say('warn', String((error && error.message) || error));
+      }
+    });
+    erase.title = 'Supprimer définitivement le dossier de ce post';
+    acts.append(erase);
+  }
   if (post.statut === 'a_publier' || post.statut === 'echec') {
     const change = timeButton(() => item, post.due_at, async (at) => {
       const d = new Date(at);
@@ -1139,9 +1170,89 @@ function postRow(post) {
     acts.append(moreMenu([entryOf(change, 'Changer l’heure', 'clock'), alreadyDone(() => item, () => markPostManual(post.path, 'facebook')),
       retireButton(() => item, () => retirePost(post.path, 'facebook'))]));
   }
+  if (!post.history) {
+    // Ouvrir / Modifier : lire tout le post, corriger le texte et le commentaire, et toutes les actions au même endroit.
+    const edit = el('button', 'btn ghost icon-btn icon-only');
+    edit.type = 'button';
+    edit.title = 'Ouvrir le post : lire, modifier le texte, archiver, effacer';
+    edit.append(icon('pencil'));
+    edit.addEventListener('click', () => toggleEditor(item, post));
+    acts.prepend(edit);
+    what.classList.add('clickable');
+    what.title = 'Cliquer pour ouvrir le post';
+    what.addEventListener('click', (event) => { if (!event.target.closest('button, a')) toggleEditor(item, post); });
+  }
   item.append(when, mini, what, acts);
   item.say = (kind, text) => live.replaceChildren(pill(kind, text));
   return item;
+}
+
+const POST_STATE_TEXT = { a_publier: 'Programmé', en_cours: 'Publication en cours', publie: 'Publié', echec: 'Échec', a_verifier: 'À vérifier sur Facebook', retire: 'Archivé, non publié' };
+function toggleEditor(item, post) {
+  const open = item.querySelector(':scope > .post-editor');
+  if (open) { open.remove(); return; }
+  const box = el('div', 'post-editor');
+  const media = [post.image_path && `Image : ${post.image_path.split('/').pop()}`, post.video_path && `Vidéo : ${post.video_path.split('/').pop()}`,
+    post.text_file && `Texte : ${post.text_file}`].filter(Boolean).join(' · ');
+  box.append(el('div', 'small muted', `${POST_TYPES[post.type] || 'Post'} · ${POST_STATE_TEXT[post.statut] || post.statut}${post.channel_name ? ' · ' + post.channel_name : ''}`));
+  if (media) box.append(el('div', 'small muted', media));
+  if (post.error) box.append(el('div', 'small warn', post.error));
+  const editable = post.statut !== 'en_cours';
+  const text = document.createElement('textarea');
+  text.value = post.text || '';
+  text.rows = Math.min(14, Math.max(4, (post.text || '').split('\n').length + 1));
+  text.disabled = !editable;
+  const comment = document.createElement('textarea');
+  comment.value = post.comment || '';
+  comment.rows = 2;
+  comment.placeholder = 'Commentaire publié sous le post (facultatif)';
+  comment.disabled = !editable;
+  box.append(el('label', 'small', 'Texte du post'), text, el('label', 'small', 'Commentaire'), comment);
+  if (post.statut === 'publie') box.append(el('p', 'small muted', 'Déjà publié : modifier le texte ici ne change pas le post sur Facebook.'));
+  const row = el('div', 'editor-acts');
+  const save = button('Enregistrer', 'btn primary', async () => {
+    save.disabled = true;
+    try {
+      await KappDossier.writePostText(post.path, text.value, post.text_file);
+      if ((comment.value.trim() || null) !== (post.comment || null)) await KappDossier.markPost(post.path, { commentaire: comment.value.trim() || null });
+      item.say('ok', 'Modifications enregistrées dans le dossier.');
+      setTimeout(renderPosts, 500);
+    } catch (error) {
+      item.say('warn', String((error && error.message) || error));
+      save.disabled = false;
+    }
+  });
+  save.disabled = !editable;
+  const close = button('Fermer', 'btn ghost', () => box.remove());
+  row.append(save, close);
+  if (post.statut === 'a_publier' || post.statut === 'echec' || post.statut === 'a_verifier') {
+    row.append(button('Archiver', 'btn ghost', async () => {
+      await KappDossier.markPost(post.path, { statut: RETIRED, retire_le: nowIso() });
+      item.say('ok', 'Archivé : il ne partira pas (voir « Archivés, non publiés » en bas).');
+      setTimeout(renderPosts, 400);
+    }));
+  }
+  if (post.statut === RETIRED) {
+    row.append(button('Remettre en file', 'btn ghost', async () => {
+      await KappDossier.markPost(post.path, { statut: 'a_publier', erreur: null, retire_le: null });
+      setTimeout(renderPosts, 200);
+    }));
+  }
+  if (post.statut !== 'en_cours') {
+    row.append(button('Effacer', 'btn ghost danger', async () => {
+      if (!confirm('Effacer ce post ? Son dossier (texte, image, vidéo) est supprimé de ton ordinateur. C’est définitif.')) return;
+      try {
+        await KappDossier.deletePost(post.path);
+        item.say('ok', 'Post effacé.');
+        setTimeout(renderPosts, 400);
+      } catch (error) {
+        item.say('warn', String((error && error.message) || error));
+      }
+    }));
+  }
+  box.append(row);
+  item.append(box);
+  text.focus();
 }
 
 // The extension's own history (lib/historique.js): what was published,
@@ -1545,7 +1656,8 @@ async function renderPostsOnce() {
   const pageOf = (p) => p.page || ((config.channels[p.channel_key] || {}).facebookPageUrl) || config.facebookPageUrl;
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
   const rank = { en_cours: 0, a_verifier: 1, echec: 2, a_publier: 3 };
-  const toCome = posts.filter((p) => p.statut !== 'publie')
+  const archived = posts.filter((p) => p.statut === RETIRED);
+  const toCome = posts.filter((p) => p.statut !== 'publie' && p.statut !== RETIRED)
     .sort((a, b) => (rank[a.statut] ?? 3) - (rank[b.statut] ?? 3) || (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
   // Published: what the folder still holds, then the extension's own history.
   await loadHistory();
@@ -1571,6 +1683,9 @@ async function renderPostsOnce() {
   // « Déjà publiés » follows the chosen filter too; the latest day is open.
   const doneShown = done.filter(shown);
   $('fb-done-box').hidden = !doneShown.length;
+  $('fb-archived-box').hidden = !archived.length;
+  $('fb-archived-title').textContent = `Archivés, non publiés (${archived.length})`;
+  $('fb-archived').replaceChildren(...archived.map(postRow));
   $('fb-done-title').textContent = `Déjà publiés (${doneShown.length})`;
   $('fb-done-days').replaceChildren(...dayGroups(doneShown, (p) => Date.parse(p.published_at || 0) || p.due_at, 'done',
     { openFirst: true, row: (p) => (p.history ? historyRow(p.history) : postRow(p)) }));
@@ -2354,6 +2469,11 @@ document.addEventListener('visibilitychange', async () => {
 
 // Thème : celui de l'ordinateur par défaut ; le bouton de l'en-tête et le menu du compte permettent de choisir clair ou sombre
 // à tout moment. Le choix reste dans ce profil Chrome et s'enregistre aussi sur le compte KappGen (même thème que le site).
+const THEME_ICONS = {
+  clair: '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  sombre: '<svg class="ico" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+  auto: '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>',
+};
 const themeAuto = () => (matchMedia('(prefers-color-scheme: light)').matches ? 'clair' : 'sombre');
 function applyTheme(choice, save) {
   if (choice === 'clair' || choice === 'sombre') localStorage.setItem('kgTheme', choice); else localStorage.removeItem('kgTheme');
@@ -2374,6 +2494,13 @@ matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { i
 function showThemeButton() {
   const choice = localStorage.getItem('kgTheme') || '';
   for (const b of document.querySelectorAll('[data-theme-choice]')) b.setAttribute('aria-checked', String(b.dataset.themeChoice === choice));
+  const cycle = document.getElementById('theme-cycle-value');
+  if (cycle) {     // icône du mode choisi : soleil = clair, lune = sombre, cercle à moitié plein = auto (suit l'ordinateur)
+    cycle.innerHTML = THEME_ICONS[choice] || THEME_ICONS.auto;
+    const name = { clair: 'Clair', sombre: 'Sombre' }[choice] || 'Auto';
+    $('theme-cycle').title = `Thème : ${name} (cliquer pour changer)`;
+    $('theme-cycle').setAttribute('aria-label', `Thème : ${name}`);
+  }
   const label = document.documentElement.dataset.theme === 'clair' ? 'Passer en thème sombre' : 'Passer en thème clair';
   const toggle = document.getElementById('theme-toggle');   // ancien bouton de l'en-tête (le thème est maintenant dans Réglages et le menu du compte)
   if (toggle) { toggle.title = label; toggle.setAttribute('aria-label', label); }
@@ -2855,3 +2982,14 @@ function bindInstagramAuto() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindInstagramAuto);
 else bindInstagramAuto();
+
+// Menu du compte : le thème en un seul bouton (Auto → Clair → Sombre → Auto…) et l'Aide (retirée de l'en-tête pour la place).
+$('theme-cycle').addEventListener('click', (event) => {
+  event.stopPropagation();
+  const next = { '': 'clair', clair: 'sombre', sombre: '' }[localStorage.getItem('kgTheme') || ''];
+  applyTheme(next, true);
+});
+$('open-help').addEventListener('click', () => {
+  toggleProfile(false);
+  document.querySelector('.topbar [data-tab="help"]').click();
+});

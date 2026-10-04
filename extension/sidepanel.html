@@ -21,7 +21,7 @@
     <nav class="topbar" aria-label="Réglages et aide">
       <button id="pause-all" class="tool pause-btn" title="Mettre en pause toutes les publications automatiques"><svg class="ico" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg><span>Pause</span></button>
       <button data-tab="settings" class="tool" title="Réglages"><svg class="ico" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg><span>Réglages</span></button>
-      <button data-tab="help" class="tool" title="Aide"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg><span>Aide</span></button>
+      <button data-tab="help" class="tool" title="Aide" hidden><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg><span>Aide</span></button>
     </nav>
     <div id="profile" class="profile" hidden>
       <button id="avatar" class="avatar" title="Mon compte" aria-haspopup="true" aria-expanded="false"></button>
@@ -32,11 +32,10 @@
         </div>
         <div id="account-plan" class="profile-plan"></div>
         <a class="profile-link" role="menuitem" href="https://app.kappgen.com/compte" target="_blank" rel="noopener noreferrer">Mon compte KappGen</a>
-        <a class="profile-link" role="menuitem" href="https://kappgen.com/" target="_blank" rel="noopener noreferrer">Site kappgen.com</a>
-        <a class="profile-link" role="menuitem" href="https://app.kappgen.com/extension" target="_blank" rel="noopener noreferrer">Installer ou mettre à jour l’extension</a>
-        <div class="profile-theme" role="group" aria-label="Thème"><span>Thème</span>
-          <div class="theme-seg"><button type="button" data-theme-choice="" role="menuitemradio">Auto</button><button type="button" data-theme-choice="clair" role="menuitemradio">Clair</button><button type="button" data-theme-choice="sombre" role="menuitemradio">Sombre</button></div></div>
+        <a class="profile-link" role="menuitem" href="https://app.kappgen.com/extension" target="_blank" rel="noopener noreferrer">Mettre à jour l’extension</a>
+        <button id="theme-cycle" class="profile-link profile-btn" type="button" role="menuitem" title="Thème : Auto (cliquer pour changer)"><span>Thème</span><span id="theme-cycle-value" class="theme-icon" aria-hidden="true"></span></button>
         <button id="renew" class="btn ghost" role="menuitem">Abonnement</button>
+        <button id="open-help" class="profile-link profile-btn" type="button" role="menuitem">Aide</button>
         <button id="logout" class="btn ghost" role="menuitem">Se déconnecter</button>
       </div>
     </div>
@@ -259,6 +258,7 @@
     <div id="fb-days"></div>
     <ul id="fb-posts" class="rows" hidden></ul>
     <details id="fb-done-box" class="done-box" hidden><summary id="fb-done-title"></summary><div id="fb-done-days"></div><ul id="fb-done" class="rows" hidden></ul></details>
+    <details id="fb-archived-box" class="done-box" hidden><summary id="fb-archived-title"></summary><ul id="fb-archived" class="rows"></ul></details>
     <p id="no-posts" class="muted small" hidden>Aucun post à venir.</p>
     <details id="fb-videos-box" class="done-box"><summary id="fb-videos-title">Vidéos et Réels venus de YouTube</summary>
       <ul id="facebook" class="rows"></ul>
@@ -335,12 +335,6 @@
   </div>
 
   <div id="tab-settings" class="tab" hidden>
-    <section class="card theme-card">
-      <div class="field-head"><h2>Thème</h2>
-        <div class="theme-seg" role="group" aria-label="Thème"><button type="button" data-theme-choice="" role="radio">Auto</button><button type="button" data-theme-choice="clair" role="radio">Clair</button><button type="button" data-theme-choice="sombre" role="radio">Sombre</button></div>
-      </div>
-      <p class="small muted">Auto suit le réglage de ton ordinateur. Ton choix est aussi enregistré sur ton compte KappGen.</p>
-    </section>
     <h3 class="set-group">Dossiers</h3>
     <section class="card" id="set-folder">
       <h2>Dossier principal</h2>

@@ -723,8 +723,23 @@ header .topbar .tool .ico { width: 15px; height: 15px; }
 header .profile { margin-left: 2px; }
 header .plan-pill { margin: 0; }
 @media (min-width: 470px) { header .topbar .tool span { display: inline; } }
-.theme-card .field-head { margin-bottom: 6px; }
-.theme-card .small { margin: 0; }
-.theme-card .theme-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: rgba(var(--ink), 0.06); border: 1px solid var(--border); }
-.theme-card .theme-seg button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
-.theme-card .theme-seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }
+.profile-btn { width: 100%; text-align: left; background: none; border: 0; font: inherit; font-size: 13px; cursor: pointer; }
+.profile-btn strong { color: var(--accent-strong); font-weight: 700; }
+.profile-btn#theme-cycle { display: flex; align-items: center; justify-content: space-between; }
+.theme-icon { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); color: var(--accent-strong); }
+.theme-icon .ico { width: 15px; height: 15px; }
+.btn.ghost.danger { color: var(--danger); }
+.btn.ghost.danger:hover:not(:disabled) { background: rgba(255, 138, 138, 0.1); color: var(--danger); }
+li.row.state-retire { opacity: 0.75; }
+
+/* Post ouvert : lire, modifier, archiver, effacer */
+li.row .what.clickable { cursor: pointer; }
+li.row .what.clickable:hover .t { color: var(--accent-strong); }
+li.row > .post-editor { grid-column: 1 / -1; display: grid; gap: 6px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.post-editor .small { margin: 0; }
+.post-editor textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 8px 10px; border-radius: 8px; font: inherit; font-size: 12.5px; line-height: 1.45;
+  background: rgba(var(--ink), 0.06); border: 1px solid var(--border); color: var(--text); }
+.post-editor textarea:focus { outline: none; border-color: var(--accent); }
+.post-editor .warn { color: #ffcf6e; }
+.editor-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.editor-acts .btn { height: 28px; }
