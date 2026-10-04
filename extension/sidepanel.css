@@ -713,3 +713,18 @@ body > * { flex: none; }
 .pace-inline { display: inline-flex; align-items: center; gap: 6px; }
 .pace-inline input[type=number] { width: 72px; }
 #set-pace select { max-width: 220px; }
+
+/* ------------------------------------- 1.20.27 : Pause, Réglages et Aide dans l'en-tête (le thème passe dans Réglages) */
+header .topbar { margin: 0 0 0 auto; display: flex; align-items: center; gap: 4px; flex: none; }
+header .topbar .tool { height: 32px; padding: 0 9px; }
+header .topbar .pause-btn { margin-right: 0; }
+header .topbar .tool span { display: none; }               /* panneau étroit : l'icône seule (le nom est dans l'infobulle) */
+header .topbar .tool .ico { width: 15px; height: 15px; }
+header .profile { margin-left: 2px; }
+header .plan-pill { margin: 0; }
+@media (min-width: 470px) { header .topbar .tool span { display: inline; } }
+.theme-card .field-head { margin-bottom: 6px; }
+.theme-card .small { margin: 0; }
+.theme-card .theme-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: rgba(var(--ink), 0.06); border: 1px solid var(--border); }
+.theme-card .theme-seg button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.theme-card .theme-seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); }

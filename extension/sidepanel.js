@@ -2374,12 +2374,10 @@ matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { i
 function showThemeButton() {
   const choice = localStorage.getItem('kgTheme') || '';
   for (const b of document.querySelectorAll('[data-theme-choice]')) b.setAttribute('aria-checked', String(b.dataset.themeChoice === choice));
-  const light = document.documentElement.dataset.theme === 'clair';
-  const label = light ? 'Passer en thème sombre' : 'Passer en thème clair';
-  $('theme-toggle').title = label;
-  $('theme-toggle').setAttribute('aria-label', label);
+  const label = document.documentElement.dataset.theme === 'clair' ? 'Passer en thème sombre' : 'Passer en thème clair';
+  const toggle = document.getElementById('theme-toggle');   // ancien bouton de l'en-tête (le thème est maintenant dans Réglages et le menu du compte)
+  if (toggle) { toggle.title = label; toggle.setAttribute('aria-label', label); }
 }
-$('theme-toggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'clair' ? 'sombre' : 'clair', true));
 showThemeButton();
 
 // --------------------------------------------------------------- account
