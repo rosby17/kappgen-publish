@@ -2316,10 +2316,13 @@ async function renderNetSettings() {
       : all[net] && all[net].shared === 'facebook'
         ? `Mêmes posts que Facebook (dossier « ${all[net].name} »), chacun à son heure.`
         : `Mêmes posts que Facebook, plus ${dirName}/A-PUBLIER du dossier principal.`;
-    const on = config.networks && config.networks[net];
+    // Seulement si le réseau est décoché dans « Réseaux utilisés » (un réseau est actif par défaut) ; sinon les puces du résumé suffisent.
     const state = box.querySelector('.net-state');
-    state.className = `pill net-state ${on ? 'ok' : 'neutral'}`;
-    state.textContent = !on ? 'Désactivé' : own ? 'Son propre dossier' : 'Automatique';
+    const cut = !networkIsOn(config, net);
+    state.hidden = !cut;
+    state.className = 'pill net-state warn';
+    state.textContent = 'Réseau coupé';
+    state.title = 'Ce réseau est décoché dans Réglages → Réseaux utilisés : rien n’y part.';
   }
 }
 for (const box of document.querySelectorAll('.net-settings')) {
