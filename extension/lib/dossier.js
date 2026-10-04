@@ -1204,6 +1204,27 @@ const KappDossier = (() => {
     return name;
   }
 
+  // « Remplacer la photo / la vidéo » : le nouveau fichier est copié dans le dossier du post et l'ancien (s'il y en a un) est supprimé,
+  // pour que le post n'en ait plus qu'un. publication.json qui désignait l'ancienne image désigne la nouvelle.
+  async function replacePostMedia(path, file, oldName) {
+    let [dir, inside] = await dirFor(path);
+    for (const part of inside.split('/').filter(Boolean)) dir = await dir.getDirectoryHandle(part);
+    const kind = IMAGE_EXT.test(file.name) ? 'image' : VIDEO_EXT.test(file.name) ? 'video' : null;
+    if (!kind) throw new Error('Choisis une image (jpg, png, webp…) ou une vidéo (mp4, mov…).');
+    const name = file.name.replace(/[\\/:*?"<>|]/g, '_');
+    const handle = await dir.getFileHandle(name, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(file);
+    await writable.close();
+    if (oldName && oldName !== name) await dir.removeEntry(oldName).catch(() => {});
+    if (kind === 'image') {
+      const parsed = await readJsonResult(dir, 'publication.json');
+      const info = parsed.value && typeof parsed.value === 'object' && !Array.isArray(parsed.value) ? parsed.value : null;
+      if (info && info.image) await markPost(path, { image: name });
+    }
+    return name;
+  }
+
   // « Effacer » un post : son dossier est supprimé pour de bon (le panneau demande confirmation avant).
   async function deletePost(path) {
     const [rootDir, inside] = await dirFor(path);
@@ -1215,7 +1236,7 @@ const KappDossier = (() => {
   }
 
   return { NETS, POST_NETS, saveRoot, loadRoot, access, folders, saveNetRoot, loadNetRoot, clearNetRoot,
-    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost, deletePost, writePostText, exportState,
+    saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost, deletePost, writePostText, replacePostMedia, exportState,
     _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testNets.facebook = h; },
     _setTestNetRoot: (net, h) => { testNets[net] = h; } };
 })();

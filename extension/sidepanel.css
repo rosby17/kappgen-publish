@@ -743,3 +743,7 @@ li.row > .post-editor { grid-column: 1 / -1; display: grid; gap: 6px; margin-top
 .post-editor .warn { color: #ffcf6e; }
 .editor-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .editor-acts .btn { height: 28px; }
+.editor-media { display: grid; gap: 6px; margin-top: 4px; }
+.media-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.media-line .small { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-line .btn { height: 28px; flex: none; }

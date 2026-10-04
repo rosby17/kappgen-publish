@@ -1137,22 +1137,17 @@ function postRow(post) {
       { type: 'postNow', path: post.path }, 'Publication sur Facebook en cours…'));
     go.dataset.publish = '1';
     acts.append(go);
-    acts.append(moreMenu([entryOf(change, 'Changer l’heure', 'clock'), alreadyDone(() => item, () => markPostManual(post.path, 'facebook')),
+    acts.append(moreMenu([editEntry(item, post), entryOf(change, 'Changer l’heure', 'clock'), alreadyDone(() => item, () => markPostManual(post.path, 'facebook')),
       archiveEntry(item, post), eraseEntry(item, post)]));
   }
   if (post.statut === RETIRED) {
-    acts.append(moreMenu([{ label: 'Remettre en file', icon: 'clock', title: 'Le post repart dans la file, à son heure',
+    acts.append(moreMenu([editEntry(item, post), { label: 'Remettre en file', icon: 'clock', title: 'Le post repart dans la file, à son heure',
       run: async () => { await KappDossier.markPost(post.path, { statut: 'a_publier', erreur: null, retire_le: null }); setTimeout(renderPosts, 200); } },
     eraseEntry(item, post)]));
   }
   if (!post.history) {
-    // Ouvrir / Modifier : lire tout le post, corriger le texte et le commentaire, et toutes les actions au même endroit.
-    const edit = el('button', 'btn ghost icon-btn icon-only');
-    edit.type = 'button';
-    edit.title = 'Ouvrir le post : lire, modifier le texte, archiver, effacer';
-    edit.append(icon('pencil'));
-    edit.addEventListener('click', () => toggleEditor(item, post));
-    acts.prepend(edit);
+    // « Modifier le post » est toujours dans le menu ⋯ ; les posts qui n'en avaient pas (publié, à vérifier…) en reçoivent un.
+    if (!acts.querySelector('.more')) acts.append(moreMenu(post.statut === 'en_cours' ? [editEntry(item, post)] : [editEntry(item, post), eraseEntry(item, post)]));
     what.classList.add('clickable');
     what.title = 'Cliquer pour ouvrir le post';
     what.addEventListener('click', (event) => { if (!event.target.closest('button, a')) toggleEditor(item, post); });
@@ -1163,6 +1158,10 @@ function postRow(post) {
 }
 
 // Menu ⋯ d'un post. Archiver = ne pas publier, rangé en bas (le dossier reste) ; Effacer = le dossier est supprimé.
+function editEntry(item, post) {
+  return { label: 'Modifier le post', icon: 'pencil', title: 'Lire tout le post, modifier son texte et son commentaire',
+    run: () => toggleEditor(item, post) };
+}
 function archiveEntry(item, post) {
   return { label: 'Archiver (ne pas publier)', icon: 'check', title: 'Le post ne partira pas : il est rangé en bas, dans « Archivés, non publiés » (rien n’est supprimé)',
     run: async () => {
@@ -1190,8 +1189,7 @@ function toggleEditor(item, post) {
   const open = item.querySelector(':scope > .post-editor');
   if (open) { open.remove(); return; }
   const box = el('div', 'post-editor');
-  const media = [post.image_path && `Image : ${post.image_path.split('/').pop()}`, post.video_path && `Vidéo : ${post.video_path.split('/').pop()}`,
-    post.text_file && `Texte : ${post.text_file}`].filter(Boolean).join(' · ');
+  const media = post.text_file ? `Fichier texte : ${post.text_file}` : '';
   box.append(el('div', 'small muted', `${POST_TYPES[post.type] || 'Post'} · ${POST_STATE_TEXT[post.statut] || post.statut}${post.channel_name ? ' · ' + post.channel_name : ''}`));
   if (media) box.append(el('div', 'small muted', media));
   if (post.error) box.append(el('div', 'small warn', post.error));
@@ -1205,7 +1203,36 @@ function toggleEditor(item, post) {
   comment.rows = 2;
   comment.placeholder = 'Commentaire publié sous le post (facultatif)';
   comment.disabled = !editable;
-  box.append(el('label', 'small', 'Texte du post'), text, el('label', 'small', 'Commentaire'), comment);
+  // Photo / vidéo : remplacer (ou ajouter) le fichier du post.
+  const mediaRow = el('div', 'editor-media');
+  const mediaFor = (kind, current) => {
+    const label = kind === 'image' ? 'photo' : 'vidéo';
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = kind === 'image' ? 'image/*' : 'video/*';
+    input.hidden = true;
+    const pick = button(current ? `Remplacer la ${label}` : `Ajouter une ${label}`, 'btn secondary', () => input.click());
+    pick.disabled = !editable;
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      pick.disabled = true;
+      try {
+        const name = await KappDossier.replacePostMedia(post.path, file, current ? current.split('/').pop() : null);
+        item.say('ok', `${kind === 'image' ? 'Photo' : 'Vidéo'} remplacée : ${name}.`);
+        setTimeout(renderPosts, 500);
+      } catch (error) {
+        item.say('warn', String((error && error.message) || error));
+        pick.disabled = false;
+      }
+    });
+    const line = el('div', 'media-line');
+    line.append(el('span', 'small muted', current ? `${kind === 'image' ? 'Photo' : 'Vidéo'} : ${current.split('/').pop()}` : `Pas de ${label}`), pick, input);
+    return line;
+  };
+  if (!post.video_path) mediaRow.append(mediaFor('image', post.image_path));
+  if (!post.image_path || post.video_path) mediaRow.append(mediaFor('video', post.video_path));
+  box.append(el('label', 'small', 'Texte du post'), text, el('label', 'small', 'Commentaire'), comment, mediaRow);
   if (post.statut === 'publie') box.append(el('p', 'small muted', 'Déjà publié : modifier le texte ici ne change pas le post sur Facebook.'));
   const row = el('div', 'editor-acts');
   const save = button('Enregistrer', 'btn primary', async () => {
