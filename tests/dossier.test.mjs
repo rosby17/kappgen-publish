@@ -381,3 +381,22 @@ test('a YouTube draft enters the history only once the upload is finished', asyn
   await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk' });
   assert.deepEqual(added.map((e) => [e.net, e.kind, e.url]), [['youtube', 'video', 'https://youtu.be/abcdefghijk']]);
 });
+
+test('organisation « marques » : une vidéo de contenus/<id>/06-rendu appartient à sa marque (marque.json), avec sa chaîne YouTube', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('ESPACE');
+  const niche = disk.dir('religion');
+  const marque = niche.dir('lumiere-divine');
+  marque.file('marque.json', JSON.stringify({ type: 'marque', nom: 'Lumière Divine', youtube: 'https://www.youtube.com/channel/UCgUSOtJy27hKmxOETSZnv3Q' }));
+  const rendu = marque.dir('contenus').dir('2026-10-05_003_peur').dir('06-rendu');
+  rendu.file('ld-03.mp4', '', { size: 6_000_000, lastModified: 1 });
+  rendu.file('publication.md', '## Titre\nQuand tu as peur de demain\n');
+  KappDossier._setTestRoot(disk);
+  const queue = await KappDossier.scan({ now: 10_000_000 });
+  const video = queue.videos.find((item) => item.relative_path.endsWith('/ld-03.mp4'));
+  assert.ok(video, 'la vidéo est trouvée');
+  assert.equal(video.channel_key, 'religion/lumiere-divine');
+  assert.equal(video.channel_name, 'lumiere-divine');
+  assert.equal(video.title, 'Quand tu as peur de demain');
+  assert.equal(queue.channels.find((c) => c.key === 'religion/lumiere-divine').config.channelId, 'UCgUSOtJy27hKmxOETSZnv3Q');
+});

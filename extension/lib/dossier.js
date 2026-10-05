@@ -255,6 +255,13 @@ const KappDossier = (() => {
       if (!(error && (error.name === 'NotFoundError' || /not found/i.test(error.message || '')))) throw error;
     }
     if (adn && channelIdIn(adn.youtube)) out.channelId = channelIdIn(adn.youtube);
+    // « marques » organisation: the brand's own file (marque.json, or chaine.json) carries its YouTube link.
+    for (const name of ['marque.json', 'chaine.json']) {
+      if (out.channelId || !node.files || !node.files.has(name)) continue;
+      const own = await readObjectResult(node.handle, name);
+      const yt = own.value && (typeof own.value.youtube === 'string' ? own.value.youtube : own.value.youtube && own.value.youtube.chaine);
+      if (!own.error && channelIdIn(yt)) out.channelId = channelIdIn(yt);
+    }
     const channelResult = await readObjectResult(node.handle, CHANNEL_FILE);
     if (channelResult.error) throw new Error(channelResult.error);
     const file = channelResult.value;
@@ -409,7 +416,15 @@ const KappDossier = (() => {
     return null;
   }
 
+  // The brand (« marque ») a video belongs to: the nearest folder holding marque.json (KappGen's « marques »
+  // organisation), chaine.json or an ADN/ folder (older organisation). Without one, the former rule applies.
+  const isBrand = (node) => !!node && ((node.files && (node.files.has('marque.json') || node.files.has('chaine.json')))
+    || (node.dirs || []).some((d) => d.name === 'ADN'));
   function channelOf(start, rootNode) {
+    for (let up = start; up; up = up.parent) {
+      if (isBrand(up)) return up;
+      if (up === rootNode) break;
+    }
     let node = start;
     while (node && node !== rootNode && CONTAINERS.has(norm(node.name))) node = node.parent;
     return node || rootNode;
