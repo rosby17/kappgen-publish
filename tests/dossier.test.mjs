@@ -400,3 +400,21 @@ test('organisation « marques » : une vidéo de contenus/<id>/06-rendu appartie
   assert.equal(video.title, 'Quand tu as peur de demain');
   assert.equal(queue.channels.find((c) => c.key === 'religion/lumiere-divine').config.channelId, 'UCgUSOtJy27hKmxOETSZnv3Q');
 });
+
+test('organisation « marques » : les posts de comptes/facebook-<compte>/a-publier sont trouvés et rattachés à la marque', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('ESPACE');
+  const marque = disk.dir('sport').dir('ballon-viral');
+  marque.file('marque.json', JSON.stringify({ type: 'marque', nom: 'Ballon Viral' }));
+  const compte = marque.dir('comptes').dir('facebook-ballon-viral');
+  compte.file('compte.json', JSON.stringify({ type: 'compte', reseau: 'facebook' }));
+  const post = compte.dir('a-publier').dir('2026-10-05-1200-test');
+  post.file('texte.txt', 'Un post');
+  post.file('publication.json', JSON.stringify({ date_locale: '2026-10-05', heure_prevue: '12:00', statut: 'a_publier' }));
+  KappDossier._setTestRoot(disk);
+  const items = await KappDossier.facebookPosts({ now: Date.now(), net: 'facebook' });
+  const item = items.find((p) => p.path.endsWith('2026-10-05-1200-test'));
+  assert.ok(item, 'le post est trouvé');
+  assert.equal(item.path, 'sport/ballon-viral/comptes/facebook-ballon-viral/a-publier/2026-10-05-1200-test');
+  assert.equal(item.channel_name, 'ballon-viral');
+});

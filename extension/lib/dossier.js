@@ -101,7 +101,7 @@ const KappDossier = (() => {
   const NET_DIR_NAMES = new Set(Object.values(NET_DIRS).flat());
   const testNets = {}; // set by tests only
   const saveNetRoot = (net, handle) => kv('readwrite', (store) => store.put(handle, netKey(net)));
-  const loadNetRoot = async (net) => testNets[net] || kv('readonly', (store) => store.get(netKey(net)));
+  const loadNetRoot = async (net) => testNets[net] || (testRoot ? null : kv('readonly', (store) => store.get(netKey(net))));   // tests : pas de base du navigateur
   const clearNetRoot = (net) => kv('readwrite', (store) => store.delete(netKey(net)));
   const saveFbRoot = (handle) => saveNetRoot('facebook', handle);
   const loadFbRoot = () => loadNetRoot('facebook');
@@ -938,6 +938,15 @@ const KappDossier = (() => {
     for await (const [name, child] of dir.entries()) {
       if (child.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
       const childPath = path ? `${path}/${name}` : name;
+      // KappGen's « marques » organisation: <marque>/comptes/<réseau>-<compte>/a-publier/ (the brand is the channel).
+      if (name.toLowerCase() === 'comptes') {
+        for await (const [account, accountDir] of child.entries()) {
+          if (accountDir.kind === 'directory' && names.some((n) => account.toLowerCase().startsWith(`${n.replace(/ /g, '-')}-`))) {
+            out.push({ handle: accountDir, path: `${childPath}/${account}`, channelPath: path, channelName: dir.name, queueName: 'a-publier' });
+          }
+        }
+        continue;
+      }
       if (names.includes(norm(name))) out.push({ handle: child, path: childPath, channelPath: path, channelName: dir.name });
       else if (depth < 4 && !SKIP.has(norm(name)) && !NET_DIR_NAMES.has(norm(name))) await findNetDirs(child, childPath, depth + 1, out, names);
     }
@@ -991,12 +1000,13 @@ const KappDossier = (() => {
       await findNetDirs(main, '', 0, dirs, NET_DIRS[net]);
       for (const fb of dirs) {
         let queue;
-        try { queue = await fb.handle.getDirectoryHandle('A-PUBLIER'); } catch { continue; }
+        const queueName = fb.queueName || 'A-PUBLIER';
+        try { queue = await fb.handle.getDirectoryHandle(queueName); } catch { continue; }
         const planningResult = await readObjectResult(fb.handle, 'planning.json');
         const planning = planningResult.value || {};
         for await (const [name, handle] of queue.entries()) {
           if (handle.kind !== 'directory' || name.startsWith('.') || name.startsWith('_')) continue;
-          out.push({ handle, name, path: pre + join(fb.path, 'A-PUBLIER', name), planning,
+          out.push({ handle, name, path: pre + join(fb.path, queueName, name), planning,
             planningError: planningResult.error,
             channelKey: fb.channelPath || '.', channelName: fb.channelPath ? fb.channelName : `${fb.channelName} (dossier principal)` });
         }
