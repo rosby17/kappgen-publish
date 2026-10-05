@@ -90,14 +90,14 @@ const KappDossier = (() => {
   // the "fbroot" of older versions), Instagram, TikTok, X, LinkedIn (posts).
   // Paths inside a network's folder start with its prefix ("fb:", "x:"…) so
   // every reader knows which folder they belong to.
-  const NETS = ['youtube', 'facebook', 'instagram', 'tiktok', 'x', 'linkedin'];
-  const POST_NETS = ['instagram', 'tiktok', 'x', 'linkedin'];
+  const NETS = ['youtube', 'facebook', 'instagram', 'tiktok', 'snapchat', 'x', 'linkedin'];
+  const POST_NETS = ['instagram', 'tiktok', 'snapchat', 'x', 'linkedin'];
   const netKey = (net) => (net === 'facebook' ? 'fbroot' : `root:${net}`);
   const FB_PREFIX = 'fb:';
   const MAIN_PREFIX = 'main:';
   const prefixOf = (net) => (net === 'facebook' ? FB_PREFIX : `${net}:`);
   // Folder names of a network inside the main folder (<chaîne>/X/A-PUBLIER…).
-  const NET_DIRS = { facebook: ['facebook'], instagram: ['instagram'], tiktok: ['tiktok'], x: ['x', 'twitter'], linkedin: ['linkedin'] };
+  const NET_DIRS = { facebook: ['facebook'], instagram: ['instagram'], tiktok: ['tiktok'], snapchat: ['snapchat'], x: ['x', 'twitter'], linkedin: ['linkedin'] };
   const NET_DIR_NAMES = new Set(Object.values(NET_DIRS).flat());
   const testNets = {}; // set by tests only
   const saveNetRoot = (net, handle) => kv('readwrite', (store) => store.put(handle, netKey(net)));
@@ -623,6 +623,7 @@ const KappDossier = (() => {
           facebook_error: record.facebookError || null, published_at: record.youtubePublishedAt || record.publishedAt || null,
           tiktok_published_at: record.tiktokPublishedAt || null, tiktok_error: record.tiktokError || null,
           instagram_published_at: record.instagramPublishedAt || null, instagram_error: record.instagramError || null,
+          snapchat_published_at: record.snapchatPublishedAt || null, snapchat_error: record.snapchatError || null,
           short_error: record.shortError || null,
           facebook_reel_at: record.facebookReelAt || null, facebook_reel_error: record.facebookReelError || null,
           x_published_at: record.xPublishedAt || null, x_error: record.xError || null,
@@ -721,7 +722,7 @@ const KappDossier = (() => {
     ['shortYoutubeId', 'youtube', 'short', (id) => `https://www.youtube.com/shorts/${id}`],
     ['facebookPublishedAt', 'facebook', 'video'], ['facebookReelAt', 'facebook', 'reel'],
     ['xPublishedAt', 'x', 'video'], ['linkedinPublishedAt', 'linkedin', 'video'],
-    ['tiktokPublishedAt', 'tiktok', 'video'], ['instagramPublishedAt', 'instagram', 'reel'],
+    ['tiktokPublishedAt', 'tiktok', 'video'], ['instagramPublishedAt', 'instagram', 'reel'], ['snapchatPublishedAt', 'snapchat', 'video'],
   ];
   async function fileIn(dir, name) {
     try { return await (await dir.getFileHandle(name)).getFile(); } catch { return null; }
@@ -808,7 +809,7 @@ const KappDossier = (() => {
       // new date would make other networks think it is a new video).
       const record = state[relativePath] || {};
       const errors = { shortYoutubeId: 'shortError', facebookPublishedAt: 'facebookError', facebookReelAt: 'facebookReelError',
-        xPublishedAt: 'xError', linkedinPublishedAt: 'linkedinError', tiktokPublishedAt: 'tiktokError', instagramPublishedAt: 'instagramError' };
+        xPublishedAt: 'xError', linkedinPublishedAt: 'linkedinError', tiktokPublishedAt: 'tiktokError', instagramPublishedAt: 'instagramError', snapchatPublishedAt: 'snapchatError' };
       for (const [key, value] of Object.entries(data)) {
         if (!errors[key]) continue;
         record[key] = value;
@@ -864,6 +865,8 @@ const KappDossier = (() => {
         if (data.tiktokError) record.tiktokError = data.tiktokError;
         if (data.instagramPublishedAt) { record.instagramPublishedAt = data.instagramPublishedAt; delete record.instagramError; }
         if (data.instagramError) record.instagramError = data.instagramError;
+        if (data.snapchatPublishedAt) { record.snapchatPublishedAt = data.snapchatPublishedAt; delete record.snapchatError; }
+        if (data.snapchatError) record.snapchatError = data.snapchatError;
         if (data.commentAt) { record.commentAt = data.commentAt; delete record.commentError; }
         if (data.commentError) record.commentError = data.commentError;
       }
@@ -1157,6 +1160,8 @@ const KappDossier = (() => {
         linkedin_error: (info.linkedin && info.linkedin.erreur) || null,
         instagram_statut: (info.instagram && info.instagram.statut) || null,
         instagram_error: (info.instagram && info.instagram.erreur) || null,
+        snapchat_statut: (info.snapchat && info.snapchat.statut) || null,
+        snapchat_error: (info.snapchat && info.snapchat.erreur) || null,
         // Facebook groups: "groupes" in publication.json overrides the panel's
         // list for this post (false = none); what happened in each one.
         groups: Array.isArray(info.groupes) || typeof info.groupes === 'boolean' ? info.groupes : null,

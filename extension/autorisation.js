@@ -3,7 +3,7 @@
 // folder grants it (a click is required by Chrome), then the window closes.
 const message = document.getElementById('message');
 const grant = document.getElementById('grant');
-const LABELS = { youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok', x: 'X', linkedin: 'LinkedIn' };
+const LABELS = { youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok', snapchat: 'Snapchat', x: 'X', linkedin: 'LinkedIn' };
 
 function done() {
   message.className = 'ok';

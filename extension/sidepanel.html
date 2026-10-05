@@ -72,7 +72,7 @@
       <li>YouTube : vidéos, Shorts, titre, description et miniature</li>
       <li>Facebook : vidéos, Reels, posts photo et texte</li>
       <li>Programmation à l’heure que tu veux, jamais de doublon</li>
-      <li>TikTok, Instagram, X et LinkedIn : tes vidéos et tes posts</li>
+      <li>TikTok, Instagram, Snapchat, X et LinkedIn : tes vidéos et tes posts</li>
     </ul>
     <p class="pw-account small muted">Compte KappGen : <strong id="pw-account-email"></strong> · <button id="pw-switch" class="link" type="button">Changer de compte</button></p>
     <p class="small muted pw-account-hint">Ton abonnement suit ton compte KappGen : un seul paiement pour tous tes profils Chrome. Déjà abonné avec une autre adresse ? Change de compte.</p>
@@ -156,6 +156,7 @@
     <button data-tab="facebook">Facebook</button>
     <button data-tab="tiktok">TikTok</button>
     <button data-tab="instagram">Instagram</button>
+    <button data-tab="snapchat">Snapchat</button>
     <button data-tab="linkedin">LinkedIn</button>
     <button data-tab="x">X</button>
   </nav>
@@ -311,6 +312,41 @@
     <details id="instagram-done-box" class="done-box" hidden><summary id="instagram-done-title"></summary><ul id="instagram-done" class="rows"></ul></details>
     <ul id="instagram-list" class="rows"></ul>
     <p id="no-instagram" class="muted" hidden>Aucune vidéo verticale pour l’instant : il faut une vidéo publiée sur YouTube avec sa version verticale (short.mp4), ou une vidéo dans ton dossier de posts.</p>
+  </div>
+
+  <div id="tab-snapchat" class="tab" hidden>
+    <details class="card tab-settings net-settings" data-net="snapchat">
+      <summary>Réglages Snapchat <span class="pill neutral net-state"></span><span class="set-summary" data-for="snapchat"></span></summary>
+      <label class="set-row">
+        <span class="set-text"><strong>Mes vidéos YouTube</strong><small>Sa version verticale (short.mp4, 5 à 60 s), avec le titre et quelques #sujets</small></span>
+        <span class="switch"><input type="checkbox" data-key="snapchatFromYoutube" data-default="off"><span></span></span>
+      </label>
+      <label class="set-row">
+        <span class="set-text"><strong>Les vidéos de mes posts Facebook</strong><small>Juste après Facebook : la vidéo du post et la première ligne de son texte</small></span>
+        <span class="switch"><input type="checkbox" data-key="snapchatFromFacebook" data-default="off"><span></span></span>
+      </label>
+      <div class="field">
+        <label>Où publier sur Snapchat</label>
+        <div id="snap-destination" class="segmented" role="radiogroup" aria-label="Où publier sur Snapchat">
+          <button type="button" data-value="spotlight" role="radio">Spotlight</button>
+          <button type="button" data-value="story" role="radio">Story</button>
+          <button type="button" data-value="both" role="radio">Les deux</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <span class="set-text"><strong>Posts pour Snapchat seulement</strong><small class="net-folder-line"></small></span>
+        <button type="button" class="btn ghost small-btn net-folder-btn">Dossier</button>
+      </div>
+      <div class="set-row" id="snap-permission">
+        <span class="set-text"><strong>Accès à Snapchat</strong><small id="snap-permission-text"></small></span>
+        <button type="button" class="btn primary small-btn" id="snap-allow">Autoriser Snapchat</button>
+      </div>
+      <p class="small muted net-note">Publié sur le profil Snapchat ouvert dans ce Chrome (profile.snapchat.com). Snapchat n’accepte que des vidéos verticales de 5 à 60 secondes. Désactivé par défaut : rien ne part avant que tu coches.</p>
+    </details>
+    <h2>À publier sur Snapchat</h2>
+    <details id="snapchat-done-box" class="done-box" hidden><summary id="snapchat-done-title"></summary><ul id="snapchat-done" class="rows"></ul></details>
+    <ul id="snapchat-list" class="rows"></ul>
+    <p id="no-snapchat" class="muted" hidden>Aucune vidéo verticale pour l’instant : il faut une vidéo publiée sur YouTube avec sa version verticale (short.mp4), ou une vidéo dans ton dossier de posts.</p>
   </div>
 
   <div id="tab-linkedin" class="tab" hidden>

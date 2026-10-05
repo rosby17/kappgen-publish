@@ -892,6 +892,7 @@ const LOGOS = {
   facebook: { short: 'FB', color: '#1877f2', svg: '<path d="M9.1 23.69v-7.98H6.63v-3.67H9.1v-1.58c0-4.09 1.85-5.98 5.86-5.98.4 0 .96.04 1.47.1.4.05.79.11 1.14.2v3.32a8.6 8.6 0 0 0-1.39-.05c-.71 0-1.26.1-1.68.31a1.69 1.69 0 0 0-.68.62c-.26.42-.37 1-.37 1.75v1.3h3.92l-.39 2.1-.29 1.57h-3.25v8.24C19.4 23.24 24 18.18 24 12.04 24 5.42 18.63.04 12 .04S0 5.42 0 12.04c0 5.63 3.87 10.35 9.1 11.65Z"/>' },
   tiktok: { short: 'TikTok', color: 'var(--text)', svg: '<path d="M12.53.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>' },
   instagram: { short: 'Insta', color: '#e1306c', svg: '<path fill="none" stroke="currentColor" stroke-width="2.2" d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"/><circle cx="12" cy="12" r="4.3" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="17.6" cy="6.4" r="1.4"/>' },
+  snapchat: { short: 'Snap', color: '#e6b800', svg: '<g transform="scale(.046875)"><path d="M497.1 366.6c-3.4-9.2-9.8-14.1-17.1-18.2-1.4-.8-2.6-1.5-3.7-1.9-2.2-1.1-4.4-2.2-6.6-3.4-22.8-12.1-40.6-27.3-53-45.4-3.5-5.1-6.6-10.5-9.1-16.1-1.1-3-1-4.7-.2-6.3 .8-1.2 1.7-2.2 2.9-3 3.9-2.6 8-5.2 10.7-7 4.9-3.2 8.8-5.7 11.2-7.4 9.4-6.5 15.9-13.5 20-21.3 2.9-5.4 4.5-11.3 4.9-17.4s-.6-12.2-2.8-17.8c-6.2-16.3-21.6-26.4-40.3-26.4-3.9 0-7.9 .4-11.7 1.2-1 .2-2.1 .5-3.1 .7 .2-11.2-.1-22.9-1.1-34.5-3.5-40.8-17.8-62.1-32.7-79.2-9.5-10.7-20.7-19.7-33.2-26.7-22.6-12.9-48.2-19.4-76.1-19.4s-53.4 6.5-76 19.4c-12.5 7-23.7 16.1-33.3 26.8-14.9 17-29.2 38.4-32.7 79.2-1 11.6-1.2 23.4-1.1 34.5-1-.3-2-.5-3.1-.7-3.9-.8-7.8-1.2-11.7-1.2-18.7 0-34.1 10.1-40.3 26.4-2.2 5.7-3.2 11.8-2.8 17.8s2 12 4.9 17.4c4.1 7.8 10.7 14.7 20 21.3 2.5 1.7 6.4 4.2 11.2 7.4 2.6 1.7 6.5 4.2 10.3 6.7 1.3 .9 2.4 2 3.3 3.3 .8 1.6 .8 3.4-.4 6.6-2.5 5.5-5.5 10.8-8.9 15.8-12.1 17.7-29.4 32.6-51.4 44.6-11.7 6.2-23.9 10.3-29 24.3-3.9 10.5-1.3 22.5 8.5 32.6 3.6 3.8 7.8 6.9 12.4 9.4 9.6 5.3 19.8 9.3 30.3 12.1 2.2 .6 4.3 1.5 6.1 2.7 3.6 3.1 3.1 7.9 7.8 14.8 2.4 3.6 5.4 6.7 9 9.1 10 6.9 21.3 7.4 33.2 7.8 10.8 .4 23 .9 36.9 5.5 5.8 1.9 11.8 5.6 18.7 9.9 16.7 10.3 39.6 24.3 77.8 24.3s61.3-14.1 78.1-24.4c6.9-4.2 12.9-7.9 18.5-9.8 13.9-4.6 26.2-5.1 36.9-5.5 11.9-.5 23.2-.9 33.2-7.8 4.2-2.9 7.7-6.7 10.2-11.2 3.4-5.8 3.4-9.9 6.6-12.8 1.8-1.2 3.7-2.1 5.8-2.6 10.7-2.8 21-6.9 30.8-12.2 4.9-2.6 9.3-6.1 13-10.2l.1-.2c9.2-9.9 11.5-21.5 7.8-31.8zm-34 18.3c-20.7 11.5-34.5 10.2-45.3 17.1-9.1 5.9-3.7 18.5-10.3 23.1-8.1 5.6-32.2-.4-63.2 9.9-25.6 8.5-42 32.8-88 32.8s-62-24.3-88.1-32.9c-31-10.3-55.1-4.2-63.2-9.9-6.6-4.6-1.2-17.2-10.3-23.1-10.7-6.9-24.5-5.7-45.3-17.1-13.2-7.3-5.7-11.8-1.3-13.9 75.1-36.4 87.1-92.6 87.7-96.7 .6-5 1.4-9-4.2-14.1-5.4-5-29.2-19.7-35.8-24.3-10.9-7.6-15.7-15.3-12.2-24.6 2.5-6.5 8.5-8.9 14.9-8.9 2 0 4 .2 6 .7 12 2.6 23.7 8.6 30.4 10.2 .8 .2 1.6 .3 2.5 .3 3.6 0 4.9-1.8 4.6-5.9-.8-13.1-2.6-38.7-.6-62.6 2.8-32.9 13.4-49.2 26-63.6 6.1-6.9 34.5-37 88.9-37S339 74.2 345 81.1c12.6 14.4 23.2 30.7 26 63.6 2.1 23.9 .3 49.5-.6 62.6-.3 4.3 1 5.9 4.6 5.9 .8 0 1.7-.1 2.5-.3 6.7-1.6 18.4-7.6 30.4-10.2 2-.4 4-.7 6-.7 6.4 0 12.4 2.5 14.9 8.9 3.5 9.4-1.2 17-12.2 24.6-6.6 4.6-30.4 19.3-35.8 24.3-5.6 5.1-4.8 9.1-4.2 14.2 .5 4.2 12.5 60.4 87.7 96.7 4.4 2.2 11.9 6.7-1.3 14.1z"/></g>' },  // logo : Font Awesome Free (CC BY 4.0)
   linkedin: { short: 'In', color: '#0a66c2', svg: '<path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/>' },
   x: { short: 'X', color: 'var(--text)', svg: '<path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.58-6.64 7.58H.47l8.6-9.83L0 1.15h7.59l5.24 6.93zM17.61 20.64h2.04L6.49 3.24H4.3z"/>' },
 };
@@ -918,12 +919,13 @@ const NETWORKS = [
   ['facebook', 'Facebook', 'Reels, vidéos et posts programmés sur ta page.', 'facebook'],
   ['tiktok', 'TikTok', 'Vidéos verticales (et horizontales) sur ton compte.', 'tiktok'],
   ['instagram', 'Instagram', 'Reels (versions verticales) sur ton compte.', 'instagram'],
+  ['snapchat', 'Snapchat', 'Spotlight et Story (versions verticales de 5 à 60 s) sur ton profil.', 'snapchat'],
   ['linkedin', 'LinkedIn', 'Vidéos (lien) et posts sur ton profil.', 'linkedin'],
   ['x', 'X', 'Posts et vidéos sur ton compte.', 'x'],
 ];
 // Every listed network is operational. Older defaults stay enabled until the
 // creator unticks them; newer destinations require an explicit opt-in.
-const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);          // on until unticked
+const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram', 'snapchat']);          // on until unticked (Snapchat : rien ne part avant qu'une source soit cochée)
 const networkIsOn = (config, name) => {
   const value = (config.networks || {})[name];
   return value === undefined ? DEFAULT_ON.has(name) : value !== false;
@@ -1346,7 +1348,7 @@ const postHistoryItems = (posts) => posts.flatMap((p) => {
   const base = { kind: p.type, path: p.path, title: (p.text || '').split('\n')[0] || p.path.split('/').pop(), thumb: p.image_path, channel: p.channel_name };
   const out = [];
   if (p.statut === 'publie') out.push({ ...base, net: 'facebook', at: Date.parse(p.published_at || '') || p.due_at || Date.now() });
-  for (const net of ['x', 'linkedin', 'tiktok', 'instagram']) if (p[`${net}_statut`] === 'publie') out.push({ ...base, net, at: Date.parse(p.published_at || '') || Date.now() });
+  for (const net of ['x', 'linkedin', 'tiktok', 'instagram', 'snapchat']) if (p[`${net}_statut`] === 'publie') out.push({ ...base, net, at: Date.parse(p.published_at || '') || Date.now() });
   return out;
 });
 const videoHistoryItems = (sent) => sent.flatMap((v) => {
@@ -1358,6 +1360,7 @@ const videoHistoryItems = (sent) => sent.flatMap((v) => {
   if (v.facebook_published_at) out.push({ ...base, net: 'facebook', kind: 'video', at: at(v.facebook_published_at) });
   if (v.tiktok_published_at) out.push({ ...base, net: 'tiktok', kind: 'video', at: at(v.tiktok_published_at) });
   if (v.instagram_published_at) out.push({ ...base, net: 'instagram', kind: 'reel', at: at(v.instagram_published_at) });
+  if (v.snapchat_published_at) out.push({ ...base, net: 'snapchat', kind: 'video', at: at(v.snapchat_published_at) });
   if (v.x_published_at) out.push({ ...base, net: 'x', kind: 'video', at: at(v.x_published_at) });
   if (v.linkedin_published_at) out.push({ ...base, net: 'linkedin', kind: 'video', at: at(v.linkedin_published_at) });
   return out;
@@ -1920,7 +1923,7 @@ async function refreshNetworkData() {
   if (!networkDataPromise) {
     networkDataPromise = (async () => {
       const folders = await KappDossier.folders().catch(() => ({}));
-      const entries = await Promise.all(['tiktok', 'instagram', 'x', 'linkedin'].map(async (net) => {
+      const entries = await Promise.all(['tiktok', 'instagram', 'snapchat', 'x', 'linkedin'].map(async (net) => {
         const reply = await send({ type: 'networkPosts', net });
         return [net, reply && reply.ok && Array.isArray(reply.data) ? reply.data : []];
       }));
@@ -1934,6 +1937,7 @@ async function refreshNetworkData() {
 function renderNetworkViews() {
   renderTikTok();
   renderInstagram();
+  renderSnapchat();
   renderShare('x');
   renderShare('linkedin');
   renderNetSettings();
@@ -2118,6 +2122,54 @@ function renderInstagram() {
   applyJob();
 }
 
+// Snapchat : comme Instagram, les versions verticales (5 à 60 s) des vidéos déjà sur YouTube et les vidéos des posts.
+function renderSnapchat() {
+  const items = [];
+  for (const v of hasOwn('snapchat') ? [] : (lastScan && lastScan.sent) || []) {
+    if ((!v.youtube_id && !v.published_at) || !v.vertical_path) continue;
+    items.push({ path: v.relative_path, kind: 'video', title: v.title || v.relative_path.split('/').pop(), preview: v.preview_path,
+      youtubeId: v.youtube_id, detail: [chan(v.channel_name), 'version verticale'].filter(Boolean).join(' · '),
+      done: v.snapchat_published_at, error: v.snapchat_error, date: v.date });
+  }
+  for (const p of hasOwn('snapchat') ? [] : lastPosts) {
+    if (!p.video_path) continue;
+    items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Snap', preview: undefined,
+      detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
+      done: p.snapchat_statut === 'publie', error: p.configuration_error || p.snapchat_error,
+      blocked: !!p.configuration_error, date: p.due_at });
+  }
+  for (const p of ownPosts.snapchat || []) if (p.video_path) items.push(ownPostItem(p, 'snapchat'));
+  const snapCard = (it) => {
+    let item;
+    const actions = [];
+    let status;
+    if (it.done) status = pill('ok', 'Publiée sur Snapchat.');
+    else {
+      status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
+        : it.error ? pill('warn', `Échec sur Snapchat : ${it.error}`) : pill('neutral', 'Prête à partir sur Snapchat.');
+      if (!it.blocked) {
+        const go = button(it.error ? 'Réessayer' : 'Publier sur Snapchat', 'btn primary', () => askSnap().then((ok) => ok && act(item, go,
+          { type: it.kind === 'video' ? 'snapchat' : 'snapchatPost', path: it.path }, 'Publication sur Snapchat en cours… (Snapchat s’ouvre)')));
+        go.dataset.publish = '1';
+        actions.push(go);
+      }
+    }
+    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
+    return item;
+  };
+  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
+  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
+  const waiting = items.filter((it) => !it.done).sort(recent);
+  const done = items.filter((it) => it.done).sort(recent);
+  $('snapchat-list').replaceChildren(...waiting.map(snapCard));
+  $('no-snapchat').hidden = items.length > 0;
+  $('snapchat-done-box').hidden = !done.length;
+  $('snapchat-done-title').textContent = `Déjà sur Snapchat (${done.length})`;
+  $('snapchat-done').replaceChildren(...done.map(snapCard));
+  appendHistory('snapchat', items.map((it) => it.path), 'snapchat-done', 'snapchat-done-box', 'snapchat-done-title', 'Déjà sur Snapchat', done.length);
+  applyJob();
+}
+
 let fbConfig = {};
 async function renderFacebook(data) {
   const config = await settings();
@@ -2205,6 +2257,7 @@ const FOLDER_NETS = [
   ['youtube', 'YouTube', 'tes vidéos'],
   ['facebook', 'Facebook', 'posts et Reels'],
   ['instagram', 'Instagram', 'Reels'],
+  ['snapchat', 'Snapchat', 'vidéos verticales'],
   ['tiktok', 'TikTok', 'vidéos'],
   ['x', 'X', 'posts'],
   ['linkedin', 'LinkedIn', 'posts'],
@@ -2310,7 +2363,7 @@ async function renderNetSettings() {
       input.disabled = !!own;
       input.closest('.set-row').classList.toggle('off', !!own);
     }
-    const dirName = { x: 'X', linkedin: 'LINKEDIN', tiktok: 'TIKTOK', instagram: 'INSTAGRAM' }[net];
+    const dirName = { x: 'X', linkedin: 'LINKEDIN', tiktok: 'TIKTOK', instagram: 'INSTAGRAM', snapchat: 'SNAPCHAT' }[net];
     box.querySelector('.net-folder-line').textContent = own
       ? `Dossier « ${all[net].name} » : seuls ses posts partent.`
       : all[net] && all[net].shared === 'facebook'
@@ -2325,9 +2378,41 @@ async function renderNetSettings() {
     state.title = 'Ce réseau est décoché dans Réglages → Réseaux utilisés : rien n’y part.';
   }
 }
+// Snapchat : accès facultatif (demandé ici, d'un clic), pour que l'ajout de Snapchat ne bloque jamais l'extension des autres.
+const SNAP_ORIGINS = ['https://profile.snapchat.com/*', 'https://my.snapchat.com/*'];
+const snapAllowed = () => chrome.permissions.contains({ origins: SNAP_ORIGINS }).catch(() => false);
+// À appeler directement dans un clic (Chrome n'affiche sa demande que pendant un geste de la personne).
+const askSnap = () => chrome.permissions.request({ origins: SNAP_ORIGINS }).catch(() => false).then((ok) => { renderSnapPermission(); return ok; });
+async function renderSnapPermission() {
+  const ok = await snapAllowed();
+  const text = $('snap-permission-text'), btn = $('snap-allow');
+  if (!text || !btn) return;
+  text.textContent = ok ? 'Autorisé : KappGen Publish peut publier sur profile.snapchat.com.' : 'Chrome te demandera une fois l’accès à profile.snapchat.com.';
+  btn.hidden = ok;
+}
+if ($('snap-allow')) $('snap-allow').addEventListener('click', () => askSnap().then((ok) => ok && send({ type: 'autoNow' })));
+renderSnapPermission();
+// Snapchat : Spotlight (découverte publique), Story, ou les deux.
+async function renderSnapDestination() {
+  const value = (await settings()).snapchatDestination || 'spotlight';
+  for (const b of document.querySelectorAll('#snap-destination button')) {
+    b.classList.toggle('active', b.dataset.value === value);
+    b.setAttribute('aria-checked', String(b.dataset.value === value));
+  }
+}
+for (const b of document.querySelectorAll('#snap-destination button')) {
+  b.addEventListener('click', async () => {
+    const current = await settings();
+    current.snapchatDestination = b.dataset.value;
+    await chrome.storage.local.set({ folder: current });
+    renderSnapDestination();
+  });
+}
+renderSnapDestination();
 for (const box of document.querySelectorAll('.net-settings')) {
   for (const input of box.querySelectorAll('input[data-key]')) {
     input.addEventListener('change', async () => {
+      if (box.dataset.net === 'snapchat' && input.checked && !(await askSnap())) { input.checked = false; return; }
       const current = await settings();
       current[input.dataset.key] = input.checked;
       // Coché maintenant : seules les vidéos et posts publiés à partir de maintenant partent (jamais tout l'historique d'un coup).
@@ -2702,7 +2787,7 @@ function applyJob() {
   if (!job || !job.path) return;
   // A job's news shows on its own network's tab only (a YouTube failure is
   // not the Facebook Reel's state).
-  const tabOf = { facebook: 'facebook', post: 'facebook', image: 'facebook', groups: 'facebook', x: 'x', linkedin: 'linkedin', tiktok: 'tiktok', instagram: 'instagram' };
+  const tabOf = { facebook: 'facebook', post: 'facebook', image: 'facebook', groups: 'facebook', x: 'x', linkedin: 'linkedin', tiktok: 'tiktok', instagram: 'instagram', snapchat: 'snapchat' };
   const jobTab = `tab-${tabOf[job.kind] || 'youtube'}`;
   for (const item of document.querySelectorAll('li.item, li.row')) {
     if (item.dataset.path !== String(job.path) || !item.say) continue;

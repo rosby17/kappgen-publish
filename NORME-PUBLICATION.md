@@ -1,6 +1,6 @@
 # Norme de publication — KappGen Publish
 
-Une vidéo rangée selon cette norme peut être publiée par KappGen vers YouTube, Facebook, TikTok, Instagram, X et LinkedIn selon les réseaux activés.
+Une vidéo rangée selon cette norme peut être publiée par KappGen vers YouTube, Facebook, TikTok, Instagram, Snapchat, X et LinkedIn selon les réseaux activés.
 
 ## 0. La règle simple (pour tout le monde, depuis 1.11)
 
@@ -141,7 +141,7 @@ Un `publication.json` absent est facultatif ; sans date ni heure, le post est pr
 Réglages → **Dossiers** :
 
 - **Dossier principal** : il sert à tous les réseaux qui n'ont pas leur propre dossier.
-- **Dossier de chaque réseau** (YouTube, Facebook, Instagram, TikTok, X, LinkedIn) : choisis-en un pour isoler son contenu. La croix ✕ le remet sur le dossier principal.
+- **Dossier de chaque réseau** (YouTube, Facebook, Instagram, Snapchat, TikTok, X, LinkedIn) : choisis-en un pour isoler son contenu. La croix ✕ le remet sur le dossier principal.
 - Dans le dossier principal, chaque réseau peut aussi avoir sa propre file :
 
 ```text
@@ -151,6 +151,7 @@ Réglages → **Dossiers** :
 ├── X/A-PUBLIER/…            # X uniquement
 ├── LINKEDIN/A-PUBLIER/…     # LinkedIn uniquement
 ├── INSTAGRAM/A-PUBLIER/…    # Instagram, vidéo verticale
+├── SNAPCHAT/A-PUBLIER/…     # Snapchat, vidéo verticale de 5 à 60 s (Spotlight et/ou Story)
 └── TIKTOK/A-PUBLIER/…       # TikTok, vidéo
 ```
 

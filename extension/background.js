@@ -107,7 +107,7 @@ async function setJob(patch) {
 
 // The day's publications, on this computer's clock; sent once in the evening
 // (21:00) to creators who ticked « Bilan du soir par mail » (off by default).
-const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram', 'x', 'linkedin']);
+const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram', 'snapchat', 'x', 'linkedin']);
 const REPORT_HOUR = 21;
 const pad2 = (n) => String(n).padStart(2, '0');
 const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -440,7 +440,7 @@ async function consumeBridgeGrant(token, sender) {
 async function postsList(net = 'facebook') {
   return folder('posts', { net });
 }
-const POST_NETS = ['instagram', 'tiktok', 'x', 'linkedin'];
+const POST_NETS = ['instagram', 'tiktok', 'snapchat', 'x', 'linkedin'];
 // A post by its path, whichever list it is in.
 async function findPost(postPath) {
   for (const net of ['facebook', ...POST_NETS]) {
@@ -619,6 +619,7 @@ async function tabToReuse(pattern, patterns) {
 }
 const tiktokTabToReuse = () => tabToReuse(/^https:\/\/www\.tiktok\.com\//, ['https://www.tiktok.com/*']);
 const instagramTabToReuse = () => tabToReuse(/^https:\/\/www\.instagram\.com\//, ['https://www.instagram.com/*']);
+const snapchatTabToReuse = () => tabToReuse(/^https:\/\/(profile|my)\.snapchat\.com\//, ['https://profile.snapchat.com/*', 'https://my.snapchat.com/*']);
 const xTabToReuse = () => tabToReuse(/^https:\/\/(x|twitter)\.com\//, ['https://x.com/*', 'https://twitter.com/*']);
 const linkedinTabToReuse = () => tabToReuse(/^https:\/\/www\.linkedin\.com\//, ['https://www.linkedin.com/*']);
 const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
@@ -737,7 +738,7 @@ async function whileShown(tabId, fn) {
 // Networks the creator switched off in the panel's « Réseaux » tab: nothing is
 // sent to them, automatically or by a click (YouTube, Facebook, TikTok...).
 // Networks on unless unticked; the newer ones (X…) only once ticked.
-const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram']);
+const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram', 'snapchat']);
 const networkOn = (settings, name) => {
   const value = ((settings && settings.networks) || {})[name];
   return value === undefined ? DEFAULT_ON.has(name) : value !== false;
@@ -1747,6 +1748,93 @@ async function publishInstagramPost(postPath, { auto = false } = {}) {
   }
 }
 
+// ---------------------------------------------------------------- Snapchat
+
+// Snapchat's web uploader (« Post to Snapchat »), in the Snapchat tab already open if there is one.
+// Snapchat access is optional (manifest « optional_host_permissions ») : asked in the panel when Snapchat is turned on,
+// so adding Snapchat never disabled the extension for people who do not use it.
+const SNAPCHAT_ORIGINS = ['https://profile.snapchat.com/*', 'https://my.snapchat.com/*'];
+async function openSnapchat({ reuse = true } = {}) {
+  if (!(await chrome.permissions.contains({ origins: SNAPCHAT_ORIGINS }).catch(() => false))) {
+    throw new Error('Autorise d’abord Snapchat : panneau KappGen Publish → onglet Snapchat → « Autoriser Snapchat ».');
+  }
+  const url = 'https://profile.snapchat.com/';
+  const tab = reuse ? await reuseOrOpen(snapchatTabToReuse, url) : await createWorkTab(url);
+  workTabId = tab.id;
+  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  const start = Date.now();
+  while (Date.now() - start < 90000) {
+    ensureNotCancelled();
+    const current = await chrome.tabs.get(tab.id);
+    const now = current.url || current.pendingUrl || '';
+    if (/accounts\.snapchat\.com|\/(login|signup)\b/.test(now)) throw new Error('Connecte-toi d’abord à Snapchat (profile.snapchat.com) dans ce navigateur, puis relance.');
+    if (/^https:\/\/(profile|my)\.snapchat\.com\//.test(now) && current.status === 'complete') {
+      await sleep(2500);
+      await injectScripts(tab.id, ['lib/page-kit.js', 'snapchat.js']);
+      return tab.id;
+    }
+    await sleep(700);
+  }
+  throw new Error('Snapchat ne s’est pas ouvert.');
+}
+
+// One vertical video (5 to 60 s) to Snapchat : Spotlight and/or Story, with its description.
+async function sendToSnapchat({ filePath, caption, title, channel, path, auto = false }) {
+  await chrome.storage.session.set({ job: { running: true, source: 'snapchat', kind: 'snapchat', path, title, channel, message: 'Ouverture de Snapchat…', startedAt: Date.now() } });
+  const settings = await folderSettings();
+  const dest = settings.snapchatDestination || 'spotlight';
+  const tabId = await openSnapchat({ reuse: !auto });
+  try { await whileShown(tabId, async () => {
+    await setJob({ message: 'Envoi de la vidéo à Snapchat…' });
+    await stepIn(tabId, '__kappgenSnapchat', 'sendVideo', { path: filePath, src: await bridgeSource(tabId, filePath) });
+    await stepIn(tabId, '__kappgenSnapchat', 'chooseDestination', { spotlight: dest !== 'story', story: dest !== 'spotlight' });
+    await setJob({ message: 'Description…' });
+    await stepIn(tabId, '__kappgenSnapchat', 'writeCaption', { caption });
+    await setJob({ message: 'Publication sur Snapchat…' });
+    await stepIn(tabId, '__kappgenSnapchat', 'post');
+  }); } finally { await stepIn(tabId, 'KappKit', 'cleanup').catch(() => {}); }
+  closeStudioTab(tabId); // only a tab opened for this post is closed
+}
+
+// Snapchat keeps descriptions short : the title and a few #topics.
+const snapCaption = (title, tags) => [title, hashtags(tags)].filter(Boolean).join(' ').slice(0, 160);
+
+// A video already on YouTube, through its vertical version (Snapchat : 5 to 60 s, 9:16).
+async function publishSnapchatVideo(relativePath, { auto = false } = {}) {
+  let video = null;
+  let attempted = false;
+  try {
+    const { sent } = await folderQueue();
+    video = sent.find((item) => item.relative_path === relativePath);
+    if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
+    if (!video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier : Snapchat n’accepte que des vidéos verticales de 5 à 60 secondes.');
+    attempted = true;
+    await sendToSnapchat({ filePath: video.vertical_path, caption: snapCaption(video.title, video.tags), title: video.title, channel: video.channel_name, path: relativePath, auto });
+    await folder('mark', { path: relativePath, status: 'published', data: { snapchatPublishedAt: new Date().toISOString() } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur Snapchat.' });
+  } catch (error) {
+    const message = friendly(error);
+    if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: { snapchatError: message } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
+// A video of the posts folder (SNAPCHAT/ or Facebook's posts), on Snapchat.
+async function publishSnapchatPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
+  try {
+    requireValidPost(post);
+    if (!post.video_path) throw new Error('Ce post n’a pas de vidéo pour Snapchat.');
+    await sendToSnapchat({ filePath: post.video_path, caption: (post.text || '').split('\n')[0].slice(0, 160), title: post.text.split('\n')[0] || 'Snap', channel: post.channel_name, path: postPath, auto });
+    await folder('markPost', { path: postPath, patch: { snapchat: { statut: 'publie', published_at: new Date().toISOString() } } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur Snapchat.' });
+  } catch (error) {
+    const message = friendly(error);
+    if (post && !post.configuration_error) await folder('markPost', { path: postPath, patch: { snapchat: { statut: 'echec', erreur: message } } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
 // A Reel (vertical video) of the posts folder.
 async function publishTikTokPost(postPath, { auto = false } = {}) {
   const post = await findPost(postPath);
@@ -2233,9 +2321,10 @@ async function spreadNext(settings, sent, own) {
   // (anciens réglages tiktokAuto / instagramAuto repris).
   const fromYt = (net) => (settings[`${net}FromYoutube`] ?? settings[`${net}Auto`]) === true;
   const fromFb = (net) => settings[`${net}FromFacebook`] === true;
+  const snapAllowed = await chrome.permissions.contains({ origins: SNAPCHAT_ORIGINS }).catch(() => false);
   // X / LinkedIn ticked before their start date was kept: from now on (TikTok / Instagram as soon as one source is on).
-  for (const net of ['x', 'linkedin', 'tiktok', 'instagram']) {
-    if (['tiktok', 'instagram'].includes(net) && !fromYt(net) && !fromFb(net)) continue;
+  for (const net of ['x', 'linkedin', 'tiktok', 'instagram', 'snapchat']) {
+    if (['tiktok', 'instagram', 'snapchat'].includes(net) && !fromYt(net) && !fromFb(net)) continue;
     if (on(net) && !settings[`${net}Since`]) {
       settings[`${net}Since`] = Date.now();
       await chrome.storage.local.set({ folder: settings });
@@ -2263,6 +2352,8 @@ async function spreadNext(settings, sent, own) {
         () => publishTikTokVideo(v.relative_path, { auto: true })],
       [on('instagram') && fromYt('instagram') && !own('instagram') && v.vertical_path && !v.instagram_published_at && !v.instagram_error
         && after(v, settings.instagramSince), () => publishInstagramVideo(v.relative_path, { auto: true })],
+      [on('snapchat') && snapAllowed && fromYt('snapchat') && !own('snapchat') && v.vertical_path && !v.snapchat_published_at && !v.snapchat_error
+        && after(v, settings.snapchatSince), () => publishSnapchatVideo(v.relative_path, { auto: true })],
       [on('x') && !own('x') && settings.xFromYoutube !== false && !v.x_published_at && !v.x_error && after(v, settings.xSince),
         () => publishXVideo(v.relative_path, { auto: true })],
       [on('linkedin') && !own('linkedin') && settings.linkedinFromYoutube !== false && !v.linkedin_published_at && !v.linkedin_error && after(v, settings.linkedinSince),
@@ -2279,9 +2370,9 @@ async function spreadNext(settings, sent, own) {
   const posts = (await postsList().catch(() => []))
     .sort((a, b) => (Date.parse(a.published_at || 0) || a.due_at || 0) - (Date.parse(b.published_at || 0) || b.due_at || 0));
   find: for (const p of posts) {
-    for (const [net, send] of [['x', publishXPost], ['linkedin', publishLinkedinPost], ['tiktok', publishTikTokPost], ['instagram', publishInstagramPost]]) {
-      const videoOnly = net === 'tiktok' || net === 'instagram';
-      if (!on(net) || own(net) || p[`${net}_statut`]) continue;
+    for (const [net, send] of [['x', publishXPost], ['linkedin', publishLinkedinPost], ['tiktok', publishTikTokPost], ['instagram', publishInstagramPost], ['snapchat', publishSnapchatPost]]) {
+      const videoOnly = net === 'tiktok' || net === 'instagram' || net === 'snapchat';
+      if (!on(net) || own(net) || p[`${net}_statut`] || (net === 'snapchat' && !snapAllowed)) continue;
       if (videoOnly ? (!fromFb(net) || !p.video_path) : settings[`${net}FromFacebook`] === false) continue;
       const savedSince = settings[`${net}Since`];
       const since = typeof savedSince === 'number' ? savedSince : Date.parse(savedSince || '') || Infinity;
@@ -2302,13 +2393,14 @@ async function ownPostNext(settings) {
   const ready = [];
   for (const net of POST_NETS) {
     if (!networkOn(settings, net)) continue;
+    if (net === 'snapchat' && !(await chrome.permissions.contains({ origins: SNAPCHAT_ORIGINS }).catch(() => false))) continue;
     ready.push(...(await postsList(net).catch(() => []))
-      .filter((p) => p.ready && (!['tiktok', 'instagram'].includes(net) || p.video_path)));
+      .filter((p) => p.ready && (!['tiktok', 'instagram', 'snapchat'].includes(net) || p.video_path)));
   }
   ready.sort((a, b) => (a.due_at || 0) - (b.due_at || 0));
   const post = ready[0];
   if (!post) return false;
-  const send = { x: publishXPost, linkedin: publishLinkedinPost, tiktok: publishTikTokPost, instagram: publishInstagramPost }[post.network];
+  const send = { x: publishXPost, linkedin: publishLinkedinPost, tiktok: publishTikTokPost, instagram: publishInstagramPost, snapchat: publishSnapchatPost }[post.network];
   await send(post.path, { auto: true });
   return true;
 }
@@ -2321,7 +2413,7 @@ async function exportState(etat) {
   const { lastAutoPostAt, lastAutoTick } = await chrome.storage.local.get(['lastAutoPostAt', 'lastAutoTick']);
   const state = {
     source: 'KappGen Publish', version: chrome.runtime.getManifest().version, maj: new Date().toISOString(), etat,
-    pause: await isPaused(), reseaux: Object.fromEntries(['youtube', 'facebook', 'tiktok', 'instagram', 'x', 'linkedin'].map((n) => [n, networkOn(settings, n)])),
+    pause: await isPaused(), reseaux: Object.fromEntries(['youtube', 'facebook', 'tiktok', 'instagram', 'snapchat', 'x', 'linkedin'].map((n) => [n, networkOn(settings, n)])),
     youtube: { visibilite: settings.visibility || 'UNLISTED', programmation: settings.schedule === 'times' ? 'heures' : 'tout-de-suite', heures: settings.times || '' },
     chaines: settings.channels || {}, dernier_passage: lastAutoTick || null, dernier_post: lastAutoPostAt || null,
   };
@@ -2864,6 +2956,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishInstagramPost(message.path).catch(() => {});
+      return { started: true };
+    },
+    snapchat: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      publishSnapchatVideo(message.path).catch(() => {});
+      return { started: true };
+    },
+    snapchatPost: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      requireValidPost(await findPost(message.path));
+      publishSnapchatPost(message.path).catch(() => {});
       return { started: true };
     },
     instagramAuto: async () => {
