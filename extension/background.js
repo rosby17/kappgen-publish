@@ -1085,6 +1085,9 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
     await chrome.storage.local.remove('pending');
     if (source === 'folder' && !(job && job.social)) {
       if (marked && !linkedYoutubeId) await folder('mark', { path: video.relative_path, status: 'failed', data: { error: message } }).catch(() => {});
+      // Draft left in Studio: never « published » in silence. Its error shows in
+      // the panel (« Pas terminée sur YouTube ») with « Renvoyer sur YouTube ».
+      if (linkedYoutubeId) await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeError: message } }).catch(() => {});
     } else {
       if (!linkedYoutubeId) await api(`/studio-upload/${videoId}/failed`, { method: 'POST', body: JSON.stringify({ error: message }) }).catch(() => {});
     }
@@ -1297,6 +1300,8 @@ async function resume() {
           await folder('mark', { path: pending.video.relative_path, status: 'published', data: { shortError: message } }).catch(() => {});
         } else if (!pending.youtubeId) {
           await folder('mark', { path: pending.video.relative_path, status: 'failed', data: { error: message } }).catch(() => {});
+        } else {
+          await folder('mark', { path: pending.video.relative_path, status: 'published', data: { youtubeError: message } }).catch(() => {});
         }
       } else if (pending.source === 'app' && !pending.youtubeId) {
         await api(`/studio-upload/${pending.videoId}/failed`, { method: 'POST', body: JSON.stringify({ error: message }) }).catch(() => {});
@@ -3014,6 +3019,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       await folder('mark', { path: message.path, status: 'reset' });
+      publish('folder', message.path, 'CHANNEL');
+      return { started: true };
+    },
+    // Unfinished YouTube draft (« Mise en ligne interrompue »…): send the video
+    // to YouTube again; networks already done (Facebook…) are not posted twice.
+    resendYoutube: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Un envoi est déjà en cours.');
+      await folder('mark', { path: message.path, status: 'resetYoutube' });
       publish('folder', message.path, 'CHANNEL');
       return { started: true };
     },

@@ -211,7 +211,8 @@ const KappDossier = (() => {
   }
 
   async function writeMarker(dir, side) {
-    const lines = Object.entries(side).filter(([, r]) => r && r.status === 'published').map(([name, r]) => [
+    // A YouTube draft (upload not finished in Studio) is not « déjà publiée ».
+    const lines = Object.entries(side).filter(([, r]) => r && r.status === 'published' && !r.draft).map(([name, r]) => [
       `${name} : déjà publiée, ne pas la renvoyer.`,
       r.youtubeId ? `YouTube : https://youtu.be/${r.youtubeId}${r.visibility ? ` (${r.visibility})` : ''}` : null,
       r.facebookPublishedAt ? `Facebook : ${r.facebookPublishedAt}` : null,
@@ -634,6 +635,7 @@ const KappDossier = (() => {
           applied_hash: record.appliedHash || null, update_tried_hash: record.updateTriedHash || null,
           force_update: !!record.forceUpdate, update_error: record.updateError || null,
           vertical_path: vertical && vertical.path, vertical_size_bytes: vertical && vertical.size,
+          youtube_draft: !!record.draft, youtube_error: record.youtubeError || null, broken_draft_ids: record.brokenDraftIds || [],
           short_youtube_id: record.shortYoutubeId || null, facebook_published_at: record.facebookPublishedAt || null,
           facebook_error: record.facebookError || null, published_at: record.youtubePublishedAt || record.publishedAt || null,
           tiktok_published_at: record.tiktokPublishedAt || null, tiktok_error: record.tiktokError || null,
@@ -834,6 +836,14 @@ const KappDossier = (() => {
       state[relativePath] = record;
     } else if (status === 'reset') {
       delete state[relativePath];
+    } else if (status === 'resetYoutube') {
+      // Unfinished YouTube draft: send the video to YouTube again, keep every
+      // other network's own record (Facebook already posted is not re-posted).
+      const record = { ...(state[relativePath] || {}) };
+      if (record.youtubeId && record.draft) record.brokenDraftIds = [...new Set([...(record.brokenDraftIds || []), record.youtubeId])];
+      for (const key of ['status', 'youtubeId', 'youtubePublishedAt', 'publishedAt', 'visibility', 'channel', 'appliedHash', 'appliedAt', 'draft',
+        'youtubeError', 'updateError', 'updateTriedHash', 'forceUpdate', 'startedAt', 'date', 'error', 'shortError']) delete record[key];
+      state[relativePath] = record;
     } else {
       const record = state[relativePath] || {};
       if (status === 'started') {
@@ -859,11 +869,12 @@ const KappDossier = (() => {
             publishedAt: firstPublishedAt, visibility: data.visibility || null,
             channel: data.channel || null, appliedHash: data.hash || null });
           // Link known at the start of the upload, before Visibility: a draft.
-          if (data.draft) record.draft = true; else delete record.draft;
+          if (data.draft) record.draft = true; else { delete record.draft; delete record.youtubeError; }
         } else if (record.youtubeId && !record.youtubePublishedAt && record.publishedAt) {
           // Lazy migration of records written by versions before 1.19.
           record.youtubePublishedAt = record.publishedAt;
         }
+        if (data.youtubeError && record.draft) record.youtubeError = data.youtubeError;
         if (data.shortYoutubeId) { record.shortYoutubeId = data.shortYoutubeId; delete record.shortError; }
         if (data.shortError) record.shortError = data.shortError;
         // Link given by hand: the sheet and thumbnail of the folder must be applied.

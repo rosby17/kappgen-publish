@@ -802,6 +802,19 @@ function sentItem(video) {
     });
     again.title = 'Republier sur YouTube avec le titre, la description et la miniature du dossier';
     actions.push(again);
+  } else if (video.youtube_draft && video.youtube_error) {
+    // Upload started in Studio but never finished (step not passed, upload
+    // interrupted): NOT published. Finish it in Studio, or send it again.
+    status = pill('warn', `Pas terminée sur YouTube : ${video.youtube_error}`);
+    status.title = video.youtube_error;
+    actions.push(iconLink('link', 'Ouvrir dans Studio', `https://studio.youtube.com/video/${video.youtube_id}/edit`));
+    const resend = button('Renvoyer sur YouTube', 'btn primary', async () => {
+      if (!confirm('La vidéo sera envoyée de nouveau sur YouTube (les autres réseaux déjà publiés ne sont pas refaits).\n\nSupprime ensuite l’envoi inachevé dans YouTube Studio (« Supprimer la vidéo »).')) return;
+      await act(item, resend, { type: 'resendYoutube', path: video.relative_path }, 'Nouvel envoi vers YouTube en cours…');
+    });
+    resend.title = 'Renvoyer la vidéo sur YouTube';
+    resend.dataset.publish = '1';
+    actions.push(resend);
   } else {
     if (!video.has_content) status = pill('neutral', 'Aucune fiche ni miniature dans le dossier.');
     else if (video.applied_hash === video.hash) status = pill('ok', 'À jour sur YouTube.');
@@ -822,7 +835,7 @@ function sentItem(video) {
     path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
     title: video.title || video.relative_path.split('/').pop(),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
-    status, actions: actions.filter((a) => !(a.tagName === 'A' && /youtu/.test(a.href))), extra,
+    status, actions: actions.filter((a) => !(a.tagName === 'A' && /youtu\.be\//.test(a.href))), extra,
   });
   // The video's thumbnail opens it on YouTube.
   const mini = item.querySelector('.mini');
@@ -836,7 +849,7 @@ function sentItem(video) {
     link.append(mini);
   }
   item.dataset.ytKinds = 'video';
-  item.dataset.ytFailed = video.update_error && video.update_tried_hash === video.hash ? '1' : '';
+  item.dataset.ytFailed = (video.update_error && video.update_tried_hash === video.hash) || (video.youtube_draft && video.youtube_error) ? '1' : '';
   return item;
 }
 

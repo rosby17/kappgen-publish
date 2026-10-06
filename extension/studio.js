@@ -117,19 +117,62 @@
     return true;
   }
 
-  async function adSuitabilityStep(mode) {
+  // « Éligibilité aux annonces » / « Ad suitability » : the step badge is
+  // selected, or its questionnaire (categories + « None of the above ») shows.
+  const AD_STEP = /Éligibilité aux annonces|Adéquation publicitaire|Ad suitability|Idoneidad para anuncios|Adequação a anúncios|Eignung für Werbung/i;
+  const NONE_TEXT = /none of the above|aucun(e)? (des|de ces)? ?(options|propositions|[ée]l[ée]ments|contenus|situations|cas|choix)? ?ci-dessus|aucun de ces|rien de tout cela|ningun[ao] de l[ao]s|nenhuma das|keine der/i;
+  function adStepShown() {
+    const dlg = dialog();
+    if (!dlg) return false;
+    const current = [...dlg.querySelectorAll('[id^="step-badge-"], ytcp-stepper [role="tab"], ytcp-stepper button')]
+      .find((b) => visible(b) && (b.getAttribute('aria-selected') === 'true' || b.hasAttribute('active') || b.classList.contains('iron-selected') || b.getAttribute('state') === 'active'));
+    if (current && AD_STEP.test(textOf(current))) return true;
+    return [...dlg.querySelectorAll('h1, h2, #title, .title')].some((h) => visible(h) && AD_STEP.test(textOf(h)));
+  }
+  // The « None of the above » checkbox, wherever Studio puts its label (on the
+  // box, beside it, or on a parent row). Lists can be lazy: scroll them first.
+  function findNone() {
     let none = findByText(S('adCheckbox'), X('adNone'));
-    if (!none) {
-      const checkboxes = [...document.querySelectorAll(S('adCheckbox'))].filter(visible);
-      none = checkboxes.find((c) => /none of the above|aucun|ci-dessus|ningun|nenhuma|keine der/i.test(textOf(c) || textOf(c.parentElement) || textOf(c.closest('ytcp-checkbox-lit, ytcp-checkbox, tp-yt-paper-checkbox') || ''))) || null;
+    if (none) return none;
+    const dlg = dialog() || document.body;
+    // Wider search only on the questionnaire itself (never on Details or Visibility).
+    if (!adStepShown() && !/Langage inapproprié|Inappropriate language|Lenguaje inapropiado|Linguagem inadequada|Unangemessene Sprache/i.test(textOf(dlg))) return null;
+    for (const box of dlg.querySelectorAll('*')) {
+      if (box.scrollHeight > box.clientHeight + 40 && getComputedStyle(box).overflowY !== 'visible') box.scrollTop = box.scrollHeight;
     }
-    if (!none) return false;
+    const boxes = [...dlg.querySelectorAll(S('adCheckbox'))].filter(visible);
+    none = boxes.find((c) => [c, c.parentElement, c.closest('ytcp-checkbox-lit, ytcp-checkbox, tp-yt-paper-checkbox, label, [role="listitem"], div')]
+      .some((n) => n && textOf(n).length < 160 && NONE_TEXT.test(textOf(n)))) || null;
+    if (none) return none;
+    // A label alone (« Aucun des éléments ci-dessus ») : its own checkbox, or itself.
+    const label = [...dlg.querySelectorAll('span, div, label, yt-formatted-string, p')]
+      .find((n) => visible(n) && textOf(n).length < 120 && NONE_TEXT.test(textOf(n)) && ![...n.children].some((c) => NONE_TEXT.test(textOf(c))));
+    if (!label) return null;
+    const row = label.closest('ytcp-checkbox-lit, ytcp-checkbox, tp-yt-paper-checkbox, label, [role="checkbox"], [role="listitem"]') || label.parentElement;
+    return (row && row.querySelector(S('adCheckbox'))) || row || label;
+  }
+
+  async function adSuitabilityStep(mode) {
+    const none = findNone();
+    if (!none) {
+      if (!adStepShown()) return false;
+      const seen = [...(dialog() || document.body).querySelectorAll(S('adCheckbox') + ', label, yt-formatted-string')]
+        .filter(visible).map((n) => textOf(n).slice(0, 50)).filter(Boolean);
+      throw new Error('YouTube Studio : case « Aucun des éléments ci-dessus » de l’étape « Éligibilité aux annonces » introuvable. Cases vues : '
+        + ([...new Set(seen)].slice(-12).join(' | ') || 'aucune') + '.');
+    }
     if (mode !== 'on') {
       throw new Error('YouTube Studio demande le questionnaire « Adéquation publicitaire » : termine-le dans l’onglet Studio resté ouvert.');
     }
-    if (none.getAttribute('aria-checked') !== 'true' && !none.hasAttribute('checked')) click(none);
+    const SUBMIT = /^(Submit rating|Envoyer (la note|la classification|l['’][ée]valuation)|Soumettre.*|Valider.*|Enviar (clasificaci[oó]n|avalia[cç][aã]o)|Bewertung senden)$/i;
+    const findSubmit = () => findByText(S('buttons'), X('adSubmit')) || findByText(S('buttons'), SUBMIT);
+    const box = none.matches(S('adCheckbox')) ? none : (none.querySelector(S('adCheckbox')) || none);
+    const checked = () => box.getAttribute('aria-checked') === 'true' || box.hasAttribute('checked');
+    // Already answered (Studio keeps the questionnaire on screen): « Next » moves on.
+    if (checked() && !findSubmit()) return false;
+    if (!checked()) click(none);
     await sleep(600);
-    const submit = await waitFor(() => findByText(S('buttons'), X('adSubmit')), { timeout: 10000, what: 'le bouton « Submit rating »' });
+    const submit = await waitFor(findSubmit, { timeout: 10000, what: 'le bouton « Envoyer la classification »' });
     click(submit);
     await sleep(2000);
     return true;

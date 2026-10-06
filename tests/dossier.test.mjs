@@ -418,3 +418,42 @@ test('organisation « marques » : les posts de comptes/facebook-<compte>/a-publ
   assert.equal(item.path, 'sport/ballon-viral/comptes/facebook-ballon-viral/a-publier/2026-10-05-1200-test');
   assert.equal(item.channel_name, 'ballon-viral');
 });
+
+test('an unfinished YouTube draft is never « déjà publiée » and can be sent again without re-posting Facebook', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  const channel = disk.dir('CHAINE');
+  const dir = project(channel, 'Match', 'match.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+  const path = 'CHAINE/Match/match.mp4';
+
+  // Studio showed the link, then the « Visibilité » step failed: a draft.
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk', draft: true });
+  await KappDossier.mark(path, 'published', { facebookPublishedAt: '2026-10-06T09:16:50.610Z' });
+  const failed = await KappDossier.mark(path, 'published', { youtubeError: 'YouTube Studio : étape « Visibilité » introuvable.' });
+  assert.equal(failed.draft, true);
+  assert.match(failed.youtubeError, /Visibilité/);
+  assert.equal(dir.children.has('DEJA-PUBLIEE.txt'), false);       // no « already published » marker for a draft
+
+  let queue = await KappDossier.scan({ now: 10_000_000 });
+  const sent = queue.sent.find((v) => v.relative_path === path);
+  assert.equal(sent.youtube_draft, true);
+  assert.match(sent.youtube_error, /Visibilité/);
+  assert.equal(queue.videos.some((v) => v.relative_path === path), false);   // never re-sent on its own (no duplicate)
+
+  // « Renvoyer sur YouTube »: back in the queue, Facebook kept, broken draft remembered.
+  const reset = await KappDossier.mark(path, 'resetYoutube');
+  assert.equal(reset.facebookPublishedAt, '2026-10-06T09:16:50.610Z');
+  assert.equal(reset.youtubeId, undefined);
+  assert.equal(reset.status, undefined);
+  assert.deepEqual([...reset.brokenDraftIds], ['abcdefghijk']);
+  queue = await KappDossier.scan({ now: 10_000_000 });
+  assert.equal(queue.videos.some((v) => v.relative_path === path), true);
+
+  // Finished for real: no longer a draft, the error is gone, the marker is written.
+  const done = await KappDossier.mark(path, 'published', { youtubeId: 'zyxwvutsrqp' });
+  assert.equal(done.draft, undefined);
+  assert.equal(done.youtubeError, undefined);
+  assert.equal(done.facebookPublishedAt, '2026-10-06T09:16:50.610Z');
+  assert.equal(dir.children.has('DEJA-PUBLIEE.txt'), true);
+});
