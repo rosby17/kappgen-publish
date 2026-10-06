@@ -2468,6 +2468,7 @@ async function renderSubscription({ fresh = false } = {}) {
     ? `Essai gratuit en cours : ${state.days_left} jour(s) restant(s).` : `Premium actif encore ${state.days_left} jour(s). Un nouvel achat s’ajoute à la suite.`;
   $('offers').hidden = active && forever;
   $('pw-subscribe').hidden = active && forever;
+  applyOfferPrices(state.offers);
   renderOffers();
   const message = $('pw-message');
   message.className = 'small muted';
@@ -2527,9 +2528,24 @@ $('pw-trial').addEventListener('click', async () => {
   if (await paywallAction($('pw-trial'), { type: 'startTrial' }, 'Activation…')) { paywallBack = false; start(); }
 });
 
-// Offer chosen on the paywall (monthly by default; lifetime highlighted).
-let chosenOffer = 'lifetime';
-const OFFER_TEXT = { monthly: '2 $ par mois', yearly: '20 $ par an', lifetime: '50 $ une seule fois (accès à vie)' };
+// Offer chosen on the paywall (yearly by default, highlighted). Prices come from the server, per zone of the customer's country.
+let chosenOffer = 'yearly';
+let offerPrices = {};   // { monthly: '7,49 €', yearly: '74,99 €' }
+function formatPrice(amount, currency) {
+  const n = Number(amount).toLocaleString('fr-FR', { minimumFractionDigits: amount % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  return currency === 'XAF' ? `${n} FCFA` : currency === 'EUR' ? `${n} €` : `${n} $`;
+}
+function applyOfferPrices(offers) {
+  for (const o of offers || []) offerPrices[o.id] = formatPrice(o.prix, o.devise);
+  for (const el of document.querySelectorAll('[data-price]')) if (offerPrices[el.dataset.price]) el.textContent = offerPrices[el.dataset.price];
+  const m = (offers || []).find((o) => o.id === 'monthly'), y = (offers || []).find((o) => o.id === 'yearly');
+  if (m && y) {
+    const saved = Math.round((m.prix * 12 - y.prix) / m.prix);
+    const note = document.querySelector('[data-note="yearly"]');
+    if (note) note.textContent = saved >= 2 ? `${saved} mois offerts` : 'Économique';
+  }
+}
+const offerText = (id) => `${offerPrices[id] || (id === 'yearly' ? '49 $' : '5 $')} ${id === 'yearly' ? 'par an' : 'par mois'}`;
 function renderOffers() {
   for (const b of document.querySelectorAll('#offers .offer')) {
     b.classList.toggle('active', b.dataset.offer === chosenOffer);
@@ -2541,7 +2557,7 @@ for (const b of document.querySelectorAll('#offers .offer')) {
 }
 $('pw-subscribe').addEventListener('click', async () => {
   if (!await applyPartnerCode()) return;
-  $('pay-summary').textContent = `Formule choisie : ${OFFER_TEXT[chosenOffer]}.`;
+  $('pay-summary').textContent = `Formule choisie : ${offerText(chosenOffer)}.`;
   $('pay-modal').hidden = false;
 });
 $('pay-close').addEventListener('click', () => { $('pay-modal').hidden = true; });
