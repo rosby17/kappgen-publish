@@ -610,9 +610,9 @@ async function closeStudioTab(tabId) {
 // An already open tab of the site is used (the one in front first, then one
 // of the current window, then any window); a new tab only when there is none.
 async function tabToReuse(pattern, patterns) {
-  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
   if (active && pattern.test(active.url || '')) return active;
-  const here = await chrome.tabs.query({ url: patterns, lastFocusedWindow: true });
+  const here = await chrome.tabs.query({ url: patterns, lastFocusedWindow: true }).catch(() => []);
   if (here[0]) return here[0];
   const anywhere = await chrome.tabs.query({ url: patterns });
   return anywhere[0] || null;
@@ -2545,6 +2545,16 @@ async function paceRecord() {
   await chrome.storage.local.set({ paceLog: [...(paceLog || []), Date.now()].slice(-300), lastAutoPostAt: Date.now() });
 }
 
+// Chrome can run with no window open (everything closed, extension alive):
+// opening a tab then fails with « No current window ». A minimised empty
+// window is opened first so scheduled publications still go out.
+async function ensureWindow() {
+  try {
+    if ((await chrome.windows.getAll()).length) return;
+    await chrome.windows.create({ url: 'about:blank', focused: false, state: 'minimized' });
+  } catch { /* the publication reports its own error */ }
+}
+
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
   // « Pause » in the panel: nothing goes out on its own until « Reprendre ».
@@ -2563,6 +2573,7 @@ async function autoPass() {
     await autoState('subscription');
     return;
   }
+  await ensureWindow();
   const settings = await folderSettings();
   const access = await folder('access').catch(() => ({ state: 'none' }));
   if (access.state === 'prompt') await askAccess().catch(() => {});
