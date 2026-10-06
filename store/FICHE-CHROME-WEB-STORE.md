@@ -16,17 +16,15 @@ Résumé (= champ `description` du manifest ; jamais de liste de réseaux ni de 
 Publie automatiquement sur tes réseaux sociaux les vidéos et posts rangés dans un dossier de ton ordinateur.
 ```
 
-Description :
+Description (courte, sans liste de réseaux ni de mots répétés : le refus du 04/10 et du 06/10 portait sur la liste de réseaux dans le RÉSUMÉ ; le champ « Résumé » de la fiche française du tableau de bord doit être le même texte que le `description` du manifeste) :
 
 ```text
 KappGen Publish transforme un dossier de ton ordinateur en file de publication pour tes réseaux sociaux.
 
 Range chaque contenu avec son texte, sa miniature ou sa vidéo. L’extension détecte les fichiers prêts, respecte leur horaire et publie avec les comptes déjà connectés dans Chrome.
 
-• YouTube : vidéos, Shorts, titre, description, tags, miniature et programmation
-• Facebook : vidéos, Reels et posts texte, photo ou vidéo
-• TikTok et Instagram : vidéos et formats verticaux
-• X et LinkedIn : posts, médias compatibles et relais des vidéos YouTube
+• Vidéos, Shorts, Reels, posts texte, photo ou vidéo
+• Titre, description, tags, miniature et programmation
 • Un dossier principal ou un dossier propre à chaque réseau
 • Une publication à la fois et suivi local contre les doublons
 • Pause globale et erreurs explicites, sans relance automatique d’un échec
