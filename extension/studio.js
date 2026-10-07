@@ -75,6 +75,8 @@
   // Monetized channels get a "Monetization" step (and, once ads are on, an
   // "Ad suitability" questionnaire) before Visibility. mode comes from the
   // channel settings: "on", "off", or "manual" (the creator finishes it).
+  // Studio's left-hand menu (Dashboard, Content, Earn…) is never a choice.
+  const SIDE_MENU = 'ytcp-navigation-drawer, tp-yt-app-drawer, #navigation-drawer, nav';
   async function monetizationStep(mode) {
     const dlg = dialog() || document.body;
     const onStep = X('monetizationStep').test(textOf(dlg));
@@ -96,7 +98,7 @@
     const findChoice = () => {
       const exact = document.querySelector(S('monetizationExact', { mode }));
       if (exact && visible(exact)) return exact;
-      const hits = [...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && wanted.test(textOf(n)) && textOf(n).length < 200);
+      const hits = [...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && !n.closest(SIDE_MENU) && wanted.test(textOf(n)) && textOf(n).length < 200);
       // the innermost match is the item itself, not a list that contains it
       return hits.find((n) => !hits.some((o) => o !== n && n.contains(o))) || null;
     };
@@ -104,8 +106,15 @@
     try {
       option = await waitFor(findChoice, { timeout: 15000, what: 'le choix de monétisation' });
     } catch (error) {
-      const seen = [...new Set([...document.querySelectorAll(CHOICES)].filter(visible).map(textOf).filter((t) => t && t.length < 80))].slice(0, 8);
-      throw new Error(`${error.message} Choix visibles : ${seen.join(' | ') || 'aucun'}.`);
+      const seen = [...new Set([...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && !n.closest(SIDE_MENU)).map(textOf).filter((t) => t && t.length < 80))].slice(0, 8);
+      // Which element was pressed, and what Studio opened above the dialog:
+      // enough to see which tag the options really use.
+      const tag = (n) => `${n.localName}${n.id ? '#' + n.id : ''}${n.getAttribute('role') ? '[' + n.getAttribute('role') + ']' : ''}`;
+      const pressed = `${tag(trigger)} « ${textOf(trigger).slice(0, 30)} »`;
+      const overlays = [...document.querySelectorAll('tp-yt-iron-dropdown, ytcp-text-menu, tp-yt-paper-listbox, [role="listbox"], [role="menu"], ytcp-paper-dialog')]
+        .filter((n) => visible(n) && !n.closest(SIDE_MENU)).slice(0, 3)
+        .map((n) => `${tag(n)} > ${[...n.querySelectorAll('*')].filter((c) => visible(c) && !c.children.length && textOf(c)).slice(0, 5).map((c) => `${tag(c)} « ${textOf(c).slice(0, 25)} »`).join(', ')}`);
+      throw new Error(`${error.message} Appuyé sur : ${pressed}. Choix visibles : ${seen.join(' | ') || 'aucun'}. Menus ouverts : ${overlays.join(' ;; ') || 'aucun'}.`);
     }
     click(option);
     await sleep(600);
