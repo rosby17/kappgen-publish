@@ -44,7 +44,7 @@ La spécification complète se trouve dans [NORME-PUBLICATION.md](NORME-PUBLICAT
 ## Fonctions
 
 - YouTube : vidéos longues, Shorts, titres, descriptions, tags, miniatures, visibilité et créneaux de quinze minutes.
-- Facebook : vidéos, Reels, posts texte/photo/vidéo et partage prudent dans neuf groupes maximum.
+- Facebook : vidéos, Reels, posts texte/photo/vidéo et partage prudent dans neuf groupes maximum. Une vidéo de plus de 90 s part toujours en vidéo normale (jamais en Reel) ; l’attente de la fin de l’envoi dépend de la taille du fichier et suit le pourcentage affiché par Facebook.
 - TikTok et Instagram : vidéos et Reels depuis les médias verticaux ou les dossiers propres au réseau.
 - X et LinkedIn : posts, médias compatibles et relais des vidéos YouTube.
 - Un dossier principal ou un dossier dédié par réseau.

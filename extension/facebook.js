@@ -8,7 +8,7 @@
   if (window.__kappgen && window.__kappgen.version === VERSION) return;
   if (!globalThis.KappFacebookFlow) throw new Error('KappGen : règles de publication Facebook indisponibles.');
   const { PUBLISH_BUTTON, GROUPS_DONE_BUTTON, SUCCESS_NOTICE, DRAFT_NOTICE, GROUP_PICKER_TITLE,
-    FORBIDDEN_GROUP_CONTROL, MAX_GROUPS, groupLimit, isPromotionUrl } = globalThis.KappFacebookFlow;
+    FORBIDDEN_GROUP_CONTROL, MAX_GROUPS, groupLimit, isPromotionUrl, uploadPlan, uploadVerdict } = globalThis.KappFacebookFlow;
   // In a background tab Chrome slows timers down (down to one tick a minute):
   // the pause then goes through the extension's service worker, never slowed.
   const sleep = (ms) => (document.hidden
@@ -68,13 +68,16 @@
     if (on) silence();
   };
   // Still sending the file to Facebook? (progress bar under 100 %, or « 45 % »).
-  const uploading = () => {
+  // Returns { busy, percent }: percent is the progress read on screen, null
+  // when Facebook shows no number (spinner, « Importation en cours »).
+  const uploadState = () => {
     for (const root of [topDialog(), composer()].filter(Boolean)) {
       for (const bar of root.querySelectorAll('[role="progressbar"]')) {
         if (!visible(bar)) continue;
         const now = Number(bar.getAttribute('aria-valuenow'));
         const max = Number(bar.getAttribute('aria-valuemax') || 100);
-        if (!Number.isFinite(now) || now < max) return true;
+        if (bar.getAttribute('aria-valuenow') == null || !Number.isFinite(now)) return { busy: true, percent: null };
+        if (now < max) return { busy: true, percent: max > 0 ? (now / max) * 100 : null };
       }
       // The window's own text, without what was typed (a title may contain « 50 % »).
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -86,17 +89,43 @@
       // and the settings screen shows them as plain text, outside any editable
       // field, so « malgré 65% de possession » used to look like an upload
       // that never finished and blocked the publication for good.
-      let uploadBadge = false;
+      let badge = null;
       while (walker.nextNode()) {
         const value = walker.currentNode.nodeValue || '';
         text += ` ${value}`;
-        if (/^\s*\d{1,3}([.,]\d+)?\s?%\s*$/.test(value)) uploadBadge = true;
+        const m = /^\s*(\d{1,3}(?:[.,]\d+)?)\s?%\s*$/.exec(value);
+        if (m && badge === null) badge = Number(m[1].replace(',', '.'));
       }
-      if (uploadBadge) return true;
-      if (/importation en cours|t[eé]l[eé]versement en cours|uploading|chargement de la vid[eé]o/i.test(text)) return true;
+      if (badge !== null) return { busy: true, percent: badge };
+      if (/importation en cours|t[eé]l[eé]versement en cours|uploading|chargement de la vid[eé]o/i.test(text)) return { busy: true, percent: null };
     }
-    return false;
+    return { busy: false, percent: null };
   };
+  const uploading = () => uploadState().busy;
+  // Waits for the file to be fully on Facebook (100 %). The time allowed
+  // depends on the file's size (receiveFile notes it); a percentage that keeps
+  // moving keeps the wait going, one stuck for long ends it with a clear
+  // message. The panel is told the progress so the publication never looks dead.
+  async function waitUploadDone() {
+    const plan = uploadPlan(window.__kappgenUploadSize || 0);
+    const start = Date.now();
+    let percent = null;
+    let lastAdvance = start;
+    let told = 0;
+    for (;;) {
+      const state = uploadState();
+      if (!state.busy) return true;
+      const now = Date.now();
+      if (state.percent !== null && (percent === null || state.percent > percent + 0.05)) { percent = state.percent; lastAdvance = now; }
+      const verdict = uploadVerdict({ elapsedMs: now - start, sinceAdvanceMs: now - lastAdvance, percent, plan });
+      if (verdict) throw new Error(verdict.message);
+      if (now - told > 30000) {
+        told = now;
+        chrome.runtime.sendMessage({ type: 'uploadProgress', network: 'facebook', percent, elapsedMs: now - start }).catch(() => {});
+      }
+      await sleep(1000);
+    }
+  }
   const byText = (pattern, { needEnabled = false, root = document } = {}) => [...root.querySelectorAll(buttons)]
     .find((node) => visible(node) && (!needEnabled || enabled(node)) && labelsOf(node).some((label) => pattern.test(label)));
 
@@ -251,13 +280,37 @@
     // open photo picker listens to. They are tried in turn below, newest first.
     const imageInputs = () => [...scope().querySelectorAll('input[type="file"]')]
       .filter((i) => /image|\*/.test(i.accept || '*')).reverse();
+    // A video post: the composer's own field first, then one in any open
+    // window (Facebook sometimes keeps it beside the composer), never the page's.
+    const videoInput = () => {
+      for (const root of [composer(), ...[...document.querySelectorAll('[role="dialog"]')].filter(visible).reverse()]) {
+        if (!root) continue;
+        const found = [...root.querySelectorAll('input[type="file"]')].filter((i) => /video|\*/.test(i.accept || '*')).pop();
+        if (found) return found;
+      }
+      return null;
+    };
     const pick = () => {
       const inputs = [...scope().querySelectorAll('input[type="file"]')];
       if (kind === 'image') return imageInputs()[0];
-      if (kind === 'video') return inputs.filter((i) => /video|\*/.test(i.accept || '*')).pop();
+      if (kind === 'video') return videoInput();
       return inputs.find(visible);
     };
-    const input = await waitFor(pick, 60000, kind === 'image' ? 'l’ajout de photo' : 'le sélecteur de fichier du Reel');
+    let input = null;
+    if (kind === 'video') {
+      // The « Photo/vidéo » button of the composer reveals the file field; its
+      // icon may appear after the composer itself: clicked again if needed.
+      input = await waitFor(pick, 10000, 'le champ vidéo de la publication').catch(() => null);
+      if (!input) {
+        const add = addMediaButton();
+        if (add) { click(add); await sleep(1500); }
+      }
+    }
+    if (!input) {
+      input = await waitFor(pick, 60000, kind === 'image' ? 'l’ajout de photo'
+        : kind === 'video' ? 'le champ vidéo de la publication (bouton « Photo/vidéo » de la fenêtre « Créer une publication »)'
+          : 'le sélecteur de fichier du Reel');
+    }
     const file = await new Promise((resolve, reject) => {
       const frame = document.createElement('iframe');
       frame.style.display = 'none';
@@ -279,6 +332,8 @@
       target.dispatchEvent(new Event('change', { bubbles: true }));
     };
     if (kind !== 'image') {
+      // Remembered for the wait at 100 %: a heavy file is given more time.
+      window.__kappgenUploadSize = file.size;
       give(input);
       return { name: file.name, size: file.size };
     }
@@ -302,6 +357,7 @@
 
   async function openReel() {
     keepQuiet(true);
+    window.__kappgenUploadSize = 0;
     const create = await waitFor(() => byText(/create\s+(a\s+)?reel|cr[eé]er\s+(un\s+)?r[eé]el|nouveau\s+r[eé]el/i)
       || byText(/^r[eé]els?$/i), 45000, 'le bouton Créer un Reel');
     click(create);
@@ -325,7 +381,7 @@
         field = await waitFor(findField, screen === 0 ? 12000 : 20000, 'le champ de texte de la publication');
       } catch (error) {
         if (screen === 3) throw error;
-        await waitFor(() => !uploading(), 15 * 60000, 'la fin de l’envoi (100 %)');
+        await waitUploadDone();
         const next = findButton(/^(next|suivant)$/i, { needEnabled: true });
         if (!next) throw error;
         click(next);
@@ -368,13 +424,14 @@
     // and the file must be fully sent (100 %) before each of them.
     keepQuiet(true);
     for (let i = 0; i < 3; i += 1) {
-      await waitFor(() => !uploading(), 15 * 60000, 'la fin de l’envoi du Reel (100 %)');
+      await waitUploadDone();
       await sleep(1500);
       const next = findButton(/^(next|suivant)$/i, { needEnabled: true });
       if (!next || byText(/^(publish|publier|share|partager|post)$/i, { needEnabled: true })) break;
       click(next);
       await sleep(2500);
     }
+    await waitUploadDone();
     let button = await waitFor(() => !uploading() && publishButtonInDialog(), 15 * 60000, 'le bouton Publier');
     let picked = { groups: [], extra: [] };
     if (groups.length || groupCount) {
@@ -393,9 +450,18 @@
     return { ...picked, ...confirmation };
   }
 
+  // The « Photo/vidéo » button INSIDE the open composer (never the page's own).
+  const addMediaButton = () => {
+    const root = composer();
+    if (!root) return null;
+    return byText(/^(photo\/vid[eé]o|photo\/video|photo|ajouter des photos|add photos)/i, { root })
+      || [...root.querySelectorAll('[aria-label]')].find((n) => visible(n) && /photo/i.test(n.getAttribute('aria-label')));
+  };
+
   // Opens the "Create post" composer of the Page (text, with or without photo).
   async function openPost({ photo }) {
     keepQuiet(true);
+    window.__kappgenUploadSize = 0;
     const create = await waitFor(
       () => byText(/^(create post|cr[eé]er une publication|cr[eé]er un post|nouvelle publication)$/i)
         || [...document.querySelectorAll('[role="button"]')].find((n) => visible(n) && /what'?s on your mind|what'?s new|write something|quoi de neuf|[ée]crivez quelque chose|que voulez-vous dire|exprimez-vous|[àa] quoi pensez-vous/i.test(textOf(n))),
@@ -403,9 +469,9 @@
     click(create);
     await waitFor(() => [...document.querySelectorAll('[role="dialog"] [contenteditable="true"], [contenteditable="true"][role="textbox"]')].find(visible), 30000, 'la fenêtre de publication');
     if (photo) {
-      const root = composer() || document;
-      const add = byText(/^(photo\/vid[eé]o|photo\/video|photo|ajouter des photos|add photos)/i, { root })
-        || [...root.querySelectorAll('[aria-label]')].find((n) => visible(n) && /photo/i.test(n.getAttribute('aria-label')));
+      // The composer's toolbar (« Photo/vidéo »…) can appear a moment after
+      // its text field: wait for it instead of looking only once.
+      const add = await waitFor(addMediaButton, 15000, 'le bouton « Photo/vidéo » de la publication').catch(() => null);
       if (add) { click(add); await sleep(1200); }
     }
     return true;
@@ -425,7 +491,7 @@
     keepQuiet(true);
     for (let screen = 0; screen < 5; screen += 1) {
       // The file must be fully on Facebook (100 %) before « Suivant ».
-      await waitFor(() => !uploading(), timeout, 'la fin de l’envoi de la vidéo (100 %)');
+      await waitUploadDone();
       await sleep(1500);
       const button = await waitFor(() => {
         silence();

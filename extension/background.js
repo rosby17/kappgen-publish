@@ -21,6 +21,7 @@
 
 importScripts('lib/schedule.js');
 importScripts('lib/rythme.js');
+importScripts('lib/facebook-flow.js');
 
 // The user's KappGen account (session cookie of kappgen.com). The local
 // Docker version is chosen in the panel's Help tab (http://localhost:8080).
@@ -866,30 +867,42 @@ async function openFacebookReel(pageUrl, { reuse = true } = {}) {
   throw new Error('Facebook ne s’est pas ouvert.');
 }
 
+// Reel or normal video for this file: a video longer than Facebook's Reel
+// limit always goes as a normal video. Its duration is read in the folder;
+// unreadable, the Reel stays (unless the file is far too heavy for one).
+async function facebookFormatOf(filePath) {
+  const info = await folder('videoInfo', { path: filePath }).catch(() => null);
+  return KappFacebookFlow.videoFormat('reel', info || {});
+}
+
 // filePath: the file to post (the long video, or its vertical version).
 async function publishFacebookReel(video, channelName, pageUrl, filePath = video && video.vertical_path, { groups = [], groupCount = 0, reuse = true } = {}) {
   if (!filePath) throw new Error('Aucun fichier vertical associé à cette vidéo.');
+  // The long video is a normal video post ("Photo/vidéo"); so is any file
+  // too long for a Reel. Only a short (vertical) video is a Reel.
+  const format = filePath === video.relative_path ? { format: 'video', reason: null } : await facebookFormatOf(filePath);
   const tabId = await openFacebookReel(pageUrl, { reuse });
   let complete = false;
   try {
-    // The long video is a normal video post ("Photo/vidéo"); only the vertical
-    // version is a Reel.
-    if (filePath === video.relative_path) {
+    if (format.format === 'video') {
+      let result = true;
       await whileShown(tabId, async () => {
         await step(tabId, 'openPost', { photo: true }, 'facebook.js');
-        await setJob({ message: 'Envoi de la vidéo sur Facebook…' });
+        await setJob({ message: format.reason ? `Facebook : ${format.reason}. Envoi de la vidéo…` : 'Envoi de la vidéo sur Facebook…' });
         await step(tabId, 'receiveFile', { kind: 'video', path: filePath,
           src: await bridgeSource(tabId, filePath) }, 'facebook.js');
         await sleep(3000);
-        const caption = (video.title || '').slice(0, 500);
+        // A YouTube video: its title only; a post of the Facebook folder: its text.
+        const caption = video.title ? video.title.slice(0, 500) : (video.description || '').slice(0, 5000);
         await step(tabId, 'fillCaption', { caption }, 'facebook.js');
         await setJob({ message: 'Envoi de la vidéo à Facebook, puis publication (peut prendre plusieurs minutes)…' });
         // expectedText: what was actually written, so the page script can
         // recognise the new post in the feed and confirm the publication.
-        await postStep(tabId, 'sendPost', { timeout: 15 * 60000, expectedText: caption });
+        // The wait for the upload itself depends on the file's size (facebook.js).
+        result = await postStep(tabId, 'sendPost', { timeout: 15 * 60000, expectedText: caption, groups, groupCount });
       });
       complete = true;
-      return true;
+      return result || true;
     }
     let picked = { groups: [], extra: [] };
     await whileShown(tabId, async () => {
@@ -2830,6 +2843,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // the background: Chrome slows a hidden tab's own timers down to one tick
     // a minute, the service worker's are not slowed down.
     pageSleep: async () => { await sleep(Math.max(0, Math.min(Number(message.ms) || 0, 30000))); return true; },
+    // A long upload in progress (Facebook): the publication is alive, the
+    // panel shows how far it is (and it is not taken for dead after 30 min).
+    uploadProgress: async () => {
+      const { job } = await chrome.storage.session.get('job');
+      if (!job || !job.running || !sender.tab || sender.tab.id !== workTabId) return false;
+      const percent = Number.isFinite(message.percent) ? `${Math.round(message.percent)} %` : 'en cours';
+      const minutes = Math.round((Number(message.elapsedMs) || 0) / 60000);
+      await setJob({ message: `Envoi de la vidéo à Facebook : ${percent}${minutes ? ` (depuis ${minutes} min)` : ''}…` });
+      return true;
+    },
     findGroups: async () => ({ groups: await findMyGroups() }),
     referrals: () => api('/referrals/me'),
     claimReferral: () => api('/referrals/claim', { method: 'POST', body: JSON.stringify({ code: message.code }) }),
