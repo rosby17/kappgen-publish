@@ -822,3 +822,5 @@ details.tab-settings > summary { container-type: inline-size; }
   .sum-chip .ico { width: 12px; height: 12px; }
   .sum-chip.off::after { content: ""; position: absolute; width: 15px; height: 1.5px; border-radius: 1px; background: currentColor; transform: rotate(-45deg); }
 }
+
+li.row .when span.late { color: #d93025; font-weight: 600; }

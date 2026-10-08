@@ -9,7 +9,20 @@
   const N = 'LinkedIn';
   const S = (key) => window.KappRecipe.sel('linkedin', key);
   const X = (key) => window.KappRecipe.re('linkedin', key);
-  const box = () => [...document.querySelectorAll(S('textBox'))].find(K.visible);
+  // LinkedIn renames the editor's classes and sometimes drops role="dialog": the recipe's selector first, then any visible writing
+  // zone of the open post window (never a comment box of the feed).
+  const FALLBACK_BOX = [
+    '[role="dialog"] [contenteditable="true"]', '[aria-modal="true"] [contenteditable="true"]', '.artdeco-modal [contenteditable="true"]',
+    '[data-test-modal] [contenteditable="true"]', '.share-box-v2__modal [contenteditable="true"]', '.share-creation-state [contenteditable="true"]',
+    '.ql-editor[contenteditable="true"]', '[role="textbox"][contenteditable="true"]', '[contenteditable="true"][aria-label*="diteur" i]',
+    '[contenteditable="true"][aria-label*="editor" i]', '[contenteditable="true"][data-placeholder]',
+  ].join(', ');
+  const notComment = (node) => !node.closest('.comments-comment-box, .comments-comment-texteditor, form[class*="comment"], [class*="comments-comment"]');
+  const box = () => {
+    let recipe = [];
+    try { recipe = [...document.querySelectorAll(S('textBox'))]; } catch (error) { recipe = []; }
+    return recipe.find(K.visible) || [...document.querySelectorAll(FALLBACK_BOX)].find((node) => K.visible(node) && notComment(node));
+  };
 
   // The « Commencer un post » window (opened by the address, or by its button).
   async function openComposer() {

@@ -1963,7 +1963,95 @@ function ownPostItem(p, net) {
     detail: [POST_TYPES[p.type] || 'Post', 'dossier du réseau', chan(p.channel_name)].filter(Boolean).join(' · '),
     done: p.statut === 'publie', error: p.configuration_error || (p.statut === 'echec' ? (p.error || 'échec') : null),
     blocked: !!p.configuration_error, date: p.published_at || p.due_at,
-    auto: true, at: p.statut === 'a_publier' && p.due_at && p.due_at > Date.now() ? p.due_at : null, own: true, net };
+    auto: true, at: p.statut === 'a_publier' && p.due_at && p.due_at > Date.now() ? p.due_at : null, own: true, net,
+    due: p.due_at || null, late: p.statut === 'a_publier' && !!p.due_at && p.due_at <= Date.now() && !p.configuration_error, post: p };
+}
+
+// Tous les réseaux ont la même rangée que Facebook (Roosevelt, 08/10) : l'heure et le jour à gauche (« aujourd’hui », « en retard »), une
+// vignette carrée, le titre du post, son état dessous (erreur comprise) et le menu ⋯ pour le modifier, changer l’heure, le retirer.
+const stampOf = (value) => (typeof value === 'number' ? value : Date.parse(value || '') || 0);
+const waitPill = (it) => (it.late ? pill('neutral', 'En retard') : it.at ? pillIcon('neutral', 'Programmé', 'clock') : null);
+function netRow(it, net, status, actions = []) {
+  const state = it.done ? 'publie' : it.blocked ? 'configuration_invalide' : it.error ? 'echec' : 'a_publier';
+  const item = el('li', `row state-${state}`);
+  if (it.path) item.dataset.path = it.path;
+  const when = el('div', 'when');
+  const ts = it.done ? stampOf(it.date) : (it.due || stampOf(it.date));
+  const timed = !!it.due || (it.done && (typeof it.date === 'number' || String(it.date || '').includes('T')));
+  if (ts) {
+    const d = new Date(ts);
+    const today = d.toDateString() === new Date().toDateString();
+    const day = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+    if (!timed) when.append(el('strong', null, day));
+    else {
+      const sub = it.done ? day : it.late ? 'en retard' : today ? 'aujourd’hui' : d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
+      when.append(el('strong', null, `${pad2(d.getHours())}:${pad2(d.getMinutes())}`), el('span', it.late ? 'late' : null, sub));
+      if (it.late) when.title = 'En retard : le post part dès que possible, un par un.';
+    }
+  } else when.append(el('strong', null, '—'), el('span', null, 'sans heure'));
+  const mini = el('div', 'mini', it.kind === 'video' ? 'Vidéo' : 'Post');
+  if (it.youtubeId) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = `https://i.ytimg.com/vi/${it.youtubeId}/mqdefault.jpg`;
+    mini.replaceChildren(img);
+  } else if (it.preview) KappDossier.fileAt(it.preview).then((file) => mini.replaceChildren(objectImage(file))).catch(() => {});
+  const what = el('div', 'what');
+  const t = el('div', 't', it.title || '(sans titre)');
+  t.title = [it.title, it.detail].filter(Boolean).join('\n');
+  what.append(t);
+  const live = liveRegion();
+  if (status) { if (!status.title) status.title = status.textContent || ''; live.append(status); }
+  what.append(live);
+  const acts = el('div', 'acts');
+  acts.append(...actions);
+  const menu = [];
+  if (it.post) menu.push(editEntry(item, it.post));
+  if (it.own && it.post && !it.done) {
+    const change = timeButton(() => item, it.due, async (at) => {
+      const d = new Date(at);
+      await KappDossier.markPost(it.path, { date_locale: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+        heure_prevue: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`, erreur: null, horaire: 'manuel' });
+      renderPosts();
+    }, { label: '' });
+    menu.push(entryOf(change, 'Changer l’heure', 'clock', { title: 'Changer l’heure de publication' }));
+  }
+  if (!it.done) {
+    const field = `${net}PublishedAt`;
+    if (it.kind === 'post') {
+      menu.push(alreadyDone(() => item, () => markPostManual(it.path, net)), retireButton(() => item, () => retirePost(it.path, net)));
+    } else if (it.kind === 'video') {
+      menu.push(alreadyDone(() => item, () => markVideoManual(it.path, { [field]: nowIso() })),
+        retireButton(() => item, () => markVideoManual(it.path, { [field]: RETIRED })));
+    }
+  }
+  if (it.own && it.post) menu.push(eraseEntry(item, it.post));
+  if (it.menuExtra) menu.push(...it.menuExtra);
+  if (menu.length) acts.append(moreMenu(menu));
+  if (it.post) {
+    what.classList.add('clickable');
+    what.title = 'Cliquer pour ouvrir le post';
+    what.addEventListener('click', (event) => { if (!event.target.closest('button, a')) toggleEditor(item, it.post); });
+  }
+  item.append(when, mini, what, acts);
+  item.say = (kind, text) => live.replaceChildren(pill(kind, text));
+  return item;
+}
+// Les listes d’un réseau, rangées par jour comme celles de Facebook : à venir (le plus proche d’abord), puis « Déjà sur … » (le plus récent d’abord).
+function renderNetLists(net, name, items, card) {
+  const pseudo = (it) => ({ path: it.path, _it: it, statut: it.done ? 'publie' : it.blocked ? 'configuration_invalide' : it.error ? 'echec' : 'a_publier',
+    configuration_error: it.blocked ? it.error : null, _at: it.done ? stampOf(it.date) : (it.due || stampOf(it.date)) });
+  const row = (p) => (p.history ? historyRow(p.history) : card(p._it));
+  const waiting = items.filter((it) => !it.done).map(pseudo)
+    .sort((a, b) => (b._at ? 1 : 0) - (a._at ? 1 : 0) || (a._it.due || b._it.due ? (a._it.due ? a._at : Infinity) - (b._it.due ? b._at : Infinity) : b._at - a._at));
+  const done = items.filter((it) => it.done).map(pseudo).sort((a, b) => b._at - a._at);
+  const fromHistory = historyFor(net, items.map((it) => it.path)).map((entry) => ({ path: entry.path, statut: 'publie', history: entry, _at: entry.at }));
+  const all = [...done, ...fromHistory].sort((a, b) => b._at - a._at);
+  $(`${net}-list`).replaceChildren(...dayGroups(waiting.slice(0, 300), (p) => p._at, `${net}-come`, { openToday: true, row }));
+  $(`${net}-done`).replaceChildren(...dayGroups(all, (p) => p._at, `${net}-done`, { openFirst: true, row }));
+  $(`${net}-done-box`).hidden = !all.length;
+  $(`${net}-done-title`).textContent = `Déjà sur ${name} (${all.length})`;
+  return { waiting: waiting.length, done: all.length };
 }
 
 // X and LinkedIn: what is published since the network was ticked (YouTube
@@ -1991,7 +2079,7 @@ async function renderShare(net) {
         if (p.statut !== 'publie') continue;
         items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Post', preview: p.image_path,
           detail: [POST_TYPES[p.type] || 'Post', 'Facebook', chan(p.channel_name)].filter(Boolean).join(' · '),
-          done: p[k.statut] === 'publie', error: p[k.perr], date: p.published_at, auto: Date.parse(p.published_at || 0) >= since });
+          done: p[k.statut] === 'publie', error: p[k.perr], date: p.published_at, auto: Date.parse(p.published_at || 0) >= since, post: p });
       }
     }
   }
@@ -2004,8 +2092,7 @@ async function renderShare(net) {
     else {
       status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
         : it.error ? pill('warn', `Échec : ${it.error}`)
-        : it.at ? pillIcon('neutral', `Programmé : ${whenText(it.at)}`, 'clock')
-          : it.auto ? pill('ok', `Part tout seul sur ${k.name}.`) : pill('neutral', `Publié avant d’avoir coché ${k.name} : clique « Publier ».`);
+        : waitPill(it) || (it.auto ? pill('ok', `Part tout seul sur ${k.name}.`) : pill('neutral', `Publié avant d’avoir coché ${k.name} : clique « Publier ».`));
       if (!it.blocked) {
         const go = button(it.error ? 'Réessayer' : 'Publier', 'btn primary', () => act(item, go,
           { type: it.kind === 'video' ? k.video : k.post, path: it.path }, `Publication sur ${k.name} en cours…`));
@@ -2013,18 +2100,12 @@ async function renderShare(net) {
         actions.push(go);
       }
     }
-    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, emptyLabel: it.kind === 'video' ? 'Vidéo' : 'Post', title: it.title, detail: it.detail, status, actions });
+    item = netRow(it, net, status, actions);
     return item;
   };
-  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
-  const waiting = items.filter((it) => !it.done).sort((a, b) => (a.at || 0) - (b.at || 0) || recent(a, b)).slice(0, 60);
-  const done = items.filter((it) => it.done).sort(recent);
-  $(`${net}-list`).replaceChildren(...waiting.map(card));
-  $(`no-${net}`).hidden = waiting.length > 0;
-  $(`${net}-done-box`).hidden = !done.length;
-  $(`${net}-done-title`).textContent = `Déjà sur ${k.name} (${done.length})`;
-  $(`${net}-done`).replaceChildren(...done.map(card));
-  appendHistory(net, items.map((it) => it.path), `${net}-done`, `${net}-done-box`, `${net}-done-title`, `Déjà sur ${k.name}`, done.length);
+  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
+  const shown = renderNetLists(net, k.name, items, card);
+  $(`no-${net}`).hidden = shown.waiting > 0;
   applyJob();
 }
 
@@ -2042,7 +2123,8 @@ function renderTikTok() {
     items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
       detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
       done: p.tiktok_statut === 'publie', error: p.configuration_error || p.tiktok_error,
-      blocked: !!p.configuration_error, date: p.due_at });
+      blocked: !!p.configuration_error, date: p.due_at, due: p.due_at || null,
+      late: !!p.due_at && p.due_at <= Date.now() && p.statut === 'a_publier' && !p.configuration_error, post: p });
   }
   for (const p of ownPosts.tiktok || []) if (p.video_path) items.push(ownPostItem(p, 'tiktok'));
   const tiktokCard = (it) => {
@@ -2052,7 +2134,7 @@ function renderTikTok() {
     if (it.done) status = pill('ok', 'Publiée sur TikTok.');
     else {
       status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
-        : it.error ? pill('warn', `Échec sur TikTok : ${it.error}`) : pill('neutral', 'Prête à partir sur TikTok.');
+        : it.error ? pill('warn', `Échec sur TikTok : ${it.error}`) : waitPill(it) || pill('neutral', 'Prête à partir sur TikTok.');
       if (!it.blocked) {
         const go = button(it.error ? 'Réessayer' : it.kind === 'video' && !it.vertical ? 'Publier (format long)' : 'Publier', 'btn primary', () => act(item, go,
           { type: it.kind === 'video' ? 'tiktok' : 'tiktokPost', path: it.path }, 'Publication sur TikTok en cours… (TikTok Studio s’ouvre)'));
@@ -2064,24 +2146,15 @@ function renderTikTok() {
         const long = button('Version longue', 'btn ghost', () => act(item, long,
           { type: 'tiktok', path: it.path, long: true }, 'Version longue vers TikTok en cours…'));
         long.dataset.publish = '1';
-        const menuNode = actions.find((a) => a.classList && a.classList.contains('more'));
-        if (menuNode) menuNode.add(entryOf(long, 'Publier la version longue', 'short'));
-        else actions.push(long);
+        it.menuExtra = [entryOf(long, 'Publier la version longue', 'short')];
       }
     }
-    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
+    item = netRow(it, 'tiktok', status, actions);
     return item;
   };
-  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
   for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
-  const waiting = items.filter((it) => !it.done).sort((a, b) => (b.vertical ? 1 : 0) - (a.vertical ? 1 : 0) || recent(a, b));
-  const done = items.filter((it) => it.done).sort(recent);
-  $('tiktok-list').replaceChildren(...waiting.map(tiktokCard));
+  renderNetLists('tiktok', 'TikTok', items, tiktokCard);
   $('no-tiktok').hidden = items.length > 0;
-  $('tiktok-done-box').hidden = !done.length;
-  $('tiktok-done-title').textContent = `Déjà sur TikTok (${done.length})`;
-  $('tiktok-done').replaceChildren(...done.map(tiktokCard));
-  appendHistory('tiktok', items.map((it) => it.path), 'tiktok-done', 'tiktok-done-box', 'tiktok-done-title', 'Déjà sur TikTok', done.length);
   applyJob();
 }
 
@@ -2100,7 +2173,8 @@ function renderInstagram() {
     items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Reel', preview: undefined,
       detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
       done: p.instagram_statut === 'publie', error: p.configuration_error || p.instagram_error,
-      blocked: !!p.configuration_error, date: p.due_at });
+      blocked: !!p.configuration_error, date: p.due_at, due: p.due_at || null,
+      late: !!p.due_at && p.due_at <= Date.now() && p.statut === 'a_publier' && !p.configuration_error, post: p });
   }
   for (const p of ownPosts.instagram || []) if (p.video_path) items.push(ownPostItem(p, 'instagram'));
   const igCard = (it) => {
@@ -2110,7 +2184,7 @@ function renderInstagram() {
     if (it.done) status = pill('ok', 'Publiée sur Instagram.');
     else {
       status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
-        : it.error ? pill('warn', `Échec sur Instagram : ${it.error}`) : pill('neutral', 'Prête à partir sur Instagram.');
+        : it.error ? pill('warn', `Échec sur Instagram : ${it.error}`) : waitPill(it) || pill('neutral', 'Prête à partir sur Instagram.');
       if (!it.blocked) {
         const go = button(it.error ? 'Réessayer' : 'Publier sur Instagram', 'btn primary', () => act(item, go,
           { type: it.kind === 'video' ? 'instagram' : 'instagramPost', path: it.path }, 'Publication sur Instagram en cours… (Instagram s’ouvre)'));
@@ -2118,19 +2192,12 @@ function renderInstagram() {
         actions.push(go);
       }
     }
-    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
+    item = netRow(it, 'instagram', status, actions);
     return item;
   };
-  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
   for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
-  const waiting = items.filter((it) => !it.done).sort(recent);
-  const done = items.filter((it) => it.done).sort(recent);
-  $('instagram-list').replaceChildren(...waiting.map(igCard));
+  renderNetLists('instagram', 'Instagram', items, igCard);
   $('no-instagram').hidden = items.length > 0;
-  $('instagram-done-box').hidden = !done.length;
-  $('instagram-done-title').textContent = `Déjà sur Instagram (${done.length})`;
-  $('instagram-done').replaceChildren(...done.map(igCard));
-  appendHistory('instagram', items.map((it) => it.path), 'instagram-done', 'instagram-done-box', 'instagram-done-title', 'Déjà sur Instagram', done.length);
   // (ancienne case « instagram-auto » remplacée par les Réglages Instagram)
   applyJob();
 }
@@ -2149,7 +2216,8 @@ function renderSnapchat() {
     items.push({ path: p.path, kind: 'post', title: p.text.split('\n')[0] || 'Snap', preview: undefined,
       detail: [chan(p.channel_name), 'vidéo du dossier de posts'].filter(Boolean).join(' · '),
       done: p.snapchat_statut === 'publie', error: p.configuration_error || p.snapchat_error,
-      blocked: !!p.configuration_error, date: p.due_at });
+      blocked: !!p.configuration_error, date: p.due_at, due: p.due_at || null,
+      late: !!p.due_at && p.due_at <= Date.now() && p.statut === 'a_publier' && !p.configuration_error, post: p });
   }
   for (const p of ownPosts.snapchat || []) if (p.video_path) items.push(ownPostItem(p, 'snapchat'));
   const snapCard = (it) => {
@@ -2159,7 +2227,7 @@ function renderSnapchat() {
     if (it.done) status = pill('ok', 'Publiée sur Snapchat.');
     else {
       status = it.blocked ? pill('warn', `Configuration invalide : ${it.error}`)
-        : it.error ? pill('warn', `Échec sur Snapchat : ${it.error}`) : pill('neutral', 'Prête à partir sur Snapchat.');
+        : it.error ? pill('warn', `Échec sur Snapchat : ${it.error}`) : waitPill(it) || pill('neutral', 'Prête à partir sur Snapchat.');
       if (!it.blocked) {
         const go = button(it.error ? 'Réessayer' : 'Publier sur Snapchat', 'btn primary', () => askSnap().then((ok) => ok && act(item, go,
           { type: it.kind === 'video' ? 'snapchat' : 'snapchatPost', path: it.path }, 'Publication sur Snapchat en cours… (Snapchat s’ouvre)')));
@@ -2167,19 +2235,12 @@ function renderSnapchat() {
         actions.push(go);
       }
     }
-    item = mediaRow({ path: it.path, preview: it.preview, youtubeId: it.youtubeId, title: it.title, detail: it.detail, status, actions });
+    item = netRow(it, 'snapchat', status, actions);
     return item;
   };
-  const recent = (a, b) => (Date.parse(b.date) || b.date || 0) - (Date.parse(a.date) || a.date || 0);
   for (let i = items.length - 1; i >= 0; i -= 1) if (items[i].done === RETIRED) items.splice(i, 1);
-  const waiting = items.filter((it) => !it.done).sort(recent);
-  const done = items.filter((it) => it.done).sort(recent);
-  $('snapchat-list').replaceChildren(...waiting.map(snapCard));
+  renderNetLists('snapchat', 'Snapchat', items, snapCard);
   $('no-snapchat').hidden = items.length > 0;
-  $('snapchat-done-box').hidden = !done.length;
-  $('snapchat-done-title').textContent = `Déjà sur Snapchat (${done.length})`;
-  $('snapchat-done').replaceChildren(...done.map(snapCard));
-  appendHistory('snapchat', items.map((it) => it.path), 'snapchat-done', 'snapchat-done-box', 'snapchat-done-title', 'Déjà sur Snapchat', done.length);
   applyJob();
 }
 
