@@ -2685,68 +2685,11 @@ async function autoPass() {
 // "Chrome connecté" in the app: check in with KappGen every minute.
 async function heartbeat() {
   api('/studio-upload/status').catch(() => {});
-  selfUpdate().catch(() => {});
-  checkNewRelease().catch(() => {});
   dailyReport().catch(() => {}); // tried again next minute if the server did not answer
   // Safety net: the automatic pass must run even if its alarm went missing.
   await ensureAlarms();
   const { lastAutoTick } = await chrome.storage.local.get('lastAutoTick');
   if (!lastAutoTick || Date.now() - lastAutoTick > (AUTO_EVERY_MINUTES + 1) * 60000) autoTick().catch(() => {});
-}
-
-// When a newer version is out on GitHub, tell the creator once (notification);
-// the « Mettre à jour » button of the side panel installs it (lib/maj.js).
-const RELEASES_URL = 'https://api.github.com/repos/rosby17/kappgen-publish/releases/latest';
-const UPDATE_GUIDE = 'https://app.kappgen.com/extension#maj';
-const newer = (a, b) => {
-  const x = String(a).split('.').map(Number);
-  const y = String(b).split('.').map(Number);
-  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
-  return false;
-};
-// A newer release is installed by itself through the helper of the computer
-// (the one behind « Mettre à jour »): new files on disk, then selfUpdate()
-// restarts the extension as soon as no publication is running. Without the
-// helper, or if it fails, the notification asking for a click stays.
-// Off with autoUpdate === false in the browser's storage.
-async function autoInstall(version) {
-  const { autoUpdate, autoInstallTry } = await chrome.storage.local.get(['autoUpdate', 'autoInstallTry']);
-  if (autoUpdate === false) return false;
-  if (autoInstallTry && autoInstallTry.version === version && Date.now() - autoInstallTry.at < 3600 * 1000) return autoInstallTry.ok === true;
-  const { job } = await chrome.storage.session.get('job');
-  if (job && job.running) return true; // later: nothing is installed in the middle of a publication
-  let ok = false;
-  try {
-    const answer = await chrome.runtime.sendNativeMessage('com.kappgen.publish', { action: 'update' });
-    ok = !!(answer && answer.ok);
-  } catch { /* no helper: the notification takes over */ }
-  await chrome.storage.local.set({ autoInstallTry: { version, at: Date.now(), ok } });
-  if (ok) selfUpdate().catch(() => {});
-  return ok;
-}
-
-async function checkNewRelease({ maxAge = 30 * 60 * 1000 } = {}) {
-  const { releaseCheck } = await chrome.storage.local.get('releaseCheck');
-  const current = chrome.runtime.getManifest().version;
-  let latest = releaseCheck && releaseCheck.latest;
-  if (!releaseCheck || Date.now() - releaseCheck.at > maxAge) {
-    const response = await fetch(RELEASES_URL, { cache: 'no-store' });
-    if (!response.ok) return;
-    latest = String((await response.json()).tag_name || '').replace(/^v/, '');
-    await chrome.storage.local.set({ releaseCheck: { at: Date.now(), latest, notified: releaseCheck && releaseCheck.notified } });
-  }
-  if (!latest || !newer(latest, current)) return;
-  if (await autoInstall(latest)) return;
-  const { releaseCheck: saved } = await chrome.storage.local.get('releaseCheck');
-  if (saved.notified === latest) return;
-  await chrome.storage.local.set({ releaseCheck: { ...saved, notified: latest } });
-  chrome.notifications.create('kappgen-update', {
-    type: 'basic',
-    iconUrl: 'icons/icon128.png',
-    title: `KappGen Publish ${latest} est disponible`,
-    message: `Tu as la version ${current}. Ouvre le panneau KappGen Publish et clique « Mettre à jour » (tes réglages sont gardés).`,
-    priority: 1,
-  });
 }
 
 // chrome.alarms.create replaces an alarm of the same name and restarts its
@@ -2760,36 +2703,6 @@ async function ensureAlarms() {
   }
 }
 
-// Unpacked install, several Chrome profiles: each profile keeps running the
-// code it loaded until someone clicks ↻. When the files on disk carry a newer
-// version, reload by ourselves (never in the middle of an upload).
-async function selfUpdate() {
-  const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
-  const waiting = disk.version && disk.version !== chrome.runtime.getManifest().version ? disk.version : '';
-  // The side panel shows « Redémarrer » while a new version waits (installed
-  // on disk, not running yet).
-  const { restartPending } = await chrome.storage.local.get('restartPending');
-  if ((restartPending || '') !== waiting) await chrome.storage.local.set({ restartPending: waiting });
-  if (!waiting) return;
-  // Never in the middle of a publication; but one with no news for 30 min is
-  // dead (it would otherwise block every update forever), and an upload being
-  // followed is picked up again after the reload (resume()).
-  const { job } = await chrome.storage.session.get('job');
-  const quiet = job && job.running ? Date.now() - (job.updatedAt || job.startedAt || 0) : Infinity;
-  const { pending } = await chrome.storage.local.get('pending');
-  if (quiet >= STALE_JOB_MS && !(pending && resuming)) { chrome.runtime.reload(); return; }
-  // Held back by a publication: say it once per version, with how to apply it now.
-  const { restartNotified } = await chrome.storage.local.get('restartNotified');
-  if (restartNotified === waiting) return;
-  await chrome.storage.local.set({ restartNotified: waiting });
-  chrome.notifications.create('kappgen-restart', {
-    type: 'basic',
-    iconUrl: 'icons/icon128.png',
-    title: `KappGen Publish ${waiting} est installée`,
-    message: 'Elle s’activera à la fin de la publication en cours. Pour l’activer tout de suite : ouvre le panneau et clique « Redémarrer », ou quitte Chrome et rouvre-le (tous tes profils d’un coup).',
-    priority: 1,
-  });
-}
 // YouTube → Facebook switch: on by default, for videos published from now on
 // (never the whole older catalogue at once).
 (async () => {
@@ -2810,13 +2723,6 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 // on the panel instead of just dismissing a toast — same one-click re-grant
 // as clicking the extension icon itself.
 chrome.notifications.onClicked.addListener(async (id) => {
-  if (id === 'kappgen-update' || id === 'kappgen-restart') {
-    // Straight to the panel and its button; the guide if Chrome refuses.
-    const win = await chrome.windows.getLastFocused().catch(() => null);
-    const opened = win && await chrome.sidePanel.open({ windowId: win.id }).then(() => true).catch(() => false);
-    if (!opened && id === 'kappgen-update') chrome.tabs.create({ url: UPDATE_GUIDE });
-    return;
-  }
   if (id !== 'kappgen-folder-access') return;
   await askAccess({ force: true }).catch(() => {});
 });
@@ -3079,7 +2985,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return {};
     },
     // Panel opened: look for a newer version (at most once every 15 min).
-    checkRelease: async () => { await checkNewRelease({ maxAge: 15 * 60 * 1000 }); return {}; },
     clearJob: async () => {
       const { job } = await chrome.storage.session.get('job');
       if (!job || !job.running) await chrome.storage.session.remove('job');

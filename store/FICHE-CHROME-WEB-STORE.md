@@ -62,15 +62,13 @@ Préparer, programmer et publier vers les réseaux sociaux choisis par l’utili
 | `scripting` | Injecter les scripts locaux de l’extension qui remplissent les formulaires des réseaux dans les onglets de publication. |
 | `tabs` | Ouvrir et suivre l’onglet de publication, détecter la connexion requise et fermer les onglets automatiques terminés. |
 | `alarms` | Réveiller périodiquement le service worker pour contrôler les publications arrivées à échéance. |
-| `notifications` | Signaler une mise à jour disponible ou une autorisation de dossier à renouveler. |
+| `notifications` | Signaler une autorisation de dossier à renouveler. |
 | `debugger` | Pour une vidéo issue de l’application KappGen locale uniquement, remettre à YouTube Studio le fichier désigné par son chemin sans le charger en mémoire. Le code refuse cet usage hors de `localhost`/`127.0.0.1`, s’attache seulement à l’onglet Studio de cette publication et se détache immédiatement ; le mode dossier ne l’utilise pas. Chrome interdit de déclarer cette autorisation comme facultative. |
-| `nativeMessaging` | Dialoguer avec un petit assistant installé volontairement par l’utilisateur sur son ordinateur (installation hors Store), uniquement pour installer une mise à jour de l’extension quand celle-ci est chargée manuellement. Sans cet assistant, l’autorisation n’est jamais utilisée ; la version du Store se met à jour par Chrome. |
 | Hôtes KappGen | Authentification, contrôle de l’essai ou de l’abonnement, paiement, parrainage, bilan facultatif et configuration déclarative de publication. |
 | YouTube / YouTube Studio | Lire la page publique de la chaîne, remplir les formulaires de vidéo, Short ou mise à jour, et, si l’utilisateur a coché l’option, poster puis épingler sous sa propre vidéo le commentaire écrit dans sa fiche. |
 | Facebook | Publier les vidéos, Reels et posts demandés sur une Page ou dans les groupes choisis, et, si l’utilisateur a coché l’option, poster le commentaire prévu sous son propre post. |
 | TikTok, Instagram, X et LinkedIn | Remplir le formulaire de publication du réseau sélectionné. |
 | `localhost` / `127.0.0.1` | Autoriser l’édition locale de KappGen, uniquement si l’utilisateur la configure. |
-| `api.github.com` | Lire uniquement la version de la dernière release publique afin d’afficher l’avis de mise à jour. |
 
 L’autorisation `management` n’est pas demandée. L’extension ne désactive et ne modifie aucune autre extension. L’autorisation `debugger` est strictement limitée à la remise d’un fichier de l’application locale dans l’onglet YouTube Studio concerné ; elle n’est jamais utilisée pour inspecter l’historique, les mots de passe ou les autres onglets.
 
