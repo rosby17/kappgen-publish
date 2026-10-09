@@ -2539,7 +2539,7 @@ async function renderSubscription({ fresh = false } = {}) {
   const forever = state.kind === 'lifetime' || state.kind === 'unlimited';
   $('pw-current').hidden = !active;
   $('pw-current').textContent = !active ? '' : forever ? 'Tu as l’accès à vie : rien à payer.' : state.kind === 'trial'
-    ? `Essai gratuit en cours : ${state.days_left} jour(s) restant(s).` : `Premium actif encore ${state.days_left} jour(s). Un nouvel achat s’ajoute à la suite.`;
+    ? `Essai gratuit en cours : ${state.days_left} jour(s) restant(s).` : Number.isFinite(state.days_left) ? `Premium actif encore ${state.days_left} jour(s). Un nouvel achat s’ajoute à la suite.` : 'Premium actif : rien à payer.';
   $('offers').hidden = active && forever;
   $('pw-subscribe').hidden = active && forever;
   applyOfferPrices(state.offers);
@@ -2560,8 +2560,11 @@ async function renderSubscription({ fresh = false } = {}) {
   if (active && waitingPayment) { waitingPayment = false; stopPaymentWatch(); }
   // Small badge on the title line: the trial, or a subscription ending soon.
   const pill = $('plan-pill');
-  pill.hidden = !(active && state.kind !== 'lifetime' && state.kind !== 'unlimited' && (state.kind === 'trial' || state.days_left <= 3));
-  pill.className = `plan-pill${state.days_left <= 1 ? ' urgent' : ''}`;
+  // Sans date de fin (KappGen gratuit à vie : days_left vaut null), pas de badge : « null <= 3 » est vrai en JavaScript et affichait
+  // « Abonnement · null j » (signalement de Roosevelt, 09/10).
+  const jours = Number.isFinite(state.days_left) ? state.days_left : null;
+  pill.hidden = !(active && !forever && jours !== null && (state.kind === 'trial' || jours <= 3));
+  pill.className = `plan-pill${jours !== null && jours <= 1 ? ' urgent' : ''}`;
   pill.textContent = state.kind === 'trial' ? `Essai gratuit · ${state.days_left} j` : `Abonnement · ${state.days_left} j`;
   $('plan-banner').hidden = true;
   return active;
