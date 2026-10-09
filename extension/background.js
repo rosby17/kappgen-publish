@@ -2434,6 +2434,8 @@ async function exportState(etat) {
     pause: await isPaused(), reseaux: Object.fromEntries(['youtube', 'facebook', 'tiktok', 'instagram', 'snapchat', 'x', 'linkedin'].map((n) => [n, networkOn(settings, n)])),
     youtube: { visibilite: settings.visibility || 'UNLISTED', programmation: settings.schedule === 'times' ? 'heures' : 'tout-de-suite', heures: settings.times || '' },
     chaines: settings.channels || {}, dernier_passage: lastAutoTick || null, dernier_post: lastAutoPostAt || null,
+    // Rythme de publication (commun à toutes les marques et à tous les réseaux) : KappGen prévient quand ses marques en demandent plus.
+    rythme: (() => { const p = KappPace.normalize(settings.pace); return { mode: p.mode, par_jour: p.perDay, de: p.from, a: p.to, ecart_min: p.minGapMinutes, intervalle_min: p.intervalMinutes }; })(),
   };
   await folder('exportState', { state }).catch(() => {});
   await chrome.storage.session.set({ lastExport: { etat, at: Date.now() } });
