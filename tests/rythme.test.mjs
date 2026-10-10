@@ -8,9 +8,29 @@ const at = (h, m = 0) => new Date(2026, 9, 4, h, m, 0, 0).getTime();
 const day = pace.dayStartOf(at(12));
 const seeded = (seed) => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
 
-test('par défaut : dès que c’est prêt, comme avant', () => {
-  assert.deepEqual(pace.gate(undefined, at(3), [], () => []), { ok: true });
-  assert.equal(pace.normalize({ mode: 'n’importe quoi' }).mode, 'asap');
+test('par défaut : une publication toutes les 45 min, à intervalle régulier (Roosevelt, 10/10)', () => {
+  const p = pace.normalize(undefined);
+  assert.equal(p.mode, 'interval');
+  assert.equal(p.intervalMinutes, 45);
+  assert.equal(pace.normalize({ mode: 'n’importe quoi' }).mode, 'interval');
+  assert.equal(pace.gate(undefined, at(3), [], () => []).next, at(8));                  // la nuit : rien avant 8 h
+  assert.deepEqual(pace.gate(undefined, at(10), [at(9, 10)], () => []), { ok: true });   // 50 min après la dernière
+  assert.equal(pace.gate(undefined, at(9, 30), [at(9)], () => []).next, at(9, 45));     // 30 min après : attendre 45 min
+});
+
+test('jamais moins de 45 min entre deux publications automatiques', () => {
+  assert.equal(pace.normalize({ mode: 'interval', intervalMinutes: 10 }).intervalMinutes, 45);
+  assert.equal(pace.normalize({ mode: 'random', minGapMinutes: 5 }).minGapMinutes, 45);
+  assert.equal(pace.normalize({ mode: 'auto' }).minGapMinutes, 45);
+});
+
+test('30 publications automatiques par jour au plus, quel que soit le mode', () => {
+  assert.equal(pace.normalize({ mode: 'random', perDay: 200 }).perDay, 30);
+  const trente = Array.from({ length: 30 }, (_, i) => at(0, 1) + i * 60000);
+  const lendemain = pace.dayStartOf(day + 36 * 3600000);
+  assert.deepEqual(pace.gate({ mode: 'asap' }, at(13), trente, () => []), { ok: false, next: lendemain });
+  assert.deepEqual(pace.gate({ mode: 'asap' }, at(13), trente.slice(1), () => []), { ok: true });
+  assert.equal(pace.gate({ mode: 'interval', from: '00:00', to: '23:59' }, at(13), trente, () => []).ok, false);
 });
 
 test('intervalle régulier : une publication toutes les N minutes, dans la plage horaire', () => {

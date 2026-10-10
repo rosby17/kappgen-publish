@@ -31,9 +31,8 @@
         </div>
         <div id="account-plan" class="profile-plan"></div>
         <a class="profile-link" role="menuitem" href="https://app.kappgen.com/compte" target="_blank" rel="noopener noreferrer">Mon compte KappGen</a>
-        <a class="profile-link" role="menuitem" href="https://app.kappgen.com/extension" target="_blank" rel="noopener noreferrer">Mettre à jour l’extension</a>
         <button id="theme-cycle" class="profile-link profile-btn" type="button" role="menuitem" title="Thème : Auto (cliquer pour changer)"><span>Thème</span><span id="theme-cycle-value" class="theme-icon" aria-hidden="true"></span></button>
-        <button id="renew" class="btn ghost" role="menuitem">Abonnement</button>
+        <button id="renew" class="btn ghost" role="menuitem" hidden>Abonnement</button>
         <button id="open-help" class="profile-link profile-btn" type="button" role="menuitem">Aide</button>
         <button id="logout" class="btn ghost" role="menuitem">Se déconnecter</button>
       </div>
@@ -412,23 +411,27 @@
     </section>
     <section class="card" id="set-pace">
       <div class="field-head"><h2>Rythme de publication</h2></div>
-      <p class="small">Pour tous les réseaux. Chaque envoi sur un réseau compte pour une publication ; les envois faits à la main ne sont jamais retardés.</p>
-      <div class="set-row">
-        <span class="set-text"><strong>Comment publier ?</strong></span>
-        <select id="pace-mode" aria-label="Rythme de publication">
-          <option value="auto">Automatique : KappGen décide</option>
-          <option value="interval">À intervalle régulier</option>
-          <option value="random">Aléatoire, comme une personne</option>
-          <option value="asap">Dès que c’est prêt</option>
-        </select>
+      <p class="small">Pour tous les réseaux. Chaque envoi sur un réseau compte pour une publication ; 30 publications automatiques par jour au plus. Les envois faits à la main ne sont jamais retardés.</p>
+      <p class="pace-titre"><strong>Comment publier ?</strong></p>
+      <select id="pace-mode" aria-label="Rythme de publication" hidden>
+        <option value="interval">À intervalle régulier</option>
+        <option value="random">Aléatoire, comme une personne</option>
+        <option value="auto">Automatique : KappGen décide</option>
+        <option value="asap">Dès que c’est prêt</option>
+      </select>
+      <div class="pace-choix" role="radiogroup" aria-label="Rythme de publication">
+        <button type="button" role="radio" data-pace="interval"><b>À intervalle régulier</b><small>Toutes les 45 min ou plus · conseillé</small></button>
+        <button type="button" role="radio" data-pace="random"><b>Aléatoire</b><small>Heures irrégulières, comme une personne</small></button>
+        <button type="button" role="radio" data-pace="auto"><b>Automatique</b><small>KappGen choisit pour toi</small></button>
+        <button type="button" role="radio" data-pace="asap"><b>Dès que c’est prêt</b><small>Sans attente</small></button>
       </div>
       <div class="set-row" id="pace-interval-row" hidden>
         <span class="set-text"><strong>Une publication toutes les</strong></span>
-        <span class="pace-inline"><input id="pace-interval-n" type="number" min="1" max="1440" aria-label="Intervalle"> <select id="pace-interval-unit" aria-label="Unité"><option value="1">minutes</option><option value="60">heures</option></select></span>
+        <span class="pace-inline"><input id="pace-interval-n" type="number" min="45" max="1440" aria-label="Intervalle"> <select id="pace-interval-unit" aria-label="Unité"><option value="1">minutes</option><option value="60">heures</option></select></span>
       </div>
       <div class="set-row" id="pace-perday-row" hidden>
         <span class="set-text"><strong>Publications par jour</strong></span>
-        <span class="pace-inline"><input id="pace-per-day" type="number" min="1" max="200" aria-label="Nombre de publications par jour"></span>
+        <span class="pace-inline"><input id="pace-per-day" type="number" min="1" max="30" aria-label="Nombre de publications par jour (30 au plus)"></span>
       </div>
       <div class="set-row" id="pace-window-row" hidden>
         <span class="set-text"><strong>Entre</strong></span>
@@ -436,7 +439,7 @@
       </div>
       <div class="set-row" id="pace-gap-row" hidden>
         <span class="set-text"><strong>Écart minimal (min)</strong></span>
-        <span class="pace-inline"><input id="pace-gap" type="number" min="1" max="600" aria-label="Écart minimal en minutes"></span>
+        <span class="pace-inline"><input id="pace-gap" type="number" min="45" max="600" aria-label="Écart minimal en minutes (45 au moins)"></span>
       </div>
       <p id="pace-help" class="small"></p>
     </section>
@@ -511,15 +514,9 @@
       </section>
 
       <section class="help-card">
-        <h3>Abonnement</h3>
-        <p>Trois formules, avec <strong>7 jours d’essai gratuit</strong> pour commencer :</p>
-        <ul class="guide">
-          <li><strong>Mensuel : 2 $ par mois.</strong></li>
-          <li><strong>Annuel : 20 $ par an</strong> (4 $ d’économie).</li>
-          <li><strong>À vie : 50 $, payés une seule fois.</strong> Tu utilises KappGen Publish sans limite, pour toujours.</li>
-        </ul>
-        <p>Clique « S’abonner », puis choisis comment payer : <strong>carte bancaire ou PayPal</strong>, ou <strong>Mobile Money</strong>. La page de paiement sécurisé s’ouvre dans un onglet. <strong>Dès que le paiement est confirmé, l’extension se débloque toute seule</strong> et ton profil passe en Premium : rien à vérifier. Payer avant la fin ne fait perdre aucun jour : la nouvelle période s’ajoute à la suite.</p>
-        <p class="muted">Ton état (Gratuit ou Premium) est dans le menu de ton avatar, en haut à droite, avec le bouton « Abonnement ». Il faut un compte KappGen avec une adresse e-mail confirmée.</p>
+        <h3>Gratuit</h3>
+        <p>KappGen Publish est <strong>gratuit pour tout le monde</strong>, sans abonnement ni limite de fonctions. Il faut seulement un compte KappGen avec une adresse e-mail confirmée.</p>
+        <p class="muted">Les nouvelles versions arrivent toutes seules par le Chrome Web Store : rien à faire de ton côté.</p>
       </section>
 
       <section class="help-card">
