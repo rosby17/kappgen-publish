@@ -1493,16 +1493,17 @@ function groupsSaid(text, warn = false) {
 }
 // Réglages → « Rythme de publication » : automatique (KappGen décide), intervalle régulier, aléatoire comme une personne, ou dès que c'est prêt.
 const PACE_HELP = {
-  auto: 'KappGen choisit pour toi : environ 8 publications par jour, de 8 h à 22 h, à des heures irrégulières qui changent chaque jour, jamais à intervalle fixe.',
-  interval: 'Une publication à intervalle fixe, uniquement pendant la plage horaire choisie.',
-  random: 'Tu choisis combien de publications par jour : KappGen tire des heures différentes chaque jour dans la plage horaire, avec un écart minimal entre deux.',
-  asap: 'Chaque publication part dès qu’elle est prête, sans attente (comportement d’origine).',
+  auto: 'KappGen choisit pour toi : environ 8 publications par jour, de 8 h à 22 h, à des heures irrégulières qui changent chaque jour, 45 min au moins entre deux.',
+  interval: 'Conseillé : une publication toutes les 45 min (ou plus), uniquement pendant la plage horaire choisie ; 30 par jour au plus.',
+  random: 'Tu choisis combien de publications par jour (30 au plus) : KappGen tire des heures différentes chaque jour dans la plage horaire, 45 min au moins entre deux.',
+  asap: 'Chaque publication part dès qu’elle est prête, sans attente ; 30 publications automatiques par jour au plus.',
 };
 async function renderPace() {
   const pace = KappPace.normalize((await settings()).pace);
   const raw = (await settings()).pace || {};
   const set = (id, value) => { if (document.activeElement !== $(id)) $(id).value = value; };
   set('pace-mode', pace.mode);
+  for (const b of document.querySelectorAll('[data-pace]')) b.setAttribute('aria-checked', String(b.dataset.pace === pace.mode));
   const hours = pace.intervalMinutes % 60 === 0 && pace.intervalMinutes >= 60;
   set('pace-interval-n', hours ? pace.intervalMinutes / 60 : pace.intervalMinutes);
   set('pace-interval-unit', hours ? '60' : '1');
@@ -1527,6 +1528,9 @@ async function savePace() {
   current.pace = { ...values, mode };      // « Automatique » : les valeurs de la personne sont gardées, l'extension en choisit d'autres tant que ce mode est actif
   await chrome.storage.local.set({ folder: current });
   await renderPace();
+}
+for (const b of document.querySelectorAll('[data-pace]')) {
+  b.addEventListener('click', () => { $('pace-mode').value = b.dataset.pace; savePace().catch(() => {}); });
 }
 for (const id of ['pace-mode', 'pace-interval-n', 'pace-interval-unit', 'pace-per-day', 'pace-from', 'pace-to', 'pace-gap']) $(id).addEventListener('change', () => savePace().catch(() => {}));
 renderPace().catch(() => {});
@@ -2552,17 +2556,12 @@ async function renderSubscription({ fresh = false } = {}) {
         : waitingPayment ? 'En attente de ton paiement… KappGen Publish se débloque tout seul dès qu’il est confirmé.'
           : 'Choisis ta formule. Paiement sécurisé par carte, PayPal ou Mobile Money.';
   const until = state.expires_at ? new Date(state.expires_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '';
-  $('account-plan').textContent = !active ? 'Gratuit · aucun abonnement actif'
-    : forever ? 'Premium · accès à vie'
-      : state.kind === 'trial' ? `Essai gratuit : ${state.days_left} jour(s) restant(s)` : `Premium · jusqu’au ${until}`;
-  $('account-plan').classList.toggle('free', !active);
-  $('renew').hidden = active && forever;          // accès à vie : plus rien à payer, pas de bouton « Abonnement »
+  // KappGen est gratuit pour tout le monde (Roosevelt, 10/10) : plus de formule, de badge « Abonnement · N j » ni de bouton « Abonnement ».
+  $('account-plan').textContent = 'Gratuit · toutes les fonctions';
+  $('account-plan').classList.remove('free');
+  $('renew').hidden = true;
   if (active && waitingPayment) { waitingPayment = false; stopPaymentWatch(); }
-  // Small badge on the title line: the trial, or a subscription ending soon.
-  const pill = $('plan-pill');
-  pill.hidden = !(active && state.kind !== 'lifetime' && state.kind !== 'unlimited' && (state.kind === 'trial' || state.days_left <= 3));
-  pill.className = `plan-pill${state.days_left <= 1 ? ' urgent' : ''}`;
-  pill.textContent = state.kind === 'trial' ? `Essai gratuit · ${state.days_left} j` : `Abonnement · ${state.days_left} j`;
+  $('plan-pill').hidden = true;
   $('plan-banner').hidden = true;
   return active;
 }

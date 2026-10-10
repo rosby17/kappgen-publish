@@ -2542,11 +2542,10 @@ async function commentNext() {
 }
 
 // ---------------------------------------------------------------- rythme de publication (Réglages → « Rythme de publication »)
-// Global to all networks: as soon as ready (default), at a regular interval, or at irregular times like a person (lib/rythme.js).
+// Global to all networks: at a regular interval (default, every 45 min), at irregular times like a person, or as soon as ready ; 30 a day at most (lib/rythme.js).
 // Each automatic send on a network counts as one publication. Manual sends are never held back or counted.
 async function paceGate(settings) {
   const pace = KappPace.normalize(settings && settings.pace);
-  if (pace.mode === 'asap') { await chrome.storage.local.remove('paceNext'); return { ok: true }; }
   const { paceLog, pacePlans } = await chrome.storage.local.get(['paceLog', 'pacePlans']);
   const plans = pacePlans || {};
   const planFor = (dayStart) => {

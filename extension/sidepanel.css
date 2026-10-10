@@ -811,3 +811,15 @@ details.tab-settings > summary { container-type: inline-size; }
 }
 
 li.row .when span.late { color: #d93025; font-weight: 600; }
+
+/* Rythme de publication : le choix en cartes intégrées au panneau (plus de liste déroulante du système) */
+.pace-titre { margin: 4px 0 8px; font-size: 12.5px; }
+.pace-choix { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 6px; }
+.pace-choix button { display: grid; gap: 3px; text-align: left; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  background: rgba(var(--ink), 0.04); border: 1px solid var(--border); color: var(--text); transition: border-color 0.15s, background 0.15s; }
+.pace-choix button:hover { border-color: rgba(var(--ink), 0.25); }
+.pace-choix button b { font-size: 12.5px; font-weight: 650; }
+.pace-choix button small { font-size: 11px; color: var(--muted); line-height: 1.35; }
+.pace-choix button[aria-checked="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.pace-choix button[aria-checked="true"] small { color: var(--text); opacity: 0.8; }
+@media (max-width: 340px) { .pace-choix { grid-template-columns: 1fr; } }
