@@ -29,20 +29,22 @@ Range chaque contenu avec son texte, sa miniature ou sa vidéo. L’extension d�
 • Une publication à la fois et suivi local contre les doublons
 • Pause globale et erreurs explicites, sans relance automatique d’un échec
 
-Les fichiers déjà présents lors du choix du dossier ne sont pas publiés automatiquement. Un compte KappGen avec un essai ou un abonnement actif est nécessaire. Chrome 116 minimum.
+Les fichiers déjà présents lors du choix du dossier ne sont pas publiés automatiquement. Un compte KappGen (gratuit) est nécessaire. Chrome 116 minimum.
 
-Mode d’emploi : https://github.com/rosby17/kappgen-publish
+Mode d’emploi : https://kappgen.com/extension
 ```
 
 Catégorie : Productivité.
 
 Langue principale : français.
 
-Site web : `https://github.com/rosby17/kappgen-publish`
+Site web : `https://kappgen.com/extension`
 
-Assistance : `https://github.com/rosby17/kappgen-publish/issues`
+Assistance : `https://kappgen.com/extension#aide`
 
-Politique de confidentialité : `https://github.com/rosby17/kappgen-publish/blob/main/PRIVACY.md`
+Politique de confidentialité : `https://kappgen.com/extension/confidentialite`
+
+(Depuis le 11/10/2026, le dépôt du code est privé : aucun lien de la fiche ne doit pointer vers GitHub.)
 
 Assets disponibles dans `store/` : icône 128 × 128, vignette 440 × 280 et vignette 1400 × 560. Les captures du panneau doivent masquer toute adresse e-mail, tout chemin local et tout identifiant de compte.
 
