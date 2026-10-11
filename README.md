@@ -4,17 +4,9 @@ KappGen Publish est une extension Chrome Manifest V3 qui publie des vidéos et d
 
 ## Installation
 
-Prérequis : Google Chrome 116 ou plus récent et un compte KappGen avec un essai ou un abonnement actif.
+Prérequis : Google Chrome 116 ou plus récent et un compte KappGen (gratuit).
 
-1. Télécharge [la dernière archive](https://github.com/rosby17/kappgen-publish/releases/latest/download/kappgen-publish.zip).
-2. Vérifie facultativement son empreinte avec le fichier `.sha256` publié à côté.
-3. Décompresse l’archive dans un emplacement permanent.
-4. Ouvre `chrome://extensions`, active le mode développeur, puis choisis « Charger l’extension non empaquetée ».
-5. Ouvre KappGen Publish, connecte-toi et sélectionne le dossier principal. Dans la boîte de dialogue Chrome, choisis « Autoriser à chaque visite ».
-
-Les installateurs guidés sont disponibles sur la [page d’installation](https://app.kappgen.com/extension) du site KappGen. Ils vérifient l’empreinte SHA-256 et remplacent une version existante de manière atomique.
-
-> L’édition Chrome Web Store et l’édition installée manuellement peuvent avoir des identifiants différents. Le stockage Chrome et les autorisations de dossiers ne migrent pas automatiquement entre ces éditions. N’active pas les automatisations dans les deux en même temps.
+Installe KappGen Publish depuis le [Chrome Web Store](https://chromewebstore.google.com/detail/kappgen-publish/fdhnddichmknbbhbmgkgodnkclejokpi) : Chrome la met ensuite à jour tout seul. Mode d’emploi et aide : [kappgen.com/extension](https://kappgen.com/extension).
 
 ## Organisation minimale
 
