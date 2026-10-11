@@ -1604,9 +1604,18 @@ async function publishXPost(postPath, { auto = false } = {}) {
 
 // LinkedIn's « Commencer un post » window, in the LinkedIn tab already open if there is one.
 const LINKEDIN_COMPOSE = 'https://www.linkedin.com/feed/?shareActive=true';
-async function openLinkedin({ reuse = true } = {}) {
-  const tab = reuse ? await reuseOrOpen(linkedinTabToReuse, LINKEDIN_COMPOSE)
-    : await createWorkTab(LINKEDIN_COMPOSE);
+// Post AS a company Page (KappGen « page » = https://www.linkedin.com/company/<page>/…): its admin view opens the
+// « Commencer un post » window in the Page's name. Any other link (a personal profile) posts from the feed, as the person.
+function linkedinComposeUrl(page) {
+  const m = /^https:\/\/(?:[a-z]{2,3}\.|www\.)?linkedin\.com\/company\/([A-Za-z0-9_%.-]{1,120})(?:[/?#]|$)/i.exec(String(page || '').trim());
+  return m ? `https://www.linkedin.com/company/${m[1]}/admin/page-posts/published/?share=true` : LINKEDIN_COMPOSE;
+}
+async function openLinkedin({ reuse = true, page = '' } = {}) {
+  const compose = linkedinComposeUrl(page);
+  const asPage = compose !== LINKEDIN_COMPOSE;
+  // A Page post never reuses a tab left on the person's feed (it would post as the person).
+  const tab = reuse && !asPage ? await reuseOrOpen(linkedinTabToReuse, compose)
+    : await createWorkTab(compose);
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   const start = Date.now();
@@ -1617,9 +1626,9 @@ async function openLinkedin({ reuse = true } = {}) {
     const url = current.url || current.pendingUrl || '';
     if (/\/(login|signup|checkpoint|authwall|uas\/login)/.test(url)) throw new Error('Connecte-toi d’abord à LinkedIn dans ce navigateur, puis relance.');
     if (url.startsWith('https://www.linkedin.com/') && current.status === 'complete') {
-      if (!asked && !/shareActive=true/.test(url)) {
+      if (!asked && !(asPage ? /\/company\/[^/]+\/admin\//.test(url) : /shareActive=true/.test(url))) {
         asked = true;
-        await chrome.tabs.update(tab.id, { url: LINKEDIN_COMPOSE });
+        await chrome.tabs.update(tab.id, { url: compose });
         await sleep(2500);
         continue;
       }
@@ -1632,9 +1641,9 @@ async function openLinkedin({ reuse = true } = {}) {
   throw new Error('LinkedIn ne s’est pas ouvert.');
 }
 
-async function sendToLinkedin({ text, mediaPath, title, channel, path, auto = false }) {
+async function sendToLinkedin({ text, mediaPath, title, channel, path, auto = false, page = '' }) {
   await chrome.storage.session.set({ job: { running: true, source: 'linkedin', kind: 'linkedin', path, title, channel, message: 'Ouverture de LinkedIn…', startedAt: Date.now() } });
-  const tabId = await openLinkedin({ reuse: !auto });
+  const tabId = await openLinkedin({ reuse: !auto, page });
   try { await whileShown(tabId, async () => {
     await stepIn(tabId, '__kappgenLinkedin', 'openComposer');
     await setJob({ message: 'Texte du post…' });
@@ -1677,7 +1686,8 @@ async function publishLinkedinPost(postPath, { auto = false } = {}) {
   try {
     requireValidPost(post);
     await sendToLinkedin({ text: post.text.slice(0, 3000), mediaPath: post.video_path || post.image_path || null,
-      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath, auto });
+      title: post.text.split('\n')[0].slice(0, 80) || 'Post', channel: post.channel_name, path: postPath, auto,
+      page: post.page || '' });
     await folder('markPost', { path: postPath, patch: { linkedin: { statut: 'publie', published_at: new Date().toISOString() } } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publié sur LinkedIn.' });
   } catch (error) {
