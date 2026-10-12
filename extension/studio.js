@@ -76,7 +76,7 @@
   // "Ad suitability" questionnaire) before Visibility. mode comes from the
   // channel settings: "on", "off", or "manual" (the creator finishes it).
   // Studio's left-hand menu (Dashboard, Content, Earn…) is never a choice.
-  const SIDE_MENU = 'ytcp-navigation-drawer, tp-yt-app-drawer, #navigation-drawer, nav';
+  const SIDE_MENU = 'ytcp-navigation-drawer, tp-yt-app-drawer, ytcp-app-sidebar, #navigation-drawer, #navigation, nav, [role="navigation"]';
   async function monetizationStep(mode) {
     const dlg = dialog() || document.body;
     const onStep = X('monetizationStep').test(textOf(dlg));
@@ -91,8 +91,13 @@
     if (!trigger) throw new Error('YouTube Studio : menu « Monétisation » introuvable.');
     // Studio's dropdown opens on a pointer press, and its choices are not always
     // radio buttons ("On" / "Off" can be plain menu items with a description).
-    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) trigger.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-    click(trigger);
+    // Opening: pointer press, then a click on the inner parts of the trigger, then the keyboard (Studio changes its
+    // dropdowns often; one way or another opens it).
+    const ouvertures = [
+      () => { for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) trigger.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); click(trigger); },
+      () => { const inner = trigger.querySelector('#right-icon, #container, #label, .dropdown-trigger-text, tp-yt-iron-icon') || trigger; click(inner); },
+      () => { if (trigger.focus) trigger.focus(); for (const key of ['Enter', ' ', 'ArrowDown']) trigger.dispatchEvent(new KeyboardEvent('keydown', { key, code: key === ' ' ? 'Space' : key, bubbles: true, cancelable: true })); },
+    ];
     const wanted = X(mode === 'on' ? 'monetizationOn' : 'monetizationOff');
     const CHOICES = S('monetizationChoices');
     const findChoice = () => {
@@ -102,10 +107,15 @@
       // the innermost match is the item itself, not a list that contains it
       return hits.find((n) => !hits.some((o) => o !== n && n.contains(o))) || null;
     };
-    let option;
-    try {
-      option = await waitFor(findChoice, { timeout: 15000, what: 'le choix de monétisation' });
-    } catch (error) {
+    let option = null;
+    for (const ouvrir of ouvertures) {
+      ouvrir();
+      option = await waitFor(findChoice, { timeout: 5000, what: 'le choix de monétisation' }).catch(() => null);
+      if (option) break;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // menu à moitié ouvert : refermé avant l'essai suivant
+      await sleep(400);
+    }
+    if (!option) {
       const seen = [...new Set([...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && !n.closest(SIDE_MENU)).map(textOf).filter((t) => t && t.length < 80))].slice(0, 8);
       // Which element was pressed, and what Studio opened above the dialog:
       // enough to see which tag the options really use.
@@ -114,7 +124,7 @@
       const overlays = [...document.querySelectorAll('tp-yt-iron-dropdown, ytcp-text-menu, tp-yt-paper-listbox, [role="listbox"], [role="menu"], ytcp-paper-dialog')]
         .filter((n) => visible(n) && !n.closest(SIDE_MENU)).slice(0, 3)
         .map((n) => `${tag(n)} > ${[...n.querySelectorAll('*')].filter((c) => visible(c) && !c.children.length && textOf(c)).slice(0, 5).map((c) => `${tag(c)} « ${textOf(c).slice(0, 25)} »`).join(', ')}`);
-      throw new Error(`${error.message} Appuyé sur : ${pressed}. Choix visibles : ${seen.join(' | ') || 'aucun'}. Menus ouverts : ${overlays.join(' ;; ') || 'aucun'}.`);
+      throw new Error(`YouTube Studio : le choix de monétisation introuvable (menu ouvert de 3 façons). Appuyé sur : ${pressed}. Choix visibles : ${seen.join(' | ') || 'aucun'}. Menus ouverts : ${overlays.join(' ;; ') || 'aucun'}.`);
     }
     click(option);
     await sleep(600);

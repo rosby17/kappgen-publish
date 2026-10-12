@@ -22,6 +22,7 @@
 importScripts('lib/schedule.js');
 importScripts('lib/rythme.js');
 importScripts('lib/facebook-flow.js');
+importScripts('lib/studio-onglet.js');
 
 // The user's KappGen account (session cookie of kappgen.com). The local
 // Docker version is chosen in the panel's Help tab (http://localhost:8080).
@@ -588,22 +589,51 @@ async function createWorkTab(url) {
   await setOwnTab(tab.id, true);
   return tab;
 }
+// A YouTube Studio tab that is still sending a video file must stay open: closing it cuts the upload and leaves
+// a broken draft in Studio (« Mise en ligne interrompue — Reprendre l'importation »). Checked without the job
+// (a failed or cancelled publication still has its upload running in the tab). Decision: lib/studio-onglet.js.
+const KEEP_UPLOADING_MAX = KappStudioOnglet.GARDE_MAX_MS;
+async function uploadingInTab(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!/^https:\/\/studio\.youtube\.com\//.test(tab.url || '')) return false;
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const progress = [...document.querySelectorAll('ytcp-video-upload-progress, ytcp-uploads-dialog .progress-label, ytcp-uploads-dialog [class*="progress"]')]
+          .map((n) => (n.innerText || n.textContent || '').trim()).join(' ');
+        let stillUploading = null;
+        try { if (window.__kappgen && window.__kappgen.stillUploading) stillUploading = !!window.__kappgen.stillUploading(); } catch (e) { /* page en cours de rechargement */ }
+        return { progress, stillUploading, body: (document.body.innerText || '').slice(0, 100000) };
+      },
+    });
+    return KappStudioOnglet.envoiEnCours(result || {});
+  } catch (error) {
+    return false;
+  }
+}
 // Closes the tabs opened by the extension that nothing uses any more (older than minAge, not the one a publication is working in).
+// A Studio tab still uploading is kept (up to 8 h) and looked at again in 3 minutes.
 async function sweepOwnTabs({ minAge = 60000 } = {}) {
   const [own, borrowed] = [await ownTabs(), await borrowedTabs()];
+  let kept = false;
   for (const [id, since] of Object.entries(own)) {
     const tabId = Number(id);
     if (tabId === workTabId || borrowed.has(tabId) || Date.now() - since < minAge) continue;
+    if (Date.now() - since < KEEP_UPLOADING_MAX && await uploadingInTab(tabId)) { kept = true; continue; }
     await chrome.tabs.remove(tabId).catch(() => {});
     await setOwnTab(tabId, false);
   }
+  if (kept) chrome.alarms.create('onglets', { delayInMinutes: 3 });
 }
 
 // Closes a Studio tab the extension opened by itself (automatic uploads),
 // leaves the creator's own tab open.
-async function closeStudioTab(tabId) {
+async function closeStudioTab(tabId, { evenUploading = false } = {}) {
   if (workTabId === tabId) workTabId = null;
   if ((await borrowedTabs()).has(tabId)) return;
+  // Still sending the file: left open (the sweep closes it once the upload is over).
+  if (!evenUploading && await uploadingInTab(tabId)) { chrome.alarms.create('onglets', { delayInMinutes: 3 }); return; }
   await chrome.tabs.remove(tabId).catch(() => {});
   await setOwnTab(tabId, false).catch(() => {});
 }
@@ -2726,6 +2756,7 @@ async function ensureAlarms() {
 ensureAlarms().catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'heartbeat') heartbeat();
+  if (alarm.name === 'onglets') sweepOwnTabs({ minAge: 15000 }).catch(() => {});
   if (alarm.name === 'auto' || alarm.name === 'due' || alarm.name === 'comment') autoTick().catch(() => {});
 });
 // Clicking the icon opens the side panel: everything happens there.
