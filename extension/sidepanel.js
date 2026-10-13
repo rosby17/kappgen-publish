@@ -814,7 +814,13 @@ function sentItem(video) {
     });
     resend.title = 'Renvoyer la vidéo sur YouTube';
     resend.dataset.publish = '1';
-    actions.push(resend);
+    // Finished by hand in Studio (retour client du 12/10) : it leaves « Échecs » and counts as published.
+    const finished = button('Je l’ai terminée dans Studio', 'btn secondary', async () => {
+      const data = await act(item, finished, { type: 'finishedYoutube', path: video.relative_path, youtubeId: video.youtube_id, hash: video.hash });
+      if (data) { item.say('busy', 'Notée comme publiée sur YouTube.'); setTimeout(renderFolder, 1000); }
+    });
+    finished.title = 'Tu as terminé la mise en ligne toi-même dans YouTube Studio : la vidéo passe dans « Déjà publiés »';
+    actions.push(finished, resend);
   } else {
     if (!video.has_content) status = pill('neutral', 'Aucune fiche ni miniature dans le dossier.');
     else if (video.applied_hash === video.hash) status = pill('ok', 'À jour sur YouTube.');
@@ -1517,9 +1523,23 @@ async function renderPace() {
   $('pace-window-row').hidden = !['interval', 'random'].includes(pace.mode);
   $('pace-help').textContent = PACE_HELP[pace.mode];
 }
-async function savePace() {
+// « Enregistré » (or why not) under the rhythm: the choice is kept as soon as it changes, the button only confirms it.
+function paceSaid(text, error = false) {
+  const status = $('pace-status');
+  status.textContent = text;
+  status.classList.toggle('error', error);
+  status.hidden = false;
+  clearTimeout(paceSaid.timer);
+  if (!error) paceSaid.timer = setTimeout(() => { status.hidden = true; }, 5000);
+}
+async function savePace({ said = true } = {}) {
   const current = await settings();
   const mode = $('pace-mode').value;
+  // A window that ends before it starts would fall back to 8 h – 22 h in silence: say it and keep what was typed.
+  if (['interval', 'random'].includes(mode) && $('pace-from').value && $('pace-to').value && !KappPace.windowOk($('pace-from').value, $('pace-to').value)) {
+    paceSaid('L’heure de fin doit venir après l’heure de début (00:00 = minuit). Rien n’a été changé.', true);
+    return;
+  }
   const unit = Number($('pace-interval-unit').value) || 1;
   const values = KappPace.normalize({
     mode: mode === 'auto' ? 'random' : mode, intervalMinutes: (Number($('pace-interval-n').value) || 1) * unit, perDay: $('pace-per-day').value,
@@ -1528,7 +1548,9 @@ async function savePace() {
   current.pace = { ...values, mode };      // « Automatique » : les valeurs de la personne sont gardées, l'extension en choisit d'autres tant que ce mode est actif
   await chrome.storage.local.set({ folder: current });
   await renderPace();
+  if (said) paceSaid(['interval', 'random'].includes(mode) ? `Enregistré : entre ${values.from} et ${values.to === '00:00' ? 'minuit' : values.to}.` : 'Enregistré.');
 }
+$('pace-save').addEventListener('click', () => savePace().catch((error) => paceSaid(String(error.message || error), true)));
 for (const b of document.querySelectorAll('[data-pace]')) {
   b.addEventListener('click', () => { $('pace-mode').value = b.dataset.pace; savePace().catch(() => {}); });
 }

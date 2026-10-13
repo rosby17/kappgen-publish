@@ -77,15 +77,38 @@
   // channel settings: "on", "off", or "manual" (the creator finishes it).
   // Studio's left-hand menu (Dashboard, Content, Earn…) is never a choice.
   const SIDE_MENU = 'ytcp-navigation-drawer, tp-yt-app-drawer, ytcp-app-sidebar, #navigation-drawer, #navigation, nav, [role="navigation"]';
-  async function monetizationStep(mode) {
+  // Choices only the creator can make (menu the extension cannot open, « manual » mode,
+  // ad questionnaire): a banner on Studio says what to do, chooseVisibility returns
+  // { attente } and the background worker calls again (waitPerson) until it is done.
+  const BANNER_ID = 'kappgen-attente-choix';
+  function showBanner(text) {
+    let banner = document.getElementById(BANNER_ID);
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = BANNER_ID;
+      banner.setAttribute('role', 'status');
+      banner.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483647;max-width:560px;'
+        + 'padding:12px 16px;border-radius:12px;background:#0b5cad;color:#fff;font:500 14px/1.45 Roboto,Arial,sans-serif;'
+        + 'box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:none';
+      document.documentElement.append(banner);
+    }
+    banner.textContent = text;
+  }
+  const hideBanner = () => { const b = document.getElementById(BANNER_ID); if (b) b.remove(); };
+  const PERSON = 'personne';
+  let lastMonetizationDetail = '';
+
+  async function monetizationStep(mode, waitPerson = false) {
     const dlg = dialog() || document.body;
     const onStep = X('monetizationStep').test(textOf(dlg));
     const SELECT = X('select');
     const section = document.querySelector(S('monetizationSection'));
     const dropdown = findByText(S('monetizationDropdown'), SELECT);
     if (!dropdown || !(onStep || section)) return false;
-    if (mode !== 'on' && mode !== 'off') {
-      throw new Error('Chaîne monétisée : choisis « Monétisation » pour cette chaîne dans l’onglet Chaînes de KappGen, ou termine l’envoi dans l’onglet YouTube Studio resté ouvert.');
+    // Already waiting for the creator: never touch the menu they may be using.
+    if (waitPerson || (mode !== 'on' && mode !== 'off')) {
+      showBanner('KappGen Publish attend ton choix : dans « Monétisation », choisis Activée (ou Désactivée) puis OK. La publication continue toute seule ensuite.');
+      return PERSON;
     }
     const trigger = dropdown || (section && section.querySelector(S('monetizationTrigger')));
     if (!trigger) throw new Error('YouTube Studio : menu « Monétisation » introuvable.');
@@ -124,7 +147,10 @@
       const overlays = [...document.querySelectorAll('tp-yt-iron-dropdown, ytcp-text-menu, tp-yt-paper-listbox, [role="listbox"], [role="menu"], ytcp-paper-dialog')]
         .filter((n) => visible(n) && !n.closest(SIDE_MENU)).slice(0, 3)
         .map((n) => `${tag(n)} > ${[...n.querySelectorAll('*')].filter((c) => visible(c) && !c.children.length && textOf(c)).slice(0, 5).map((c) => `${tag(c)} « ${textOf(c).slice(0, 25)} »`).join(', ')}`);
-      throw new Error(`YouTube Studio : le choix de monétisation introuvable (menu ouvert de 3 façons). Appuyé sur : ${pressed}. Choix visibles : ${seen.join(' | ') || 'aucun'}. Menus ouverts : ${overlays.join(' ;; ') || 'aucun'}.`);
+      // Not a dead end: the creator picks it by hand and the upload goes on.
+      lastMonetizationDetail = `Appuyé sur : ${pressed}. Choix visibles : ${seen.join(' | ') || 'aucun'}. Menus ouverts : ${overlays.join(' ;; ') || 'aucun'}.`;
+      showBanner('KappGen Publish n’a pas pu ouvrir le menu « Monétisation » : choisis Activée (ou Désactivée) puis OK. La publication continue toute seule ensuite.');
+      return PERSON;
     }
     click(option);
     await sleep(600);
@@ -171,17 +197,28 @@
     return (row && row.querySelector(S('adCheckbox'))) || row || label;
   }
 
-  async function adSuitabilityStep(mode) {
+  const nextEnabled = () => {
+    const next = document.querySelector(S('nextButton'));
+    return !!next && visible(next) && !next.hasAttribute('disabled') && next.getAttribute('aria-disabled') !== 'true';
+  };
+  const AD_BANNER = 'KappGen Publish attend ton choix : réponds au questionnaire « Éligibilité aux annonces » puis « Envoyer la classification ». La publication continue toute seule ensuite.';
+  async function adSuitabilityStep(mode, waitPerson = false) {
+    // Waiting for the creator: once Studio lets « Next » go, the questionnaire is answered.
+    if (waitPerson) {
+      if (!adStepShown() || nextEnabled()) return false;
+      showBanner(AD_BANNER);
+      return PERSON;
+    }
     const none = findNone();
     if (!none) {
       if (!adStepShown()) return false;
-      const seen = [...(dialog() || document.body).querySelectorAll(S('adCheckbox') + ', label, yt-formatted-string')]
-        .filter(visible).map((n) => textOf(n).slice(0, 50)).filter(Boolean);
-      throw new Error('YouTube Studio : case « Aucun des éléments ci-dessus » de l’étape « Éligibilité aux annonces » introuvable. Cases vues : '
-        + ([...new Set(seen)].slice(-12).join(' | ') || 'aucune') + '.');
+      if (nextEnabled()) return false;
+      showBanner(AD_BANNER);
+      return PERSON;
     }
     if (mode !== 'on') {
-      throw new Error('YouTube Studio demande le questionnaire « Adéquation publicitaire » : termine-le dans l’onglet Studio resté ouvert.');
+      showBanner(AD_BANNER);
+      return PERSON;
     }
     const SUBMIT = /^(Submit rating|Envoyer (la note|la classification|l['’][ée]valuation)|Soumettre.*|Valider.*|Enviar (clasificaci[oó]n|avalia[cç][aã]o)|Bewertung senden)$/i;
     const findSubmit = () => findByText(S('buttons'), X('adSubmit')) || findByText(S('buttons'), SUBMIT);
@@ -359,7 +396,7 @@
       return !!document.querySelector(S('thumbnailPicker'));
     },
 
-    async chooseVisibility({ visibility, monetization, scheduleAt }) {
+    async chooseVisibility({ visibility, monetization, scheduleAt, waitPerson = '' }) {
       const schedule = visibility === 'SCHEDULE' && scheduleAt;
       const name = ['PRIVATE', 'UNLISTED', 'PUBLIC'].includes(visibility) ? visibility : 'PRIVATE';
       // Details → Video elements → Checks → Visibility. "Next" stays
@@ -369,12 +406,19 @@
       while (Date.now() - start < 180000) {
         const radio = document.querySelector(S('visibilityRadio', { name }));
         if (visible(radio)) {
+          hideBanner();
           if (schedule) return scheduleFor(scheduleAt);
           click(radio);
           await sleep(800);
           return true;
         }
-        if (await monetizationStep(monetization) || await adSuitabilityStep(monetization)) continue;
+        const money = await monetizationStep(monetization, waitPerson === 'monetisation');
+        if (money === PERSON) return { attente: 'monetisation', detail: lastMonetizationDetail };
+        if (money) continue;
+        const ads = await adSuitabilityStep(monetization, waitPerson === 'annonces');
+        if (ads === PERSON) return { attente: 'annonces' };
+        if (ads) continue;
+        hideBanner();
         // Studio's info bubbles (« Learn more / Dismiss ») sit over the dialog
         // and keep it on « Details »: close them (never the dialog itself).
         const bubble = [...document.querySelectorAll('ytcp-uploads-dialog button, ytcp-uploads-dialog ytcp-button, ytcp-uploads-dialog [role="button"], tp-yt-paper-dialog button, tp-yt-paper-dialog [role="button"]')]

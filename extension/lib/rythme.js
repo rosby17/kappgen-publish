@@ -5,6 +5,7 @@
 //   random   : N publications par jour à des heures irrégulières, comme une personne (jamais à intervalle fixe)
 // Règles de Roosevelt (10/10) : par défaut, une publication toutes les 45 min (intervalle régulier) ; jamais moins de 45 min entre deux
 // publications automatiques (sauf « dès que c'est prêt ») ; jamais plus de 30 publications automatiques par jour, quel que soit le mode.
+// Fin de plage « 00:00 » = minuit, la fin de la journée (retour client du 12/10 : « entre 8 h et minuit » revenait à 22 h).
 // Chaque envoi sur un réseau compte pour une publication. Les fonctions sont pures (l'heure et le hasard sont passés en paramètres)
 // pour être testées sans navigateur.
 const KappPace = (() => {
@@ -19,6 +20,9 @@ const KappPace = (() => {
   };
   const validTime = (v, fallback) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')) ? String(v) : fallback);
 
+  // A window ends after it starts; « 00:00 » as the end is midnight (always after the start).
+  const windowOk = (from, to) => to === '00:00' || to > from;
+
   function normalize(raw) {
     const r = raw && typeof raw === 'object' ? raw : {};
     const p = {
@@ -29,7 +33,7 @@ const KappPace = (() => {
       to: validTime(r.to, DEFAULTS.to),
       minGapMinutes: clampInt(r.minGapMinutes, MIN_GAP, 600, DEFAULTS.minGapMinutes),
     };
-    if (p.to <= p.from) { p.from = DEFAULTS.from; p.to = DEFAULTS.to; }
+    if (!windowOk(p.from, p.to)) { p.from = DEFAULTS.from; p.to = DEFAULTS.to; }
     return p.mode === 'auto' ? { ...p, ...AUTO } : p;      // automatique : les réglages de la personne ne comptent pas, l'extension choisit
   }
 
@@ -39,6 +43,14 @@ const KappPace = (() => {
     d.setHours(h, m, 0, 0);
     return d.getTime();
   };
+  // End of the window: « 00:00 » is the midnight that ends the day (the next day's 00:00).
+  const endClock = (dayStart, hhmm) => {
+    if (hhmm !== '00:00') return atClock(dayStart, hhmm);
+    const d = new Date(dayStart);
+    d.setDate(d.getDate() + 1);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() - 1;
+  };
   const dayStartOf = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
   // The day's irregular times: the window is cut into perDay bands and one moment is drawn inside each (so the day is covered
@@ -46,7 +58,7 @@ const KappPace = (() => {
   function buildPlan(pace, dayStart, random = Math.random) {
     const p = normalize(pace);
     const from = atClock(dayStart, p.from);
-    const to = atClock(dayStart, p.to);
+    const to = endClock(dayStart, p.to);
     const band = (to - from) / p.perDay;
     const minGap = Math.min(p.minGapMinutes * 60000, band * 0.9);
     const times = [];
@@ -70,7 +82,7 @@ const KappPace = (() => {
     if (p.mode === 'asap') return doneToday >= MAX_PER_DAY ? { ok: false, next: tomorrow } : { ok: true };
     if (doneToday >= MAX_PER_DAY) return { ok: false, next: p.mode === 'interval' ? atClock(tomorrow, p.from) : plans(tomorrow)[0] };
     const start = atClock(today, p.from);
-    const end = atClock(today, p.to);
+    const end = endClock(today, p.to);
     const irregular = p.mode === 'random' || p.mode === 'auto';
     const nextDayStart = () => (irregular ? plans(tomorrow)[0] : atClock(tomorrow, p.from));
     if (now < start) return { ok: false, next: irregular ? Math.max(start, plans(today)[0]) : start };
@@ -88,7 +100,7 @@ const KappPace = (() => {
     return now >= next ? { ok: true } : { ok: false, next };
   }
 
-  const api = { MODES, DEFAULTS, AUTO, MIN_GAP, MAX_PER_DAY, normalize, buildPlan, gate, dayStartOf };
+  const api = { MODES, DEFAULTS, AUTO, MIN_GAP, MAX_PER_DAY, windowOk, normalize, buildPlan, gate, dayStartOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   return api;
 })();
