@@ -2957,7 +2957,33 @@ $('job-clear').addEventListener('click', async () => {
   renderJob(null);
 });
 
-$('version').textContent = `v${chrome.runtime.getManifest().version}`;
+// Version: a downloaded update shows « v1.21.17 → v1.21.18 » until it installs
+// itself (between two publications); a click checks the Chrome Web Store now.
+async function renderVersion(note) {
+  const current = chrome.runtime.getManifest().version;
+  const { updateWaiting, justUpdated } = await chrome.storage.local.get(['updateWaiting', 'justUpdated']);
+  const view = KappUpdate.label({ current, waiting: updateWaiting, justUpdated, now: Date.now() });
+  const node = $('version');
+  node.textContent = note || view.text;
+  node.title = view.title;
+  node.dataset.state = view.state;
+}
+renderVersion();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes.updateWaiting || changes.justUpdated)) renderVersion();
+});
+$('version').addEventListener('click', async () => {
+  renderVersion('Vérification…');
+  const reply = await send({ type: 'checkUpdate' });
+  const status = reply && reply.ok && reply.data ? reply.data.status : 'error';
+  const notes = {
+    no_update: 'À jour',
+    update_available: 'Nouvelle version : téléchargement…',
+    throttled: 'Déjà vérifié il y a peu',
+  };
+  renderVersion(notes[status] || 'Vérification impossible');
+  setTimeout(() => renderVersion(), 4000);
+});
 
 // One line under the title: is the automatic publishing running, when did it
 // last look, what is next, and on which clock (this computer's).
