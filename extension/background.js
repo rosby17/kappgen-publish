@@ -23,6 +23,7 @@ importScripts('lib/schedule.js');
 importScripts('lib/rythme.js');
 importScripts('lib/facebook-flow.js');
 importScripts('lib/studio-onglet.js');
+importScripts('lib/mise-a-jour.js');
 
 // The user's KappGen account (session cookie of kappgen.com). The local
 // Docker version is chosen in the panel's Help tab (http://localhost:8080).
@@ -103,6 +104,9 @@ async function setJob(patch) {
   // Every publication that ends (sent or failed) goes into the day's log,
   // told in one e-mail in the evening (no message for each one).
   if (job && job.running && patch.running === false && REPORTED_KINDS.has(job.kind)) await logDay(next).catch(() => {});
+
+  // A new version waiting for this publication to end installs a minute later (tabs swept first).
+  if (patch.running === false) chrome.alarms.create('maj', { delayInMinutes: 1 });
 }
 
 // ------------------------------------------------------- evening summary
@@ -2794,7 +2798,47 @@ async function ensureAlarms() {
   }
 })();
 ensureAlarms().catch(() => {});
+// ------------------------------------------------------- automatic updates
+// Chrome installs a downloaded version only when the extension is idle, and this
+// one never is: without help, users kept the old version until Chrome was closed.
+// Now it asks the Chrome Web Store every 3 h and restarts itself on the new
+// version between two publications. Decision: lib/mise-a-jour.js.
+async function applyUpdate() {
+  const { updateWaiting, pending } = await chrome.storage.local.get(['updateWaiting', 'pending']);
+  if (!updateWaiting) return;
+  // Already on that version (installed by a Chrome restart): nothing to do, and no reload loop.
+  if (updateWaiting.version === chrome.runtime.getManifest().version) { await chrome.storage.local.remove('updateWaiting'); return; }
+  const { job } = await chrome.storage.session.get('job');
+  const verdict = KappUpdate.canReload({ job, pending, now: Date.now() });
+  if (!verdict.ok) { chrome.alarms.create('maj', { delayInMinutes: KappUpdate.RETRY_MINUTES }); return; }
+  chrome.runtime.reload();
+}
+
+async function checkUpdate() {
+  const answer = await chrome.runtime.requestUpdateCheck().catch((error) => ({ status: 'error', error: String(error && error.message || error) }));
+  const result = { status: answer.status, version: answer.version || null, at: Date.now() };
+  await chrome.storage.local.set({ updateCheck: result });
+  return result;
+}
+
+chrome.runtime.onUpdateAvailable.addListener(async (details) => {
+  await chrome.storage.local.set({ updateWaiting: { version: details.version, since: Date.now() } });
+  applyUpdate().catch(() => {});
+});
+
+// The periodic check, created once: re-creating it on every service-worker wake
+// would push it back each time and it would never fire.
+chrome.alarms.get('verif-maj').then((alarm) => {
+  if (!alarm) chrome.alarms.create('verif-maj', { delayInMinutes: 5, periodInMinutes: KappUpdate.CHECK_MINUTES });
+}).catch(() => {});
+// A version downloaded before a restart of the service worker installs as soon as possible.
+chrome.storage.local.get('updateWaiting').then(({ updateWaiting }) => {
+  if (updateWaiting && updateWaiting.version !== chrome.runtime.getManifest().version) chrome.alarms.create('maj', { delayInMinutes: 1 });
+}).catch(() => {});
+
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'maj') applyUpdate().catch(() => {});
+  if (alarm.name === 'verif-maj') checkUpdate().catch(() => {});
   if (alarm.name === 'heartbeat') heartbeat();
   if (alarm.name === 'onglets') sweepOwnTabs({ minAge: 15000 }).catch(() => {});
   if (alarm.name === 'auto' || alarm.name === 'due' || alarm.name === 'comment') autoTick().catch(() => {});
@@ -2818,7 +2862,14 @@ chrome.notifications.onClicked.addListener(async (id) => {
   await askAccess({ force: true }).catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => { heartbeat(); resume(); });
-chrome.runtime.onInstalled.addListener(() => { heartbeat(); resume(); closeOldKeeper(); });
+chrome.runtime.onInstalled.addListener((details) => {
+  heartbeat(); resume(); closeOldKeeper();
+  if (details && details.reason === 'update') {
+    const version = chrome.runtime.getManifest().version;
+    chrome.storage.local.remove('updateWaiting').catch(() => {});
+    if (details.previousVersion !== version) chrome.storage.local.set({ justUpdated: { version, from: details.previousVersion || null, at: Date.now() } }).catch(() => {});
+  }
+});
 resume(); // service worker restarted while an upload was being followed
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -2833,6 +2884,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     status: () => api('/studio-upload/status'),
     queue: async () => (await isLocalApp() ? api('/studio-upload/queue') : { videos: [], host_storage_configured: false }),
     folderQueue: () => folderQueue(),
+    // « Vérifier les mises à jour » (clic sur le numéro de version dans le panneau).
+    checkUpdate: () => checkUpdate(),
     folderMark: () => folder('mark', { path: message.path, status: message.status }),
     channelVideos: () => channelVideos(message.channelId),
     facebookPosts: () => postsList(),
