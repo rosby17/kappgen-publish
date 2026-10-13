@@ -823,3 +823,7 @@ li.row .when span.late { color: #d93025; font-weight: 600; }
 .pace-choix button[aria-checked="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .pace-choix button[aria-checked="true"] small { color: var(--text); opacity: 0.8; }
 @media (max-width: 340px) { .pace-choix { grid-template-columns: 1fr; } }
+
+/* Rythme de publication : « Enregistrer » et ce qui a été gardé */
+.pace-save { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.pace-save .status { margin: 0; }

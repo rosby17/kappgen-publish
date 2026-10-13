@@ -80,3 +80,18 @@ test('automatique : l’extension décide (8 par jour, 8 h – 22 h, irrégulier
   assert.equal(pace.gate(n, at(6), [], plans).ok, false);
   assert.deepEqual(pace.gate(n, plans(day)[0] + 1000, [], plans), { ok: true });
 });
+
+test('plage « entre 8 h et minuit » : 00:00 en fin de plage est gardé (retour client du 12/10)', () => {
+  const p = pace.normalize({ mode: 'interval', from: '08:00', to: '00:00' });
+  assert.equal(p.from, '08:00');
+  assert.equal(p.to, '00:00');
+  assert.deepEqual(pace.gate(p, at(23, 30), [at(22, 30)], () => []), { ok: true });       // 23 h 30 : encore dans la plage
+  assert.equal(pace.gate(p, at(7), [], () => []).next, at(8));
+  const plan = pace.buildPlan({ mode: 'random', perDay: 8, from: '16:00', to: '00:00' }, day, seeded(7));
+  assert.equal(plan.length, 8);
+  assert.ok(plan.every((t) => t >= at(16) && t < at(24)));
+  assert.ok(plan[plan.length - 1] > at(22));                                              // la fin de soirée sert vraiment
+  // une vraie plage à l'envers reste refusée
+  assert.equal(pace.windowOk('22:00', '08:00'), false);
+  assert.equal(pace.normalize({ mode: 'interval', from: '22:00', to: '08:00' }).to, '22:00');
+});

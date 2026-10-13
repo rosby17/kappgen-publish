@@ -435,13 +435,17 @@
       </div>
       <div class="set-row" id="pace-window-row" hidden>
         <span class="set-text"><strong>Entre</strong></span>
-        <span class="pace-inline"><input id="pace-from" type="time" aria-label="De"> et <input id="pace-to" type="time" aria-label="À"></span>
+        <span class="pace-inline"><input id="pace-from" type="time" aria-label="De"> et <input id="pace-to" type="time" aria-label="À (00:00 = minuit)" title="00:00 = minuit"></span>
       </div>
       <div class="set-row" id="pace-gap-row" hidden>
         <span class="set-text"><strong>Écart minimal (min)</strong></span>
         <span class="pace-inline"><input id="pace-gap" type="number" min="45" max="600" aria-label="Écart minimal en minutes (45 au moins)"></span>
       </div>
       <p id="pace-help" class="small"></p>
+      <div class="pace-save">
+        <button type="button" id="pace-save" class="btn secondary">Enregistrer</button>
+        <span id="pace-status" class="status small" role="status" aria-live="polite" hidden></span>
+      </div>
     </section>
     <section class="card catchup-card" id="set-catchup">
       <div class="set-row" id="catchup-row">

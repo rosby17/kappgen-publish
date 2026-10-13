@@ -977,7 +977,7 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
       });
       await step(tabId, 'fillDetails', { title: `${video.title} — Short`, description: video.description });
       if (video.tags && video.tags.length) await step(tabId, 'fillTags', { tags: video.tags }).catch(() => {});
-      await step(tabId, 'chooseVisibility', { visibility: shortVisibility, monetization });
+      await chooseVisibilityStep(tabId, { visibility: shortVisibility, monetization });
     });
     return await finishUpload(job);
   } catch (error) {
@@ -1016,6 +1016,46 @@ async function publishShortOnly(relativePath, { auto = false } = {}) {
     if (video && attempted) await folder('mark', { path: relativePath, status: 'published', data: { shortError: message } }).catch(() => {});
     await setJob({ running: false, done: false, error: message, message });
   }
+}
+
+// Studio sometimes needs a choice only the creator can make (monetization menu
+// the extension cannot open, « manual » monetization, ad questionnaire): the
+// upload waits for it (Studio tab in front, a notification, a banner on Studio)
+// and goes on by itself once it is made, instead of stopping as a failure.
+const PERSON_WAIT_MS = 20 * 60000;
+const PERSON_NOTICE = 'kappgen-studio-choix';
+const PERSON_WHAT = {
+  monetisation: 'la monétisation (Activée ou Désactivée, puis OK)',
+  annonces: 'le questionnaire « Éligibilité aux annonces » (puis « Envoyer la classification »)',
+};
+async function chooseVisibilityStep(tabId, args) {
+  let result = await step(tabId, 'chooseVisibility', args);
+  const start = Date.now();
+  let asked = '';
+  while (result && result.attente) {
+    const what = PERSON_WHAT[result.attente] || 'ton choix';
+    if (asked !== result.attente) {
+      asked = result.attente;
+      await setJob({ message: `YouTube Studio attend ton choix : ${what}. La publication continue toute seule dès que c’est fait.` });
+      chrome.notifications.create(PERSON_NOTICE, {
+        type: 'basic', iconUrl: 'icons/icon128.png', priority: 2, requireInteraction: true,
+        title: 'KappGen Publish attend ton choix dans YouTube Studio',
+        message: `Choisis ${what} dans l’onglet YouTube Studio : la publication continue toute seule ensuite.`,
+      }, () => void chrome.runtime.lastError);
+    }
+    if (Date.now() - start > PERSON_WAIT_MS) {
+      chrome.notifications.clear(PERSON_NOTICE, () => void chrome.runtime.lastError);
+      throw new Error(`YouTube Studio attendait ${what} : rien n’a été choisi en 20 minutes.${result.detail ? ` (${result.detail})` : ''}`);
+    }
+    await sleep(4000);
+    ensureNotCancelled();
+    result = await step(tabId, 'chooseVisibility', { ...args, waitPerson: result.attente });
+  }
+  if (asked) {
+    chrome.notifications.clear(PERSON_NOTICE, () => void chrome.runtime.lastError);
+    await setJob({ message: 'Choix fait, la publication continue…' });
+  }
+  return result;
 }
 
 // Same steps for both sources; only where the video comes from differs.
@@ -1116,7 +1156,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       }
 
       await setJob({ message: 'Visibilité…' });
-      await step(tabId, 'chooseVisibility', { visibility, monetization, scheduleAt });
+      await chooseVisibilityStep(tabId, { visibility, monetization, scheduleAt });
     });
     if (scheduleAt) await rememberSlot(video.channel_key, scheduleAt);
 
@@ -2765,6 +2805,15 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 // on the panel instead of just dismissing a toast — same one-click re-grant
 // as clicking the extension icon itself.
 chrome.notifications.onClicked.addListener(async (id) => {
+  if (id === PERSON_NOTICE) {
+    // Straight to the Studio tab that waits for the choice.
+    if (workTabId) {
+      const tab = await chrome.tabs.update(workTabId, { active: true }).catch(() => null);
+      if (tab) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    }
+    chrome.notifications.clear(id, () => void chrome.runtime.lastError);
+    return;
+  }
   if (id !== 'kappgen-folder-access') return;
   await askAccess({ force: true }).catch(() => {});
 });
@@ -3002,6 +3051,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await folder('mark', { path: message.path, status: 'resetYoutube' });
       publish('folder', message.path, 'CHANNEL');
       return { started: true };
+    },
+    // Draft finished by hand in Studio: published, with the sheet already applied
+    // (no update sent over what the creator just did).
+    finishedYoutube: async () => {
+      await requireAccess();
+      if (!/^[A-Za-z0-9_-]{11}$/.test(String(message.youtubeId || ''))) throw new Error('Lien YouTube de cette vidéo inconnu.');
+      await folder('mark', { path: message.path, status: 'published', data: { youtubeId: message.youtubeId, hash: message.hash || null } });
+      return { ok: true };
     },
     // A job that never finished (tab closed, Facebook stuck) must not block everything.
     // « Annuler »: the work tab is stopped (reloaded if it is the creator's own,
