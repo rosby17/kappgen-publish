@@ -2565,7 +2565,9 @@ async function renderSubscription({ fresh = false } = {}) {
   const forever = state.kind === 'lifetime' || state.kind === 'unlimited';
   $('pw-current').hidden = !active;
   $('pw-current').textContent = !active ? '' : forever ? 'Tu as l’accès à vie : rien à payer.' : state.kind === 'trial'
-    ? `Essai gratuit en cours : ${state.days_left} jour(s) restant(s).` : `Premium actif encore ${state.days_left} jour(s). Un nouvel achat s’ajoute à la suite.`;
+    ? `Essai gratuit en cours : ${state.days_left} jour(s) restant(s).`
+    // Sans date de fin (days_left vaut null), plus de « encore null jour(s) ».
+    : Number.isFinite(state.days_left) ? `Premium actif encore ${state.days_left} jour(s). Un nouvel achat s’ajoute à la suite.` : 'Premium actif : rien à payer.';
   $('offers').hidden = active && forever;
   $('pw-subscribe').hidden = active && forever;
   applyOfferPrices(state.offers);
