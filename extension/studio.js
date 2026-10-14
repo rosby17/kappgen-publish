@@ -110,45 +110,67 @@
       showBanner('KappGen Publish attend ton choix : dans « Monétisation », choisis Activée (ou Désactivée) puis OK. La publication continue toute seule ensuite.');
       return PERSON;
     }
-    const trigger = dropdown || (section && section.querySelector(S('monetizationTrigger')));
-    if (!trigger) throw new Error('YouTube Studio : menu « Monétisation » introuvable.');
+    const first = dropdown || (section && section.querySelector(S('monetizationTrigger')));
+    if (!first) throw new Error('YouTube Studio : menu « Monétisation » introuvable.');
+    const M = window.KappMonetisation;
+    // Ce qu'on peut presser : l'élément trouvé (souvent l'intérieur, div#child-input), puis le vrai déclencheur qui l'entoure
+    // (14/10 : appuyer sur div#child-input ouvrait un menu vide).
+    const triggers = [...new Set([first.closest('ytcp-dropdown-trigger'), first, first.closest('tp-yt-paper-dropdown-menu, ytcp-form-select, ytcp-select')]
+      .filter((n) => n && visible(n)))];
     // Studio's dropdown opens on a pointer press, and its choices are not always
     // radio buttons ("On" / "Off" can be plain menu items with a description).
     // Opening: pointer press, then a click on the inner parts of the trigger, then the keyboard (Studio changes its
     // dropdowns often; one way or another opens it).
-    const ouvertures = [
+    const ouvertures = (trigger) => [
       () => { for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) trigger.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); click(trigger); },
       () => { const inner = trigger.querySelector('#right-icon, #container, #label, .dropdown-trigger-text, tp-yt-iron-icon') || trigger; click(inner); },
       () => { if (trigger.focus) trigger.focus(); for (const key of ['Enter', ' ', 'ArrowDown']) trigger.dispatchEvent(new KeyboardEvent('keydown', { key, code: key === ' ' ? 'Space' : key, bubbles: true, cancelable: true })); },
     ];
     const wanted = X(mode === 'on' ? 'monetizationOn' : 'monetizationOff');
     const CHOICES = S('monetizationChoices');
+    // Jamais un choix : le menu de gauche de Studio, ni la file de mise en ligne en bas de l'écran.
+    const horsChoix = (n) => n.closest(SIDE_MENU) || (M && n.closest(M.UPLOAD_PANEL));
+    const correspond = (n) => (M ? M.matches(textOf(n), mode, wanted) : (wanted.test(textOf(n)) && textOf(n).length < 200));
     const findChoice = () => {
       const exact = document.querySelector(S('monetizationExact', { mode }));
       if (exact && visible(exact)) return exact;
-      const hits = [...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && !n.closest(SIDE_MENU) && wanted.test(textOf(n)) && textOf(n).length < 200);
+      // Les éléments de la recette, puis tout ce que contiennent les menus et petites fenêtres ouverts.
+      const pool = [...document.querySelectorAll(CHOICES)];
+      if (M) for (const overlay of document.querySelectorAll(M.OVERLAYS)) if (visible(overlay)) pool.push(...overlay.querySelectorAll('*'));
+      const hits = [...new Set(pool)].filter((n) => visible(n) && !horsChoix(n) && correspond(n));
       // the innermost match is the item itself, not a list that contains it
-      return hits.find((n) => !hits.some((o) => o !== n && n.contains(o))) || null;
+      const inner = hits.find((n) => !hits.some((o) => o !== n && n.contains(o))) || null;
+      // Clic sur la ligne entière du choix (le texte seul ne réagit pas toujours).
+      return inner && (inner.closest('tp-yt-paper-item, tp-yt-paper-radio-button, [role="option"], [role="menuitem"], [role="menuitemradio"], [role="radio"], ytcp-text-menu-item, ytcp-ve') || inner);
     };
     let option = null;
-    for (const ouvrir of ouvertures) {
-      ouvrir();
-      option = await waitFor(findChoice, { timeout: 5000, what: 'le choix de monétisation' }).catch(() => null);
+    for (const trigger of triggers) {
+      for (const ouvrir of ouvertures(trigger)) {
+        ouvrir();
+        option = await waitFor(findChoice, { timeout: 4000, what: 'le choix de monétisation' }).catch(() => null);
+        if (option) break;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // menu à moitié ouvert : refermé avant l'essai suivant
+        await sleep(400);
+      }
       if (option) break;
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); // menu à moitié ouvert : refermé avant l'essai suivant
-      await sleep(400);
     }
     if (!option) {
-      const seen = [...new Set([...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && !n.closest(SIDE_MENU)).map(textOf).filter((t) => t && t.length < 80))].slice(0, 8);
-      // Which element was pressed, and what Studio opened above the dialog:
-      // enough to see which tag the options really use.
+      const trigger = triggers[0] || first;
+      const seen = [...new Set([...document.querySelectorAll(CHOICES)].filter((n) => visible(n) && !horsChoix(n)).map(textOf)
+        .filter((t) => t && t.length < 80 && !(M && M.isUploadRow(t))))].slice(0, 8);
+      // Which element was pressed, and what Studio opened above the dialog (with the texts of its items, even nested,
+      // and how many are hidden): enough to see which tag and which words the options really use.
       const tag = (n) => `${n.localName}${n.id ? '#' + n.id : ''}${n.getAttribute('role') ? '[' + n.getAttribute('role') + ']' : ''}`;
-      const pressed = `${tag(trigger)} « ${textOf(trigger).slice(0, 30)} »`;
-      const overlays = [...document.querySelectorAll('tp-yt-iron-dropdown, ytcp-text-menu, tp-yt-paper-listbox, [role="listbox"], [role="menu"], ytcp-paper-dialog')]
-        .filter((n) => visible(n) && !n.closest(SIDE_MENU)).slice(0, 3)
-        .map((n) => `${tag(n)} > ${[...n.querySelectorAll('*')].filter((c) => visible(c) && !c.children.length && textOf(c)).slice(0, 5).map((c) => `${tag(c)} « ${textOf(c).slice(0, 25)} »`).join(', ')}`);
+      const pressed = triggers.map((t) => `${tag(t)} « ${textOf(t).slice(0, 30)} »`).join(' puis ');
+      const overlays = [...document.querySelectorAll((M && M.OVERLAYS) || 'tp-yt-iron-dropdown, ytcp-text-menu, tp-yt-paper-listbox, [role="listbox"], [role="menu"], ytcp-paper-dialog')]
+        .filter((n) => visible(n) && !horsChoix(n)).slice(0, 3)
+        .map((n) => {
+          const items = [...n.querySelectorAll('tp-yt-paper-item, [role="option"], [role="menuitem"], [role="menuitemradio"], [role="radio"], tp-yt-paper-radio-button, ytcp-text-menu-item, li')];
+          const shown = items.filter(visible);
+          return `${tag(n)} (${shown.length}/${items.length} visibles) > ${(shown.length ? shown : items).slice(0, 5).map((c) => `${tag(c)} « ${textOf(c).slice(0, 25)} »`).join(', ')}`;
+        });
       // Not a dead end: the creator picks it by hand and the upload goes on.
-      lastMonetizationDetail = `Appuyé sur : ${pressed}. Choix visibles : ${seen.join(' | ') || 'aucun'}. Menus ouverts : ${overlays.join(' ;; ') || 'aucun'}.`;
+      lastMonetizationDetail = `Appuyé sur : ${pressed || tag(trigger)}. Choix visibles : ${seen.join(' | ') || 'aucun'}. Menus ouverts : ${overlays.join(' ;; ') || 'aucun'}.`;
       showBanner('KappGen Publish n’a pas pu ouvrir le menu « Monétisation » : choisis Activée (ou Désactivée) puis OK. La publication continue toute seule ensuite.');
       return PERSON;
     }

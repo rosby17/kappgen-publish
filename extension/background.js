@@ -303,7 +303,8 @@ async function injectScripts(tabId, files) {
   }
   const recipe = await publishRecipe();
   await chrome.scripting.executeScript({ target: { tabId }, func: (data) => { window.__kappgenRecipe = data; }, args: [recipe] });
-  await injectFiles(tabId, ['lib/recette.js', ...files]);
+  // studio.js : reconnaissance des choix de monétisation (lib/monetisation.js).
+  await injectFiles(tabId, ['lib/recette.js', ...(files.includes('studio.js') ? ['lib/monetisation.js'] : []), ...files]);
 }
 
 async function recipeSelector(network, key) {
