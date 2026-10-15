@@ -473,9 +473,23 @@ const visibilityOf = (key) => VISIBILITY_LABELS[autoVisibility.get(key)] ? autoV
 let showChannels = false;
 const chan = (name) => (showChannels ? name : null);
 
+// Chemin du dossier de la vidéo, à copier pour la retrouver (miniature, fiche et vidéo sont dans ce dossier).
+function pathButton(folder) {
+  const copy = button('Copier le chemin', 'btn ghost', async () => {
+    await navigator.clipboard.writeText(folder || '');
+    copy.textContent = 'Chemin copié';
+    setTimeout(() => { copy.textContent = 'Copier le chemin'; }, 1500);
+  });
+  copy.title = folder || '';
+  return copy;
+}
+
 function videoItem(video) {
   const planned = video.schedule_at && video.schedule_at > Date.now();
-  const status = video.last_error ? pill('warn', video.last_error)
+  // Incomplete (no thumbnail, title or description): listed so the person can finish it, never publishable (16/10).
+  const complete = video.complete !== false;
+  const status = !complete ? pill('neutral', `En préparation : il manque ${(video.missing || []).join(', ')}. Rien ne part tant que ce n’est pas complet.`)
+    : video.last_error ? pill('warn', video.last_error)
     : planned ? pill('ok', `Programmée : publique sur YouTube le ${whenText(video.schedule_at)}${video.auto_ok ? ' (envoyée à YouTube dès maintenant)' : ''}.`)
       : video.auto_ok ? pill('ok', visibilityOf(video.channel_key) === 'SCHEDULE' ? 'Partira toute seule, au prochain horaire.' : `Partira toute seule (${VISIBILITY_LABELS[visibilityOf(video.channel_key)]}).`)
         : pill('neutral', video.auto_blocked || 'Envoi manuel.');
@@ -505,16 +519,20 @@ function videoItem(video) {
     renderFolder();
   });
   drop.title = 'Ne jamais publier cette vidéo';
+  const copy = pathButton(video.folder_path);
+  const files = [video.thumbnail_path ? `Miniature : ${video.thumbnail_path.split('/').pop()}` : 'Miniature : manquante',
+    video.sheet_path ? `Fiche : ${video.sheet_path.split('/').pop()}` : 'Fiche : manquante'];
   const item = card({
     path: video.relative_path, preview: video.preview_path, title: video.title,
-    details: [chan(video.channel_name), [size(video.size_bytes), video.thumbnail_path ? 'miniature' : 'sans miniature',
-      video.tags.length ? `${video.tags.length} mots-clés` : null].filter(Boolean).join(' · ')],
-    status, actions: [go, moreMenu([
+    details: [chan(video.channel_name), `Dossier : ${video.folder_path || '—'}`, files.join(' · '),
+      [size(video.size_bytes), video.tags.length ? `${video.tags.length} mots-clés` : null].filter(Boolean).join(' · ')],
+    status, actions: complete ? [go, copy, moreMenu([
       entryOf(plan, video.schedule_at ? 'Changer l’heure de publication' : 'Programmer', 'clock'),
       entryOf(already, 'Déjà publiée (déjà sur YouTube)', 'check'),
       entryOf(drop, 'Ne pas publier', 'trash', { danger: true }),
-    ])],
+    ])] : [copy, moreMenu([entryOf(drop, 'Ne pas publier', 'trash', { danger: true })])],
   });
+  if (!complete) item.style.opacity = '0.7';
   if (video.thumbnail_warning && !video.last_error) item.querySelector('.info').append(pill('warn', video.thumbnail_warning));
   item.dataset.ytKinds = 'video';
   item.dataset.ytFailed = video.last_error ? '1' : '';

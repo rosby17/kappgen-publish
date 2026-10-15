@@ -92,6 +92,7 @@ function project(parent, name, videoName, modified) {
   const dir = parent.dir(name);
   dir.file(videoName, '', { size: 6 * 1024 * 1024, lastModified: modified });
   dir.file('publication.md', `## Titre\n${name}\n\n## Description\nDescription de ${name}`);
+  dir.file('miniature.jpg', '', { size: 300 * 1024, lastModified: modified });   // une vidéo n'est publiable que complète (16/10)
   return dir;
 }
 
@@ -456,4 +457,33 @@ test('an unfinished YouTube draft is never « déjà publiée » and can be sent
   assert.equal(done.youtubeError, undefined);
   assert.equal(done.facebookPublishedAt, '2026-10-06T09:16:50.610Z');
   assert.equal(dir.children.has('DEJA-PUBLIEE.txt'), true);
+});
+
+test('une vidéo incomplète (sans miniature, titre ou description) n’est jamais publiable et dit ce qui manque (16/10)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  const channel = disk.dir('CHAINE');
+  const sansMiniature = channel.dir('SansMiniature');
+  sansMiniature.file('video.mp4', '', { size: 6 * 1024 * 1024, lastModified: 1 });
+  sansMiniature.file('publication.md', '## Titre\nTitre\n\n## Description\nDescription');
+  const sansDescription = channel.dir('SansDescription');
+  sansDescription.file('video.mp4', '', { size: 6 * 1024 * 1024, lastModified: 1 });
+  sansDescription.file('publication.md', '## Titre\nTitre');
+  sansDescription.file('miniature.jpg', '', { size: 300 * 1024, lastModified: 1 });
+  project(channel, 'Complete', 'complete.mp4', 1);
+  KappDossier._setTestRoot(disk);
+
+  const queue = await KappDossier.scan({ now: 10_000_000 });
+  const sans = queue.videos.find((item) => item.relative_path.includes('SansMiniature/'));
+  const desc = queue.videos.find((item) => item.relative_path.includes('SansDescription/'));
+  const ok = queue.videos.find((item) => item.relative_path.endsWith('/complete.mp4'));
+  assert.equal(sans.complete, false);
+  assert.deepEqual([...sans.missing], ['la miniature']);
+  assert.equal(sans.auto_ok, false);
+  assert.match(sans.auto_blocked, /il manque la miniature/);
+  assert.deepEqual([...desc.missing], ['la description']);
+  assert.equal(desc.auto_ok, false);
+  assert.equal(ok.complete, true);
+  assert.equal(ok.auto_ok, true);
+  assert.equal(ok.folder_path, 'CHAINE/Complete');
 });

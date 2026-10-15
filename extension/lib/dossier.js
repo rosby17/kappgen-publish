@@ -656,9 +656,11 @@ const KappDossier = (() => {
       // Started long ago and never finished: the video may already be on
       // YouTube (Studio stuck, extension reloaded). Never re-send it alone.
       const interrupted = record.status === 'started' && !running;
+      // Une vidéo n'est proposée que complète : miniature, titre et description (16/10). Rien ne part avant.
+      const manquants = [!thumb && 'la miniature', !sheet.title && 'le titre', !sheet.description && 'la description'].filter(Boolean);
       let blocked = null;
-      if (config.auto === false) blocked = 'publication automatique désactivée pour cette chaîne';
-      else if (!sheet.title) blocked = 'pas de fiche avec un titre : envoi manuel seulement';
+      if (manquants.length) blocked = `il manque ${manquants.join(', ')} : rien ne part tant que la vidéo n’est pas complète`;
+      else if (config.auto === false) blocked = 'publication automatique désactivée pour cette chaîne';
       else if (now - video.modified < SETTLE_MS) blocked = 'fichier modifié il y a moins de 10 min';
       else if (watchSince && video.modified < watchSince) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
       else if (record.status === 'failed') blocked = 'dernier envoi en échec : relance-le à la main';
@@ -694,6 +696,9 @@ const KappDossier = (() => {
         vertical_size_bytes: vertical && vertical.size,
         channel_config: fileConfig,
         interrupted,
+        complete: manquants.length === 0,
+        missing: manquants,
+        folder_path: relativePath.split('/').slice(0, -1).join('/'),
       });
     }
     // Channels with only sent videos still show in the settings.
