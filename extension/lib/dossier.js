@@ -90,14 +90,14 @@ const KappDossier = (() => {
   // the "fbroot" of older versions), Instagram, TikTok, X, LinkedIn (posts).
   // Paths inside a network's folder start with its prefix ("fb:", "x:"…) so
   // every reader knows which folder they belong to.
-  const NETS = ['youtube', 'facebook', 'instagram', 'tiktok', 'snapchat', 'x', 'linkedin'];
-  const POST_NETS = ['instagram', 'tiktok', 'snapchat', 'x', 'linkedin'];
+  const NETS = ['youtube', 'facebook', 'instagram', 'tiktok', 'snapchat', 'x', 'linkedin', 'pinterest'];
+  const POST_NETS = ['instagram', 'tiktok', 'snapchat', 'x', 'linkedin', 'pinterest'];
   const netKey = (net) => (net === 'facebook' ? 'fbroot' : `root:${net}`);
   const FB_PREFIX = 'fb:';
   const MAIN_PREFIX = 'main:';
   const prefixOf = (net) => (net === 'facebook' ? FB_PREFIX : `${net}:`);
   // Folder names of a network inside the main folder (<chaîne>/X/A-PUBLIER…).
-  const NET_DIRS = { facebook: ['facebook'], instagram: ['instagram'], tiktok: ['tiktok'], snapchat: ['snapchat'], x: ['x', 'twitter'], linkedin: ['linkedin'] };
+  const NET_DIRS = { facebook: ['facebook'], instagram: ['instagram'], tiktok: ['tiktok'], snapchat: ['snapchat'], x: ['x', 'twitter'], linkedin: ['linkedin'], pinterest: ['pinterest'] };
   const NET_DIR_NAMES = new Set(Object.values(NET_DIRS).flat());
   const testNets = {}; // set by tests only
   const saveNetRoot = (net, handle) => kv('readwrite', (store) => store.put(handle, netKey(net)));
@@ -1194,6 +1194,8 @@ const KappDossier = (() => {
         x_error: (info.x && info.x.erreur) || null,
         linkedin_statut: (info.linkedin && info.linkedin.statut) || null,
         linkedin_error: (info.linkedin && info.linkedin.erreur) || null,
+        pinterest_statut: (info.pinterest && info.pinterest.statut) || null,
+        pinterest_error: (info.pinterest && info.pinterest.erreur) || null,
         instagram_statut: (info.instagram && info.instagram.statut) || null,
         instagram_error: (info.instagram && info.instagram.erreur) || null,
         snapchat_statut: (info.snapchat && info.snapchat.statut) || null,

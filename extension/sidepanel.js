@@ -941,9 +941,11 @@ const NETWORKS = [
   ['snapchat', 'Snapchat', 'Spotlight et Story (versions verticales de 5 à 60 s) sur ton profil.', 'snapchat'],
   ['linkedin', 'LinkedIn', 'Vidéos (lien) et posts sur ton profil.', 'linkedin'],
   ['x', 'X', 'Posts et vidéos sur ton compte.', 'x'],
+  ['pinterest', 'Pinterest', 'Épingles verticales (2:3 ou 9:16) sur ton compte. Chrome demande l’accès à pinterest.com.', 'pinterest'],
 ];
 // Every listed network is operational. Older defaults stay enabled until the
 // creator unticks them; newer destinations require an explicit opt-in.
+const PIN_ORIGINS = ['https://www.pinterest.com/*'];
 const DEFAULT_ON = new Set(['youtube', 'facebook', 'tiktok', 'instagram', 'snapchat']);          // on until unticked (Snapchat : rien ne part avant qu'une source soit cochée)
 const networkIsOn = (config, name) => {
   const value = (config.networks || {})[name];
@@ -981,6 +983,8 @@ async function renderNetworks() {
     const wrap = el('label');
     wrap.append(box, text);
     box.addEventListener('change', async () => {
+      // Pinterest : accès facultatif, demandé tout de suite (dans le clic), comme Snapchat.
+      if (name === 'pinterest' && box.checked && !(await chrome.permissions.request({ origins: PIN_ORIGINS }).catch(() => false))) { box.checked = false; return; }
       const current = await settings();
       current.networks = { ...(current.networks || {}), [name]: box.checked };
       // X: what is published from now on goes there (never the older catalogue).
