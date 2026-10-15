@@ -23,6 +23,7 @@ importScripts('lib/schedule.js');
 importScripts('lib/rythme.js');
 importScripts('lib/facebook-flow.js');
 importScripts('lib/studio-onglet.js');
+importScripts('lib/pinterest.js');
 importScripts('lib/mise-a-jour.js');
 
 // The user's KappGen account (session cookie of kappgen.com). The local
@@ -113,7 +114,7 @@ async function setJob(patch) {
 
 // The day's publications, on this computer's clock; sent once in the evening
 // (21:00) to creators who ticked « Bilan du soir par mail » (off by default).
-const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram', 'snapchat', 'x', 'linkedin']);
+const REPORTED_KINDS = new Set(['youtube', 'short', 'post', 'facebook', 'tiktok', 'instagram', 'snapchat', 'x', 'linkedin', 'pinterest']);
 const REPORT_HOUR = 21;
 const pad2 = (n) => String(n).padStart(2, '0');
 const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -447,7 +448,7 @@ async function consumeBridgeGrant(token, sender) {
 async function postsList(net = 'facebook') {
   return folder('posts', { net });
 }
-const POST_NETS = ['instagram', 'tiktok', 'snapchat', 'x', 'linkedin'];
+const POST_NETS = ['instagram', 'tiktok', 'snapchat', 'x', 'linkedin', 'pinterest'];
 // A post by its path, whichever list it is in.
 async function findPost(postPath) {
   for (const net of ['facebook', ...POST_NETS]) {
@@ -658,6 +659,7 @@ const instagramTabToReuse = () => tabToReuse(/^https:\/\/www\.instagram\.com\//,
 const snapchatTabToReuse = () => tabToReuse(/^https:\/\/(profile|my)\.snapchat\.com\//, ['https://profile.snapchat.com/*', 'https://my.snapchat.com/*']);
 const xTabToReuse = () => tabToReuse(/^https:\/\/(x|twitter)\.com\//, ['https://x.com/*', 'https://twitter.com/*']);
 const linkedinTabToReuse = () => tabToReuse(/^https:\/\/www\.linkedin\.com\//, ['https://www.linkedin.com/*']);
+const pinterestTabToReuse = () => tabToReuse(/^https:\/\/(www\.)?pinterest\.com\//, KappPinterest.ORIGINS.concat(['https://pinterest.com/*']));
 const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
 const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
   ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
@@ -1954,6 +1956,71 @@ async function publishTikTokPost(postPath, { auto = false } = {}) {
   }
 }
 
+// ---------------------------------------------------------------- Pinterest
+
+// Pinterest's pin builder, in the Pinterest tab already open if there is one.
+// Pinterest access is optional (manifest « optional_host_permissions »), asked in the panel when Pinterest is turned on,
+// so adding Pinterest never disabled the extension for people who do not use it.
+async function openPinterest({ reuse = true } = {}) {
+  if (!(await chrome.permissions.contains({ origins: KappPinterest.ORIGINS }).catch(() => false))) {
+    throw new Error('Autorise d’abord Pinterest : panneau KappGen Publish → Réseaux → Pinterest.');
+  }
+  const url = KappPinterest.CREATION_URL;
+  const tab = reuse ? await reuseOrOpen(pinterestTabToReuse, url) : await createWorkTab(url);
+  workTabId = tab.id;
+  const start = Date.now();
+  while (Date.now() - start < 90000) {
+    ensureNotCancelled();
+    const current = await chrome.tabs.get(tab.id);
+    const now = current.url || current.pendingUrl || '';
+    if (/\/login|\/signup/.test(now)) throw new Error('Connecte-toi d’abord à Pinterest dans ce navigateur, puis relance.');
+    if (/^https:\/\/(www\.)?pinterest\.com\//.test(now) && current.status === 'complete') {
+      await injectScripts(tab.id, ['lib/page-kit.js', 'pinterest.js']);
+      return tab.id;
+    }
+    await sleep(700);
+  }
+  throw new Error('Pinterest ne s’est pas ouvert.');
+}
+
+// One vertical pin (image or video) to Pinterest, with its title and description.
+async function sendToPinterest({ filePath, title, description, channel, path, auto = false }) {
+  await chrome.storage.session.set({ job: { running: true, source: 'pinterest', kind: 'pinterest', path, title, channel, message: 'Ouverture de Pinterest…', startedAt: Date.now() } });
+  const tabId = await openPinterest({ reuse: !auto });
+  try { await whileShown(tabId, async () => {
+    await setJob({ message: 'Envoi de l’épingle à Pinterest…' });
+    await stepIn(tabId, '__kappgenPinterest', 'sendMedia', { path: filePath, src: await bridgeSource(tabId, filePath) });
+    await setJob({ message: 'Titre et description de l’épingle…' });
+    await stepIn(tabId, '__kappgenPinterest', 'writePin', { title, description });
+    await setJob({ message: 'Publication sur Pinterest…' });
+    await stepIn(tabId, '__kappgenPinterest', 'send');
+  }); } finally { await stepIn(tabId, 'KappKit', 'cleanup').catch(() => {}); }
+  closeStudioTab(tabId); // only a tab opened for this pin is closed
+}
+
+// A post of the Pinterest folder: its photo or video (vertical, 2:3 or 9:16), and its text as title and description.
+async function publishPinterestPost(postPath, { auto = false } = {}) {
+  const post = await findPost(postPath);
+  try {
+    requireValidPost(post);
+    const media = post.video_path || post.image_path;
+    if (!media) throw new Error('Ce post n’a ni image ni vidéo : une épingle en a besoin.');
+    if (post.video_path) {
+      const info = await folder('videoInfo', { path: post.video_path }).catch(() => null);
+      const format = KappPinterest.checkFormat(info && info.width, info && info.height);
+      if (!format.ok) throw new Error(format.message);
+    }
+    const texts = KappPinterest.pinTexts(post.text);
+    await sendToPinterest({ filePath: media, title: texts.title || 'Épingle', description: texts.description, channel: post.channel_name, path: postPath, auto });
+    await folder('markPost', { path: postPath, patch: { pinterest: { statut: 'publie', published_at: new Date().toISOString() } } });
+    await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur Pinterest.' });
+  } catch (error) {
+    const message = friendly(error);
+    if (post && !post.configuration_error) await folder('markPost', { path: postPath, patch: { pinterest: { statut: 'echec', erreur: message } } }).catch(() => {});
+    await setJob({ running: false, done: false, error: message, message });
+  }
+}
+
 // ------------------------------------------------------ Facebook posts
 
 // The Page of a post: its own publication.json / planning.json, otherwise the
@@ -2497,13 +2564,16 @@ async function ownPostNext(settings) {
   for (const net of POST_NETS) {
     if (!networkOn(settings, net)) continue;
     if (net === 'snapchat' && !(await chrome.permissions.contains({ origins: SNAPCHAT_ORIGINS }).catch(() => false))) continue;
+    if (net === 'pinterest' && !(await chrome.permissions.contains({ origins: KappPinterest.ORIGINS }).catch(() => false))) continue;
     ready.push(...(await postsList(net).catch(() => []))
-      .filter((p) => p.ready && (!['tiktok', 'instagram', 'snapchat'].includes(net) || p.video_path)));
+      .filter((p) => p.ready && (!['tiktok', 'instagram', 'snapchat'].includes(net) || p.video_path))
+      // Pinterest : seulement ses propres épingles, jamais les posts Facebook partagés (formats non verticaux).
+      .filter((p) => net !== 'pinterest' || !p.shared));
   }
   ready.sort((a, b) => (a.due_at || 0) - (b.due_at || 0));
   const post = ready[0];
   if (!post) return false;
-  const send = { x: publishXPost, linkedin: publishLinkedinPost, tiktok: publishTikTokPost, instagram: publishInstagramPost, snapchat: publishSnapchatPost }[post.network];
+  const send = { x: publishXPost, linkedin: publishLinkedinPost, tiktok: publishTikTokPost, instagram: publishInstagramPost, snapchat: publishSnapchatPost, pinterest: publishPinterestPost }[post.network];
   await send(post.path, { auto: true });
   return true;
 }
@@ -3061,6 +3131,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishSnapchatPost(message.path).catch(() => {});
+      return { started: true };
+    },
+    pinterestPost: async () => {
+      await requireAccess();
+      const { job } = await chrome.storage.session.get('job');
+      if (job && job.running) throw new Error('Une publication est déjà en cours.');
+      requireValidPost(await findPost(message.path));
+      publishPinterestPost(message.path).catch(() => {});
       return { started: true };
     },
     instagramAuto: async () => {

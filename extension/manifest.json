@@ -65,7 +65,8 @@
         "https://twitter.com/*",
         "https://www.linkedin.com/*",
         "https://profile.snapchat.com/*",
-        "https://my.snapchat.com/*"
+        "https://my.snapchat.com/*",
+        "https://www.pinterest.com/*"
       ],
       "use_dynamic_url": true
     }
@@ -75,6 +76,7 @@
   },
   "optional_host_permissions": [
     "https://profile.snapchat.com/*",
-    "https://my.snapchat.com/*"
+    "https://my.snapchat.com/*",
+    "https://www.pinterest.com/*"
   ]
 }
