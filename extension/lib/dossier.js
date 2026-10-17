@@ -524,7 +524,15 @@ const KappDossier = (() => {
     async function visit(node) {
       await stateFor(node);
       const videos = await videosOf(node);
-      if (videos.length) {
+      // Dossier de travail d'une vidéo KappGen (<marque>/contenus/<vidéo>/06-rendu/video.mp4) : son titre est dans 02-texte/fiche.md et
+      // sa miniature dans 07-miniature/ (Roosevelt, 17/10 : « video · sans miniature · pas de fiche » quand le dossier choisi contient aussi
+      // les dossiers de travail). La copie rangée dans « KappGen - à publier » est préférée plus bas (doublons).
+      const travail = videos.length && norm(node.name) === '06 rendu' && node.parent
+        && node.parent.dirs.find((d) => norm(d.name) === '02 texte' && d.files.has('fiche.md'));
+      if (travail) {
+        const mini = node.parent.dirs.find((d) => norm(d.name) === '07 miniature');
+        for (const video of videos) units.push({ node, video, sheets: [[travail, ['fiche.md']]], thumbs: [mini, node], channel: channelOf(node.parent, tree), kind: 'kappgen' });
+      } else if (videos.length) {
         const isRender = RENDER_DIRS.has(norm(node.name)) && node.parent;
         let shared = sharedSheets(node);
         if (!shared.length && !videos.some((video) => ownSheets(node, video.name).length)) shared = await anyText(node);
@@ -718,6 +726,17 @@ const KappDossier = (() => {
         v.auto_blocked = `dossier marqué ${MARKER_FILE} : vidéo déjà publiée, vérifie avant de la renvoyer à la main`;
       }
     }
+    // La même vidéo (même nom, même poids) vue à deux endroits du dossier choisi (copie rangée par KappGen + dossier de travail) : une seule
+    // carte, jamais deux envois. On garde celle qui a sa fiche, puis sa miniature, puis celle qui n'est pas un dossier de travail.
+    const meilleure = (a, b) => (b.has_sheet - a.has_sheet) || (!!b.thumbnail_path - !!a.thumbnail_path) || ((a.kind === 'kappgen') - (b.kind === 'kappgen'));
+    const parCle = new Map();
+    for (const v of videos) {
+      const cle = `${v.relative_path.split('/').pop()}|${v.size_bytes}`;
+      const deja = parCle.get(cle);
+      if (!deja || meilleure(v, deja) < 0) parCle.set(cle, v);
+    }
+    const gardees = new Set(parCle.values());
+    for (let i = videos.length - 1; i >= 0; i -= 1) if (!gardees.has(videos[i])) videos.splice(i, 1);
     videos.sort((a, b) => a.channel_key.localeCompare(b.channel_key) || a.relative_path.localeCompare(b.relative_path));
     for (const v of [...videos, ...sent]) {
       scanInfo.set(v.relative_path, { title: v.title, thumb: v.thumbnail_path || v.preview_path || null, channel: v.channel_name || null });

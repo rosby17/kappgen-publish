@@ -457,3 +457,27 @@ test('an unfinished YouTube draft is never « déjà publiée » and can be sent
   assert.equal(done.facebookPublishedAt, '2026-10-06T09:16:50.610Z');
   assert.equal(dir.children.has('DEJA-PUBLIEE.txt'), true);
 });
+
+test('KappGen work folder: sheet and thumbnail found, and the published copy wins over the duplicate', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('YOUTUBE');
+  const fiche = '## Titre\n```\nPourquoi tu ne te remets pas d\'un deuil\n```\n\n## Description\n```\nUne description.\n```\n';
+  // dossier de travail de KappGen : 06-rendu/video.mp4, 02-texte/fiche.md, 07-miniature/miniature.png
+  const travail = disk.dir('BOUDDHISME').dir('paz-nirvana').dir('contenus').dir('2026-10-15_004');
+  travail.dir('06-rendu').file('video.mp4', '', { size: 521192373, lastModified: 1 });
+  travail.dir('02-texte').file('fiche.md', fiche);
+  travail.dir('07-miniature').file('miniature.png', 'png', { size: 1000 });
+  KappDossier._setTestRoot(disk);
+  let queue = await KappDossier.scan({ now: 10_000_000 });
+  assert.equal(queue.videos.length, 1);
+  assert.equal(queue.videos[0].title, 'Pourquoi tu ne te remets pas d’un deuil'.replace('’', "'"));
+  assert.match(queue.videos[0].thumbnail_path, /07-miniature\/miniature\.png$/);
+  // la copie rangée par KappGen dans « KappGen - à publier » : une seule carte, celle du dossier de publication à égalité de fiche
+  const rangee = disk.dir('KappGen - à publier').dir('Paz Nirvana').dir('2026-10-15_004');
+  rangee.file('video.mp4', '', { size: 521192373, lastModified: 1 });
+  rangee.file('publication.md', fiche);
+  rangee.file('miniature.png', 'png', { size: 1000 });
+  queue = await KappDossier.scan({ now: 10_000_000 });
+  assert.equal(queue.videos.length, 1);
+  assert.match(queue.videos[0].relative_path, /^KappGen - à publier\//);
+});
