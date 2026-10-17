@@ -1134,13 +1134,24 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
         // Not worth failing a whole upload over: tags can be added later.
         await step(tabId, 'fillTags', { tags: video.tags }).catch((error) => setJob({ warning: String(error.message || error) }));
       }
-      if (video.thumbnail_path && await step(tabId, 'hasThumbnailPicker')) {
-        const thumbInput = 'thumbInput';
-        if (source === 'folder') {
-          const src = await bridgeSource(tabId, video.thumbnail_path);
-          await step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path }).catch(() => {});
+      if (video.thumbnail_path) {
+        // Attendre le champ Miniature (Studio l'affiche après le traitement) : avant, la miniature partait silencieusement.
+        await setJob({ message: 'Miniature…' });
+        const picker = await step(tabId, 'waitForThumbnailPicker').then(() => true, () => false);
+        if (!picker) {
+          await setJob({ warning: 'Miniature non envoyée : YouTube n’a pas affiché le champ Miniature pour cette chaîne. Terminez-la dans YouTube Studio, ou utilisez « Mettre à jour » après.' });
         } else {
-          await setLocalFile(tabId, thumbInput, video.thumbnail_path).catch(() => {});
+          const thumbInput = 'thumbInput';
+          try {
+            if (source === 'folder') {
+              const src = await bridgeSource(tabId, video.thumbnail_path);
+              await step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path });
+            } else {
+              await setLocalFile(tabId, thumbInput, video.thumbnail_path);
+            }
+          } catch (error) {
+            await setJob({ warning: `Miniature non envoyée : ${friendly(error)}` });
+          }
         }
       }
 

@@ -418,6 +418,14 @@
       return !!document.querySelector(S('thumbnailPicker'));
     },
 
+    // Studio shows the uploader only once the new file is processed: wait for it
+    // rather than deciding from a snapshot (the video was sent without thumbnail).
+    async waitForThumbnailPicker() {
+      await waitFor(() => document.querySelector(S('thumbnailPicker')),
+        { timeout: 150000, what: 'le champ Miniature (chaîne non vérifiée ?)' });
+      return true;
+    },
+
     async chooseVisibility({ visibility, monetization, scheduleAt, waitPerson = '' }) {
       const schedule = visibility === 'SCHEDULE' && scheduleAt;
       const name = ['PRIVATE', 'UNLISTED', 'PUBLIC'].includes(visibility) ? visibility : 'PRIVATE';
