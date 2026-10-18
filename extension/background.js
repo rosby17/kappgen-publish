@@ -782,6 +782,25 @@ const networkOn = (settings, name) => {
   return value === undefined ? DEFAULT_ON.has(name) : value !== false;
 };
 
+// Vidéos voulues sur un réseau d'après KappGen (Réseaux de la marque : la longue, le short, chacun dans son format, ou rien) :
+// { longue, courte } = noms de fichiers du dossier de la vidéo. null = la marque n'a pas ce réglage : comportement d'avant.
+const planVideos = (own, net) => (own && own.videos ? (own.videos[net] || { longue: '', courte: '' }) : null);
+// Chemin d'un de ces fichiers pour cette vidéo, ou null s'il n'existe pas (encore) : une déclinaison pas encore faite attend.
+function videoFile(video, name) {
+  if (!name || !video) return null;
+  if (name === 'video.mp4') return video.relative_path;
+  if (name === 'short.mp4') return video.vertical_path || null;
+  return (video.format_files || []).includes(name) ? video.relative_path.replace(/[^/]*$/, '') + name : null;
+}
+// Le fichier à envoyer sur un réseau : le short si on en veut un et qu'il est là, sinon la longue (d'après le réglage de KappGen).
+const fileFor = (video, own, net, prefer = 'courte') => {
+  const plan = planVideos(own, net);
+  if (!plan) return undefined;                       // pas de réglage : chaque réseau choisit comme avant
+  const order = prefer === 'courte' ? ['courte', 'longue'] : ['longue', 'courte'];
+  for (const kind of order) { const f = videoFile(video, plan[kind]); if (f) return f; }
+  return null;
+};
+
 function ownOf(settings, video) {
   const { facebook, ...panel } = (settings.channels || {})[video.channel_key] || {};
   const own = { ...panel, ...((video && video.channel_config) || {}) };
@@ -1516,9 +1535,13 @@ async function publishFacebookOnly(relativePath, { auto = false, as = null } = {
     if (!video) throw new Error('La vidéo longue doit d’abord être publiée sur YouTube.');
     const own = ownOf(await folderSettings(), video);
     // Without `as` (the « Publier » button): the Short as a Reel if there is one, else the video.
-    if (as === null) reel = own.facebookMode !== 'video' && !!video.vertical_path;
-    if (reel && !video.vertical_path) throw new Error('Pas de version verticale (short.mp4) pour un Réel.');
-    const file = reel ? video.vertical_path : video.relative_path;
+    const plan = planVideos(own, 'facebook');
+    if (as === null) reel = plan ? !!videoFile(video, plan.courte) && !videoFile(video, plan.longue) : own.facebookMode !== 'video' && !!video.vertical_path;
+    // Avec le réglage de KappGen : le fichier choisi pour Facebook (longue ou short, dans son format)
+    const voulu = plan ? videoFile(video, reel ? plan.courte : plan.longue) : null;
+    if (plan && !voulu) throw new Error(reel ? 'Pas de short prévu (ou pas encore prêt) pour Facebook.' : 'Pas de vidéo longue prévue (ou pas encore prête) pour Facebook.');
+    if (!plan && reel && !video.vertical_path) throw new Error('Pas de version verticale (short.mp4) pour un Réel.');
+    const file = voulu || (reel ? video.vertical_path : video.relative_path);
     await setJob({ title: video.title, message: reel ? 'Réel sur Facebook…' : 'Vidéo sur Facebook…' });
     attempted = true;
     await publishFacebookReel(video, video.channel_name, own.facebookPageUrl, file, { reuse: !auto });
@@ -1585,7 +1608,9 @@ async function publishTikTokVideo(relativePath, { auto = false, long = false } =
     video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
     // The vertical version first (TikTok's own format); the long one on request.
-    const filePath = long ? video.relative_path : (video.vertical_path || video.relative_path);
+    const choisi = fileFor(video, ownOf(await folderSettings(), video), 'tiktok');
+    if (choisi === null) throw new Error('Pas de vidéo prévue (ou pas encore prête) pour TikTok.');
+    const filePath = choisi || (long ? video.relative_path : (video.vertical_path || video.relative_path));
     const caption = [video.title, hashtags(video.tags)].filter(Boolean).join(' ').slice(0, 2200);
     attempted = true;
     await sendToTikTok({ filePath, caption, title: video.title, channel: video.channel_name, path: relativePath, auto });
@@ -1661,7 +1686,8 @@ async function publishXVideo(relativePath, { auto = false } = {}) {
     video = sent.find((item) => item.relative_path === relativePath);
     if (!video || !video.youtube_id) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
     attempted = true;
-    await sendToX({ text: xText(video.title, `https://youtu.be/${video.youtube_id}`), mediaPath: video.vertical_path || null,
+    const choisiX = fileFor(video, ownOf(await folderSettings(), video), 'x');
+    await sendToX({ text: xText(video.title, `https://youtu.be/${video.youtube_id}`), mediaPath: choisiX === undefined ? (video.vertical_path || null) : choisiX,
       title: video.title, channel: video.channel_name, path: relativePath, auto });
     await folder('mark', { path: relativePath, status: 'published', data: { xPublishedAt: new Date().toISOString() } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur X.' });
@@ -1835,10 +1861,12 @@ async function publishInstagramVideo(relativePath, { auto = false } = {}) {
     const { sent } = await folderQueue();
     video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
-    if (!video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier : Instagram recadrerait la vidéo.');
+    const choisiIg = fileFor(video, ownOf(await folderSettings(), video), 'instagram');
+    if (choisiIg === null) throw new Error('Pas de vidéo prévue (ou pas encore prête) pour Instagram.');
+    if (choisiIg === undefined && !video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier : Instagram recadrerait la vidéo.');
     const caption = [video.title, hashtags(video.tags)].filter(Boolean).join('\n\n').slice(0, 2200);
     attempted = true;
-    await sendToInstagram({ filePath: video.vertical_path, caption, title: video.title, channel: video.channel_name, path: relativePath, auto });
+    await sendToInstagram({ filePath: choisiIg || video.vertical_path, caption, title: video.title, channel: video.channel_name, path: relativePath, auto });
     await folder('mark', { path: relativePath, status: 'published', data: { instagramPublishedAt: new Date().toISOString() } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur Instagram.' });
   } catch (error) {
@@ -1923,9 +1951,11 @@ async function publishSnapchatVideo(relativePath, { auto = false } = {}) {
     const { sent } = await folderQueue();
     video = sent.find((item) => item.relative_path === relativePath);
     if (!video) throw new Error('La vidéo doit d’abord être publiée sur YouTube.');
-    if (!video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier : Snapchat n’accepte que des vidéos verticales de 5 à 60 secondes.');
+    const choisiSnap = fileFor(video, ownOf(await folderSettings(), video), 'snapchat');
+    if (choisiSnap === null) throw new Error('Pas de vidéo prévue (ou pas encore prête) pour Snapchat.');
+    if (choisiSnap === undefined && !video.vertical_path) throw new Error('Aucune version verticale (short.mp4) dans le dossier : Snapchat n’accepte que des vidéos verticales de 5 à 60 secondes.');
     attempted = true;
-    await sendToSnapchat({ filePath: video.vertical_path, caption: snapCaption(video.title, video.tags), title: video.title, channel: video.channel_name, path: relativePath, auto });
+    await sendToSnapchat({ filePath: choisiSnap || video.vertical_path, caption: snapCaption(video.title, video.tags), title: video.title, channel: video.channel_name, path: relativePath, auto });
     await folder('mark', { path: relativePath, status: 'published', data: { snapchatPublishedAt: new Date().toISOString() } });
     await setJob({ running: false, done: true, error: null, auto, message: 'Publiée sur Snapchat.' });
   } catch (error) {
@@ -2520,24 +2550,29 @@ async function spreadNext(settings, sent, own) {
   for (const v of videos) {
     const ch = ownOf(settings, v);
     const fb = on('facebook') && ch.facebook && ch.facebookPageUrl && after(v, ch.facebookSince || 1);
+    // Avec le réglage de KappGen (ch.videos) : un réseau ne reçoit QUE les vidéos choisies pour lui, dans leur format ; le reste ne part pas.
+    const plan = (net) => planVideos(ch, net);
+    const veut = (net, kind) => { const p = plan(net); return p ? !!videoFile(v, p[kind]) : null; };
+    const recoit = (net, avant) => (plan(net) ? !!fileFor(v, ch, net) : avant);
+    const fbLong = veut('facebook', 'longue'), fbReel = veut('facebook', 'courte');
     const steps = [
       // Its Short (vertical version) on YouTube.
-      [on('youtube') && v.vertical_path && !v.short_youtube_id && !v.short_error && ch.auto !== false,
+      [on('youtube') && (plan('youtube') ? veut('youtube', 'courte') : !!v.vertical_path) && !v.short_youtube_id && !v.short_error && ch.auto !== false,
         () => publishShortOnly(v.relative_path, { auto: true })],
       // On the Facebook Page: the long video, then its Short as a Reel.
-      [fb && !v.facebook_published_at && !v.facebook_error, () => publishFacebookOnly(v.relative_path, { auto: true, as: 'video' })],
+      [fb && (fbLong === null || fbLong) && !v.facebook_published_at && !v.facebook_error, () => publishFacebookOnly(v.relative_path, { auto: true, as: 'video' })],
       // The Reel once the Short is on YouTube (or when YouTube's Short failed / is not used).
-      [fb && v.vertical_path && (v.short_youtube_id || v.short_error || !on('youtube')) && !v.facebook_reel_at && !v.facebook_reel_error,
+      [fb && (fbReel === null ? !!v.vertical_path : fbReel) && (v.short_youtube_id || v.short_error || !on('youtube') || !veut('youtube', 'courte')) && !v.facebook_reel_at && !v.facebook_reel_error,
         () => publishFacebookOnly(v.relative_path, { auto: true, as: 'reel' })],
-      [on('tiktok') && fromYt('tiktok') && !own('tiktok') && !v.tiktok_published_at && !v.tiktok_error && after(v, settings.tiktokSince),
+      [on('tiktok') && recoit('tiktok', fromYt('tiktok')) && !own('tiktok') && !v.tiktok_published_at && !v.tiktok_error && (plan('tiktok') || after(v, settings.tiktokSince)),
         () => publishTikTokVideo(v.relative_path, { auto: true })],
-      [on('instagram') && fromYt('instagram') && !own('instagram') && v.vertical_path && !v.instagram_published_at && !v.instagram_error
-        && after(v, settings.instagramSince), () => publishInstagramVideo(v.relative_path, { auto: true })],
-      [on('snapchat') && snapAllowed && fromYt('snapchat') && !own('snapchat') && v.vertical_path && !v.snapchat_published_at && !v.snapchat_error
-        && after(v, settings.snapchatSince), () => publishSnapchatVideo(v.relative_path, { auto: true })],
-      [on('x') && !own('x') && settings.xFromYoutube !== false && !v.x_published_at && !v.x_error && after(v, settings.xSince),
+      [on('instagram') && recoit('instagram', fromYt('instagram') && !!v.vertical_path) && !own('instagram') && !v.instagram_published_at && !v.instagram_error
+        && (plan('instagram') || after(v, settings.instagramSince)), () => publishInstagramVideo(v.relative_path, { auto: true })],
+      [on('snapchat') && snapAllowed && recoit('snapchat', fromYt('snapchat') && !!v.vertical_path) && !own('snapchat') && !v.snapchat_published_at && !v.snapchat_error
+        && (plan('snapchat') || after(v, settings.snapchatSince)), () => publishSnapchatVideo(v.relative_path, { auto: true })],
+      [on('x') && !own('x') && recoit('x', settings.xFromYoutube !== false) && !v.x_published_at && !v.x_error && after(v, settings.xSince),
         () => publishXVideo(v.relative_path, { auto: true })],
-      [on('linkedin') && !own('linkedin') && settings.linkedinFromYoutube !== false && !v.linkedin_published_at && !v.linkedin_error && after(v, settings.linkedinSince),
+      [on('linkedin') && !own('linkedin') && recoit('linkedin', settings.linkedinFromYoutube !== false) && !v.linkedin_published_at && !v.linkedin_error && after(v, settings.linkedinSince),
         () => publishLinkedinVideo(v.relative_path, { auto: true })],
     ];
     const step = steps.find(([due]) => due);
