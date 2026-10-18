@@ -315,6 +315,19 @@ const KappDossier = (() => {
       if (!validFacebookPage(fb.page)) throw new Error(`${CHANNEL_FILE} : facebook.page doit être un lien https://www.facebook.com/…`);
       out.facebookPageUrl = String(fb.page).trim();
     }
+    // Vidéos voulues sur chaque réseau, réglées dans KappGen (Réseaux de la marque) : { réseau: { longue: fichier, courte: fichier } }.
+    // Seuls des noms de fichiers simples du dossier de la vidéo sont acceptés ; "" = rien sur ce réseau.
+    if (file.videos != null) {
+      if (!file.videos || typeof file.videos !== 'object' || Array.isArray(file.videos)) throw new Error(`${CHANNEL_FILE} : videos doit contenir un objet JSON.`);
+      const nom = (v) => (v == null || v === '' ? '' : /^[\w.-]{1,80}\.(mp4|m4v|mov)$/i.test(String(v)) ? String(v) : null);
+      out.videos = {};
+      for (const [net, plan] of Object.entries(file.videos)) {
+        if (!plan || typeof plan !== 'object') continue;
+        const longue = nom(plan.longue), courte = nom(plan.courte);
+        if (longue === null || courte === null) throw new Error(`${CHANNEL_FILE} : videos.${net} contient un nom de fichier invalide.`);
+        out.videos[net] = { longue, courte };
+      }
+    }
     return out;
   }
 
@@ -643,6 +656,8 @@ const KappDossier = (() => {
           applied_hash: record.appliedHash || null, update_tried_hash: record.updateTriedHash || null,
           force_update: !!record.forceUpdate, update_error: record.updateError || null,
           vertical_path: vertical && vertical.path, vertical_size_bytes: vertical && vertical.size,
+          // les autres formats faits par KappGen (reel-court-carre.mp4…), pour les réseaux qui les demandent (videos de reglages-publication.json)
+          format_files: [...node.files.keys()].filter((name) => /^reel-(court|longue)-[a-z]+\.(mp4|m4v|mov)$/i.test(name)),
           youtube_draft: !!record.draft, youtube_error: record.youtubeError || null, broken_draft_ids: record.brokenDraftIds || [],
           short_youtube_id: record.shortYoutubeId || null, facebook_published_at: record.facebookPublishedAt || null,
           facebook_error: record.facebookError || null, published_at: record.youtubePublishedAt || record.publishedAt || null,

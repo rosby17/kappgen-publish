@@ -59,7 +59,11 @@ function normalizedFacebookPage(value) {
     const hosts = new Set(['facebook.com', 'www.facebook.com', 'web.facebook.com', 'm.facebook.com', 'mobile.facebook.com', 'business.facebook.com']);
     if (url.protocol !== 'https:' || !hosts.has(url.hostname.toLowerCase()) || url.username || url.password) return null;
     url.hostname = 'www.facebook.com';
-    url.search = '';
+    // Une page sans nom d'utilisateur n'a que son numéro : https://www.facebook.com/profile.php?id=61552323307269 (Roosevelt, 18/10 :
+    // le lien était coupé en « profile.php »). On garde ce numéro, et rien d'autre de la query.
+    const id = url.pathname.replace(/\/+$/, '').toLowerCase() === '/profile.php' ? url.searchParams.get('id') : null;
+    if (url.pathname.replace(/\/+$/, '').toLowerCase() === '/profile.php' && !/^\d{5,25}$/.test(id || '')) return null;
+    url.search = id ? `?id=${id}` : '';
     url.hash = '';
     return url.toString();
   } catch {
