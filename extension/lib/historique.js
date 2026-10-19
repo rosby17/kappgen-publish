@@ -116,7 +116,13 @@ const KappHistorique = (() => {
     if (channel) channel.addEventListener('message', () => fn());
   }
 
-  return { add, list, onChange, thumbOf };
+  // « Supprimer de la liste » sur une ligne de l'historique : effacée pour de bon.
+  async function remove(id) {
+    await tx('readwrite', (store) => store.delete(id));
+    if (channel) channel.postMessage('changed');
+  }
+
+  return { add, list, onChange, thumbOf, remove };
 })();
 
 if (typeof module !== 'undefined') module.exports = KappHistorique;

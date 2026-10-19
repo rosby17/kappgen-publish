@@ -836,3 +836,13 @@ li.row .when span.late { color: #d93025; font-weight: 600; }
 .folder-kappgen p { margin: 0 0 6px; }
 .folder-kappgen code { display: block; font-size: 12px; word-break: break-all; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, currentColor 8%, transparent); margin-bottom: 8px; }
 .folder-kappgen .actions { margin-bottom: 8px; }
+
+/* Aperçu en grand avant de publier */
+.apercu-cliquable { cursor: zoom-in; }
+.apercu-fond { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .72); display: flex; align-items: center; justify-content: center; padding: 14px; }
+.apercu { position: relative; width: 100%; max-height: 100%; overflow: auto; background: var(--card, #161a24); color: inherit; border-radius: 16px; padding: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
+.apercu-fermer { position: absolute; top: 8px; right: 8px; z-index: 2; }
+.apercu-media { display: flex; align-items: center; justify-content: center; min-height: 120px; border-radius: 10px; overflow: hidden; background: #000; color: #aaa; font-size: 13px; }
+.apercu-media img, .apercu-media video { display: block; width: 100%; max-height: 70vh; object-fit: contain; background: #000; }
+.apercu-titre { font-weight: 700; margin: 12px 0 6px; line-height: 1.35; }
+.apercu-texte { white-space: pre-wrap; font-size: 13px; line-height: 1.5; opacity: .85; max-height: 30vh; overflow: auto; }
