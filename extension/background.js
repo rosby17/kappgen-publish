@@ -621,11 +621,11 @@ async function uploadingInTab(tabId) {
 // Closes the tabs opened by the extension that nothing uses any more (older than minAge, not the one a publication is working in).
 // A Studio tab still uploading is kept (up to 8 h) and looked at again in 3 minutes.
 async function sweepOwnTabs({ minAge = 60000 } = {}) {
-  const [own, borrowed] = [await ownTabs(), await borrowedTabs()];
+  const [own, borrowed, enTransfert] = [await ownTabs(), await borrowedTabs(), await transferTabs()];
   let kept = false;
   for (const [id, since] of Object.entries(own)) {
     const tabId = Number(id);
-    if (tabId === workTabId || borrowed.has(tabId) || Date.now() - since < minAge) continue;
+    if (tabId === workTabId || borrowed.has(tabId) || enTransfert.has(tabId) || Date.now() - since < minAge) continue;
     if (Date.now() - since < KEEP_UPLOADING_MAX && await uploadingInTab(tabId)) { kept = true; continue; }
     await chrome.tabs.remove(tabId).catch(() => {});
     await setOwnTab(tabId, false);
@@ -646,12 +646,13 @@ async function closeStudioTab(tabId, { evenUploading = false } = {}) {
 
 // An already open tab of the site is used (the one in front first, then one
 // of the current window, then any window); a new tab only when there is none.
-async function tabToReuse(pattern, patterns) {
+async function tabToReuse(pattern, patterns, exclude = new Set()) {
+  const ok = (tab) => tab && !exclude.has(tab.id);
   const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
-  if (active && pattern.test(active.url || '')) return active;
-  const here = await chrome.tabs.query({ url: patterns, lastFocusedWindow: true }).catch(() => []);
+  if (ok(active) && pattern.test(active.url || '')) return active;
+  const here = (await chrome.tabs.query({ url: patterns, lastFocusedWindow: true }).catch(() => [])).filter(ok);
   if (here[0]) return here[0];
-  const anywhere = await chrome.tabs.query({ url: patterns });
+  const anywhere = (await chrome.tabs.query({ url: patterns })).filter(ok);
   return anywhere[0] || null;
 }
 const tiktokTabToReuse = () => tabToReuse(/^https:\/\/www\.tiktok\.com\//, ['https://www.tiktok.com/*']);
@@ -660,7 +661,8 @@ const snapchatTabToReuse = () => tabToReuse(/^https:\/\/(profile|my)\.snapchat\.
 const xTabToReuse = () => tabToReuse(/^https:\/\/(x|twitter)\.com\//, ['https://x.com/*', 'https://twitter.com/*']);
 const linkedinTabToReuse = () => tabToReuse(/^https:\/\/www\.linkedin\.com\//, ['https://www.linkedin.com/*']);
 const pinterestTabToReuse = () => tabToReuse(/^https:\/\/(www\.)?pinterest\.com\//, KappPinterest.ORIGINS.concat(['https://pinterest.com/*']));
-const studioTabToReuse = () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*']);
+// Un onglet Studio qui transfère encore une vidéo n'est jamais réutilisé : changer son adresse annulerait le transfert.
+const studioTabToReuse = async () => tabToReuse(/^https:\/\/studio\.youtube\.com\//, ['https://studio.youtube.com/*'], await transferTabs());
 const facebookTabToReuse = () => tabToReuse(/^https:\/\/(www\.|web\.|business\.)?facebook\.com\//,
   ['https://www.facebook.com/*', 'https://facebook.com/*', 'https://web.facebook.com/*', 'https://business.facebook.com/*']);
 
@@ -1124,7 +1126,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
     }
     await setJob({ title: video.title, channel: video.channel_name, message: 'Ouverture de YouTube Studio…' });
     if (visibility === 'CHANNEL') visibility = 'UNLISTED';
-    tabId = await openStudioUpload(channelId, false, { reuse: !auto });
+    tabId = await uploadInTransferTab(channelId) || await openStudioUpload(channelId, false, { reuse: !auto });
     if (source === 'folder') {
       const learned = channelIdOf((await chrome.tabs.get(tabId)).url);
       if (learned) await rememberChannel(video.channel_key, learned);
@@ -1227,6 +1229,97 @@ async function earlyLink(tabId, timeout = 60000) {
   return null;
 }
 
+// ---------------------------------------------------------- transferts en arrière-plan
+// Roosevelt, 19/10 : « une seule vidéo à la fois » alors que YouTube en accepte 15. Une fois la vidéo enregistrée dans Studio (lien,
+// titre, miniature, visibilité faits), la fin du transfert du fichier n'a plus besoin de la publication : son onglet Studio reste ouvert
+// et un suivi à part attend la fin, pendant que la vidéo suivante démarre dans un autre onglet. Les transferts en cours sont notés dans
+// chrome.storage.local « transfers » (repris après un redémarrage de l'extension) ; MAX_TRANSFERTS à la fois.
+const MAX_TRANSFERTS = 5;
+// { <youtubeId>: { tabId, title, path, source, social, startedAt } } : plusieurs vidéos peuvent transférer dans le même onglet.
+async function transfers() {
+  const { transfers: t } = await chrome.storage.local.get('transfers');
+  return t && typeof t === 'object' ? t : {};
+}
+async function addTransfer(youtubeId, entry) {
+  const t = await transfers();
+  t[youtubeId] = entry;
+  await chrome.storage.local.set({ transfers: t });
+}
+async function dropTransfersOf(tabId) {
+  const t = await transfers();
+  const gone = Object.entries(t).filter(([, e]) => e.tabId === tabId);
+  for (const [id] of gone) delete t[id];
+  await chrome.storage.local.set({ transfers: t });
+  return gone.map(([, e]) => e);
+}
+async function transferTabs() {
+  return new Set(Object.values(await transfers()).map((e) => e.tabId));
+}
+// Un suivi par onglet : il attend que plus rien ne s'importe dans l'onglet (toutes ses vidéos), puis le ferme. Jamais pendant qu'une
+// publication remplit une nouvelle vidéo dans ce même onglet.
+const followed = new Set();
+async function followTransfer(tabId) {
+  if (followed.has(tabId)) return;
+  followed.add(tabId);
+  let failure = null;
+  try {
+    let calm = 0;
+    let errors = 0;
+    const deadline = Date.now() + 8 * 3600 * 1000;
+    while (calm < 3 && Date.now() < deadline) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!tab || !(tab.url || '').startsWith('https://studio.youtube.com')) throw new Error('Transfert interrompu : l’onglet YouTube Studio a été fermé avant la fin. Reprends l’importation dans Studio.');
+      const { pending } = await chrome.storage.local.get('pending');
+      let busy = !!(pending && pending.tabId === tabId);
+      if (!busy) {
+        try {
+          await injectScripts(tabId, ['studio.js']);
+          const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!(window.__kappgen && window.__kappgen.stillUploading()) });
+          busy = !!result;
+          errors = 0;
+        } catch (error) {
+          errors += 1;
+          if (errors >= 5) throw error;
+          await sleep(5000);
+          continue;
+        }
+      }
+      calm = busy ? 0 : calm + 1;
+      await sleep(5000);
+    }
+    if (calm < 3) throw new Error('Le transfert YouTube n’a pas pu être confirmé après huit heures. Vérifie son état dans Studio avant toute relance.');
+    await closeStudioTab(tabId, { evenUploading: true });
+  } catch (error) {
+    failure = error;
+  } finally {
+    const entries = await dropTransfersOf(tabId).catch(() => []);
+    if (failure) {
+      for (const e of entries) {
+        if (e.source === 'folder' && e.path && !e.social) await folder('mark', { path: e.path, status: 'published', data: { youtubeError: friendly(failure) } }).catch(() => {});
+      }
+    }
+    followed.delete(tabId);
+  }
+}
+async function followAllTransfers() {
+  for (const id of await transferTabs()) followTransfer(id).catch(() => {});
+}
+// Un onglet Studio de la même chaîne qui transfère déjà : la vidéo suivante y est importée sans recharger (Créer › Importer des vidéos).
+async function uploadInTransferTab(channelId) {
+  for (const tabId of await transferTabs()) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !(tab.url || '').startsWith('https://studio.youtube.com') || (channelId && !(tab.url || '').includes(channelId))) continue;
+    try {
+      await injectScripts(tabId, ['studio.js']);
+      if (await whileShown(tabId, () => step(tabId, 'openUploadInPage'))) {
+        workTabId = tabId;
+        return tabId;
+      }
+    } catch { /* l'onglet ne répond pas : un autre onglet sera ouvert */ }
+  }
+  return null;
+}
+
 // Second half of an upload, shared by publish() and resume(): save as soon as
 // Studio has given the video its YouTube link, then keep the Studio tab open
 // until the transfer is over (closing it would cancel the transfer).
@@ -1257,8 +1350,16 @@ async function finishUpload(job) {
     job = { ...job, stage: 'saved', youtubeId, saveStuck: !saved };
     await chrome.storage.local.set({ pending: job });
   }
-  await setJob({ running: true, youtubeUrl: `https://youtu.be/${youtubeId}`, message: 'Enregistrée dans Studio, transfert en cours (garde l’onglet Studio ouvert)…' });
-  let calm = 0;
+  if (!job.saveStuck) {
+    // Enregistrée proprement : la fin du transfert est suivie à part (followTransfer), la publication continue sans l'attendre.
+    await addTransfer(youtubeId, { tabId, title: video.title, path: video.relative_path, source, social: !!job.social, startedAt: Date.now() });
+    if (workTabId === tabId) workTabId = null;
+    followTransfer(tabId).catch(() => {});
+  }
+  await setJob({ running: true, youtubeUrl: `https://youtu.be/${youtubeId}`, message: job.saveStuck
+    ? 'Enregistrée dans Studio, transfert en cours (garde l’onglet Studio ouvert)…'
+    : 'Enregistrée dans Studio : le transfert continue en arrière-plan (garde Chrome ouvert).' });
+  let calm = job.saveStuck ? 0 : 3;
   let pollingErrors = 0;
   const deadline = Date.now() + 8 * 3600 * 1000;
   while (calm < 3 && Date.now() < deadline) {
@@ -1288,7 +1389,7 @@ async function finishUpload(job) {
     await setJob({ message: 'Studio bloqué sur « Saving… » : visibilité réglée depuis la page de la vidéo…' });
     await applyVisibilityFromEdit(tabId, youtubeId, visibility);
   }
-  await closeStudioTab(tabId);
+  if (job.saveStuck) await closeStudioTab(tabId);
   await chrome.storage.local.remove('pending');
   // A Short is a nested step: publishShortOnly() or the long video's social
   // chain owns the final job state. Marking the job done here would re-enable
@@ -1401,6 +1502,7 @@ async function applyVisibilityFromEdit(tabId, youtubeId, visibility) {
 // just follow that one to its end.
 let resuming = false;
 async function resume() {
+  followAllTransfers().catch(() => {});        // transferts laissés en arrière-plan avant le redémarrage
   if (resuming) return;
   const { pending } = await chrome.storage.local.get('pending');
   if (!pending) return;
@@ -2519,6 +2621,13 @@ async function chainIfDone(since) {
 // order, before the next publication. A network with its own folder
 // (Réglages → Dossiers) only takes that folder's posts. Nothing is retried
 // on its own after a failure (the panel shows « Réessayer »).
+// Écrit UNE valeur dans les réglages en relisant ceux du moment : réécrire tout l'objet lu au début du passage effaçait un choix fait
+// pendant ce temps dans le panneau (Roosevelt, 19/10 : la visibilité « Publique » revenait à « Non répertoriée »).
+async function mergeFolderSetting(patch) {
+  const { folder } = await chrome.storage.local.get('folder');
+  await chrome.storage.local.set({ folder: { ...(folder || {}), ...patch } });
+}
+
 async function spreadNext(settings, sent, own) {
   const on = (net) => networkOn(settings, net);
   // « Mes vidéos YouTube sur ma Page » is on by default: without a start
@@ -2526,7 +2635,7 @@ async function spreadNext(settings, sent, own) {
   // (before 1.18.1). From now on, plus the videos of the last 7 days.
   if (!settings.facebookFromYoutubeSince) {
     settings.facebookFromYoutubeSince = Date.now() - 7 * 24 * 3600000;
-    await chrome.storage.local.set({ folder: settings });
+    await mergeFolderSetting({ facebookFromYoutubeSince: settings.facebookFromYoutubeSince });
   }
   // TikTok / Instagram : « Mes vidéos YouTube » et « Les vidéos de mes posts Facebook » sont désactivés par défaut
   // (anciens réglages tiktokAuto / instagramAuto repris).
@@ -2538,7 +2647,7 @@ async function spreadNext(settings, sent, own) {
     if (['tiktok', 'instagram', 'snapchat'].includes(net) && !fromYt(net) && !fromFb(net)) continue;
     if (on(net) && !settings[`${net}Since`]) {
       settings[`${net}Since`] = Date.now();
-      await chrome.storage.local.set({ folder: settings });
+      await mergeFolderSetting({ [`${net}Since`]: settings[`${net}Since`] });
     }
   }
   const after = (v, since) => {
@@ -2851,7 +2960,8 @@ async function autoPass() {
   // Each network's own posts (its folder, or <NETWORK>/A-PUBLIER), at their time.
   if (!paced && await ownPostNext(settings)) { await paceRecord(); await chainIfDone(passAt); return; }
   let next = null;
-  for (const candidate of !paced && networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
+  const pleins = Object.keys(await transfers()).length >= MAX_TRANSFERTS;      // assez de transferts en cours : la suivante attend
+  for (const candidate of !paced && !pleins && networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
       await folder('mark', { path: candidate.relative_path, status: 'ignored', data: { reason: 'déjà sur la chaîne (même titre)' } }).catch(() => {});
       continue;
@@ -3244,7 +3354,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // marked « Publication annulée. » and never sent again on its own.
     cancelJob: async () => {
       cancelRequested = true;
-      if (workTabId) {
+      if (workTabId && (await transferTabs()).has(workTabId)) {
+        // l'onglet transfère aussi d'autres vidéos : ni rechargé ni fermé (la publication s'arrête à sa prochaine étape)
+      } else if (workTabId) {
         if ((await borrowedTabs()).has(workTabId)) await chrome.tabs.reload(workTabId).catch(() => {});
         else await chrome.tabs.remove(workTabId).catch(() => {});
       }

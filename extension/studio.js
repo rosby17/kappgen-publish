@@ -6,6 +6,24 @@
 // background worker, which does the one thing a page script cannot: handing
 // the local MP4 path to the file picker (DevTools protocol, see background.js).
 
+// Nom donné au fichier dans YouTube Studio : celui du dossier de la vidéo quand le fichier porte un nom passe-partout (video.mp4,
+// final.mp4…) ou qu'il sort d'un dossier de travail KappGen (<vidéo>/06-rendu/). Exemple :
+// « paz-nirvana/contenus/2026-10-15_003_sujet-a-choisir/06-rendu/video.mp4 » → « 2026-10-15_003_sujet-a-choisir.mp4 ».
+function nomPourStudio(chemin, nomFichier) {
+  const parts = String(chemin || '').split('/').filter(Boolean);
+  if (parts.length && parts[parts.length - 1] === nomFichier) parts.pop();
+  const m = String(nomFichier || '').match(/^(.*?)(\.[a-z0-9]{2,4})?$/i);
+  const base = m[1] || '', ext = m[2] || '.mp4';
+  const neutre = /^(\d+[-_ ]?)?(rendus?|renders?|exports?|sorties?|output|final|videos?|a[-_ ]publier|pret|prets|ready)$/i;
+  const travail = parts.some((x) => /^\d+[-_ ]?rendu$/i.test(x));
+  if (!travail && !/^(video|final|rendu|render|export|output|sortie|short|vertical|reel|montage)([-_ ]?\d+)?$/i.test(base)) return null;
+  while (parts.length && neutre.test(parts[parts.length - 1])) parts.pop();
+  const dossier = (parts.pop() || '').replace(/[\\/:*?"<>|]+/g, ' ').trim();
+  if (!dossier || dossier.toLowerCase() === base.toLowerCase()) return null;
+  return dossier + (/^(short|vertical|reel)/i.test(base) ? '-short' : '') + ext;
+}
+if (typeof module !== 'undefined') module.exports = { nomPourStudio };
+
 (() => {
   // A reused tab may hold the script of an older version: replace it.
   const VERSION = chrome.runtime.getManifest().version;
@@ -67,6 +85,20 @@
 
   // Visible clickable element whose own text matches, anywhere in Studio
   // (monetization opens its own small dialog above the upload dialog).
+  // Après « Enregistrer », Studio affiche « Importation de la vidéo : votre vidéo est toujours en cours d'importation… Ne fermez pas cet
+  // onglet » avec un bouton « Fermer » (Roosevelt, 19/10 : l'extension restait bloquée devant). Fermer ce message ne coupe pas
+  // l'importation : elle continue dans l'onglet. Renvoie true si le message a été fermé.
+  function closeUploadingNotice() {
+    const avis = /toujours en cours d.importation|is still (being )?upload|ne fermez pas cet onglet|don.t close this (tab|window)/i;
+    for (const dlg of document.querySelectorAll('tp-yt-paper-dialog, ytcp-dialog, ytcp-uploads-still-processing-dialog, [role="dialog"]')) {
+      if (!visible(dlg) || dlg.closest('ytcp-uploads-dialog') || !avis.test(dlg.innerText || '')) continue;   // jamais la fenêtre d'envoi elle-même
+      const fermer = [...dlg.querySelectorAll('ytcp-button, button, tp-yt-paper-button, [role="button"]')]
+        .find((b) => visible(b) && /^(Fermer|Close|OK|Compris|Got it)$/i.test((b.innerText || b.getAttribute('aria-label') || '').trim()));
+      if (fermer) { click(fermer); return true; }
+    }
+    return false;
+  }
+
   function findByText(selector, pattern) {
     return [...document.querySelectorAll(selector)].find((node) => visible(node) && pattern.test(textOf(node))) || null;
   }
@@ -306,6 +338,20 @@
   window.__kappgen = {
     version: VERSION,
     // True once the upload dialog's file picker is on the page.
+    // Nouvelle importation DANS la page déjà ouverte (Roosevelt, 19/10) : « Créer › Importer des vidéos », sans recharger, pour que
+    // l'importation précédente continue. Renvoie false si le bouton n'est pas trouvé (l'extension ouvre alors un autre onglet).
+    async openUploadInPage() {
+      if (document.querySelector(S('filePicker'))) return true;
+      const create = document.querySelector('ytcp-button#create-icon, #create-icon, ytcp-icon-button#create-icon');
+      if (!create || !visible(create)) return false;
+      click(create);
+      const item = await waitFor(() => findByText('tp-yt-paper-item, ytcp-text-menu tp-yt-paper-item, [role="menuitem"], #text-item-0',
+        /^(Importer des vidéos|Importer une vidéo|Upload videos?|Mettre en ligne des vidéos)$/i), { timeout: 8000, what: 'le menu Créer' }).catch(() => null);
+      if (!item) return false;
+      click(item);
+      return !!(await waitFor(() => document.querySelector(S('filePicker')), { timeout: 20000, what: 'la fenêtre d’envoi' }).catch(() => null));
+    },
+
     async waitForFilePicker() {
       try {
         await waitFor(() => document.querySelector(S('filePicker')),
@@ -343,11 +389,15 @@
         frame.src = src;
         document.documentElement.append(frame);
       });
+      // Le fichier arrive dans Studio sous le nom de SON dossier (Roosevelt, 19/10 : « video » dans Studio, une importation interrompue
+      // demandait « video.mp4 » et on ne retrouvait pas le dossier). Rien n'est renommé sur le disque.
+      const nom = nomPourStudio(path, file.name);
+      const envoye = nom ? new File([file], nom, { type: file.type, lastModified: file.lastModified }) : file;
       const transfer = new DataTransfer();
-      transfer.items.add(file);
+      transfer.items.add(envoye);
       input.files = transfer.files;
       input.dispatchEvent(new Event('change', { bubbles: true }));
-      return { name: file.name, size: file.size };
+      return { name: envoye.name, size: envoye.size };
     },
 
     async fillDetails({ title, description }) {
@@ -499,6 +549,7 @@
       const close = document.querySelector(S('shareClose'));
       if (close) click(close);
       await sleep(1500);
+      closeUploadingNotice();
       return this.saveState();
     },
 
@@ -508,6 +559,7 @@
     saveState() {
       const close = document.querySelector(S('shareClose'));
       if (close && visible(close)) { click(close); return 'closed'; }
+      if (closeUploadingNotice()) return 'closed';
       const dlg = dialog();
       if (!dlg || !visible(dlg)) return 'closed';
       if (X('saving').test(textOf(dlg))) return 'saving';

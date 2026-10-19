@@ -402,6 +402,12 @@
         <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
       </div>
       <p id="folder-hint" class="muted small">Le dossier de ta chaîne, ou celui qui regroupe toutes tes chaînes.</p>
+      <div id="folder-kappgen" class="folder-kappgen" hidden>
+        <p class="small"><b>KappGen range tes marques ici :</b></p>
+        <code id="folder-kappgen-path"></code>
+        <div class="actions"><button id="folder-kappgen-copy" class="btn secondary" type="button">Copier le chemin</button></div>
+        <p class="muted small">Choisis ce dossier, ou n’importe quel dossier au-dessus (Documents…) : l’extension se place toute seule sur tes marques. Sur Mac, dans la fenêtre, ⌘⇧G puis colle le chemin.</p>
+      </div>
     </section>
     <section class="card" id="set-net-folders">
       <h2>Dossier de chaque réseau</h2>
@@ -647,6 +653,7 @@ Ingrédients : …</pre>
   <script src="lib/rythme.js"></script>
   <script src="lib/historique.js"></script>
   <script src="lib/dossier.js"></script>
+  <script src="lib/kappgen-local.js"></script>
   <script src="lib/mise-a-jour.js"></script>
   <script src="sidepanel.js"></script>
 </body>

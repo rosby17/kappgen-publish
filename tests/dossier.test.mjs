@@ -481,3 +481,53 @@ test('KappGen work folder: sheet and thumbnail found, and the published copy win
   assert.equal(queue.videos.length, 1);
   assert.match(queue.videos[0].relative_path, /^KappGen - à publier\//);
 });
+
+test('KappGen : une vidéo montée AVANT le choix du dossier part seule dès que sa miniature et sa fiche sont là (Roosevelt, 19/10)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('YOUTUBE');
+  const fiche = '## Titre\n```\nPourquoi tu t\'épuises\n```\n';
+  const c = disk.dir('BOUDDHISME').dir('paz-nirvana').dir('contenus').dir('2026-10-15_002');
+  c.dir('06-rendu').file('video.mp4', '', { size: 553771273, lastModified: 1_000_000 });          // montée le 16/10
+  c.dir('02-texte').file('fiche.md', fiche, { lastModified: 1_000_000 });
+  const mini = c.dir('07-miniature');
+  KappDossier._setTestRoot(disk);
+  // dossier choisi le 18/10 (watchSince 5 000 000), miniature pas encore faite : elle attend sa miniature, jamais envoyée sans
+  let v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
+  assert.equal(v.auto_ok, false);
+  assert.match(v.auto_blocked, /en attente de sa miniature/);
+  // miniature arrivée APRÈS le choix du dossier : la vidéo est complète maintenant, elle part toute seule
+  mini.file('miniature.jpg', 'jpg', { size: 1000, lastModified: 8_000_000 });
+  v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
+  assert.equal(v.auto_ok, true, v.auto_blocked);
+  // tout était complet avant le choix : elle attend un clic, comme avant
+  mini.file('miniature.jpg', 'jpg', { size: 1000, lastModified: 2_000_000 });
+  v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
+  assert.match(v.auto_blocked, /déjà dans le dossier/);
+  // miniature toute fraîche (moins de 10 min) : on attend qu'elle soit stable
+  mini.file('miniature.jpg', 'jpg', { size: 1000, lastModified: 9_900_000 });
+  v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
+  assert.match(v.auto_blocked, /moins de 10 min/);
+});
+
+test('Studio reçoit le fichier sous le nom de son dossier (Roosevelt, 19/10)', () => {
+  const src = readFileSync(join(root, 'extension/studio.js'), 'utf8');
+  const nomPourStudio = new Function(`${src.slice(src.indexOf('function nomPourStudio'), src.indexOf('if (typeof module'))}; return nomPourStudio;`)();
+  assert.equal(nomPourStudio('BOUDDHISME/paz-nirvana/contenus/2026-10-15_003_x/06-rendu/video.mp4', 'video.mp4'), '2026-10-15_003_x.mp4');
+  assert.equal(nomPourStudio('contenus/2026-10-15_003_x/06-rendu/short.mp4', 'short.mp4'), '2026-10-15_003_x-short.mp4');
+  assert.equal(nomPourStudio('VIDEO/04-puits-canadien/final.mp4', 'final.mp4'), '04-puits-canadien.mp4');
+  assert.equal(nomPourStudio('Mes vidéos/cuisine.mp4', 'cuisine.mp4'), null);            // un fichier déjà bien nommé garde son nom
+});
+
+test('le dossier des marques est trouvé dans un dossier choisi plus haut, grâce au marqueur de KappGen', async () => {
+  const context = vm.createContext({ console, DOMException, AbortController, setTimeout, clearTimeout, fetch: async () => { throw new Error('hors ligne'); } });
+  vm.runInContext(`${readFileSync(join(root, 'extension/lib/kappgen-local.js'), 'utf8')}\nthis.KappLocal = KappLocal;`, context);
+  const documents = new MemoryDirectory('Documents');
+  documents.dir('Factures');
+  const youtube = documents.dir('Motion').dir('YOUTUBE');
+  youtube.file('.kappgen-marques.json', '{}');
+  youtube.dir('BOUDDHISME').dir('paz-nirvana').file('marque.json', '{}');
+  assert.equal((await context.KappLocal.racineDans(documents)).name, 'YOUTUBE');
+  assert.equal((await context.KappLocal.racineDans(youtube)).name, 'YOUTUBE');
+  assert.equal(await context.KappLocal.racineDans(documents.children.get('Factures')), null);
+  assert.equal(await context.KappLocal.dossier(), null);                                     // KappGen absent : aucune erreur
+});

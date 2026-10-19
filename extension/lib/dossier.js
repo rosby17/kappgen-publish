@@ -679,11 +679,21 @@ const KappDossier = (() => {
       // Started long ago and never finished: the video may already be on
       // YouTube (Studio stuck, extension reloaded). Never re-send it alone.
       const interrupted = record.status === 'started' && !running;
+      // Quand la vidéo est devenue COMPLÈTE : la plus récente des dates de la vidéo, de sa miniature, de sa fiche et du publication.md
+      // posé par KappGen (Roosevelt, 19/10 : une vidéo montée avant le choix du dossier, dont la miniature et la fiche sont arrivées
+      // après, passait pour « déjà là » et attendait un clic). Un lien (hardlink) garde la date d'origine : c'est la bonne.
+      let readyAt = Math.max(video.modified, (thumb && thumb.modified) || 0);
+      if (unit.kind === 'kappgen') {
+        const fiche = unit.sheets[0] && unit.sheets[0][0] && unit.sheets[0][0].files.get('fiche.md');
+        if (fiche) readyAt = Math.max(readyAt, (await fiche.getFile()).lastModified);
+        if (node.files.has('publication.md')) readyAt = Math.max(readyAt, (await node.files.get('publication.md').getFile()).lastModified);
+      }
       let blocked = null;
       if (config.auto === false) blocked = 'publication automatique désactivée pour cette chaîne';
       else if (!sheet.title) blocked = 'pas de fiche avec un titre : envoi manuel seulement';
-      else if (now - video.modified < SETTLE_MS) blocked = 'fichier modifié il y a moins de 10 min';
-      else if (watchSince && video.modified < watchSince) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
+      else if (unit.kind === 'kappgen' && !thumb) blocked = 'en attente de sa miniature : elle partira toute seule dès qu’elle sera prête';
+      else if (now - readyAt < SETTLE_MS) blocked = 'fichier modifié il y a moins de 10 min';
+      else if (watchSince && readyAt < watchSince) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
       else if (record.status === 'failed') blocked = 'dernier envoi en échec : relance-le à la main';
       else if (running) blocked = 'envoi déjà en cours';
       else if (interrupted) blocked = 'envoi précédent interrompu : vérifie dans YouTube Studio qu’elle n’y est pas déjà, puis relance à la main';

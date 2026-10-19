@@ -830,3 +830,9 @@ li.row .when span.late { color: #d93025; font-weight: 600; }
 /* Rythme de publication : « Enregistrer » et ce qui a été gardé */
 .pace-save { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .pace-save .status { margin: 0; }
+
+/* KappGen trouvé sur cet ordinateur : le dossier des marques à choisir */
+.folder-kappgen { margin-top: 10px; padding: 12px; border-radius: 14px; background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent); }
+.folder-kappgen p { margin: 0 0 6px; }
+.folder-kappgen code { display: block; font-size: 12px; word-break: break-all; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, currentColor 8%, transparent); margin-bottom: 8px; }
+.folder-kappgen .actions { margin-bottom: 8px; }
