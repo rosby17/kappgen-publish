@@ -124,6 +124,20 @@ const KappFiches = (() => {
     return String(text || '').replace(/</g, '‹').replace(/>/g, '›').trim().slice(0, limit).trim();
   }
 
+  // Description : 4000 caractères au plus (Roosevelt, 19/10 : au-delà, YouTube bloquait certains envois ; large marge sous ses 5000),
+  // coupée à la fin d'une ligne ou d'une phrase plutôt qu'au milieu d'un mot.
+  const DESCRIPTION_MAX = 4000;
+  function cleanDescription(text) {
+    const t = clean(text, 100000);
+    if (t.length <= DESCRIPTION_MAX) return t;
+    const morceau = t.slice(0, DESCRIPTION_MAX);
+    for (const sep of ['\n', '. ', '! ', '? ']) {
+      const i = morceau.lastIndexOf(sep);
+      if (i > DESCRIPTION_MAX * 0.6) return morceau.slice(0, i + (sep === '\n' ? 0 : 1)).trim();
+    }
+    return morceau.trim();
+  }
+
   // Keeps whole tags within YouTube's 500-character budget.
   function fitTags(tags) {
     const out = [];
@@ -137,5 +151,5 @@ const KappFiches = (() => {
     return out;
   }
 
-  return { read, clean, fitTags, plain, firstLineTitle };
+  return { read, clean, cleanDescription, fitTags, plain, firstLineTitle };
 })();

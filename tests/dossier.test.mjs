@@ -568,3 +568,118 @@ test('le panneau n’a jamais deux fonctions du même nom (la seconde écraserai
     assert.deepEqual(doubles, [], `${fichier} : ${doubles.join(', ')}`);
   }
 });
+
+test('verrou d’envoi : seul un envoi récent d’un AUTRE profil bloque, jamais un essai interrompu de ce profil (Roosevelt, 19/10)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  project(disk.dir('CHAINE'), 'Episode', 'episode.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+  const path = 'CHAINE/Episode/episode.mp4';
+  // envoi lancé par ce profil puis interrompu (extension mise à jour) : relancer depuis le même profil n'est jamais bloqué
+  await KappDossier.mark(path, 'started', { owner: 'profil-A' });
+  const relance = await KappDossier.mark(path, 'started', { owner: 'profil-A' });
+  assert.equal(relance.owner, 'profil-A');
+  // un autre profil, pendant que l'envoi donne de ses nouvelles : bloqué
+  await assert.rejects(KappDossier.mark(path, 'started', { owner: 'profil-B' }), /Un autre profil Chrome envoie déjà cette vidéo/);
+  // un battement d'un autre profil ne rafraîchit pas le verrou de celui qui envoie
+  const avant = (await KappDossier.mark(path, 'alive', { owner: 'profil-B' })).aliveAt;
+  assert.equal(avant, undefined);
+  assert.ok((await KappDossier.mark(path, 'alive', { owner: 'profil-A' })).aliveAt > 0);
+  // la fin de l'envoi retire le verrou
+  const fini = await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk' });
+  assert.equal(fini.owner, undefined);
+  assert.equal(fini.aliveAt, undefined);
+});
+
+test('verrou d’envoi périmé : plus de nouvelles depuis 10 min, il ne bloque plus (et l’ancien verrou sans profil non plus)', () => {
+  const { KappDossier } = library();
+  const now = 100 * 60000;
+  const minute = 60000;
+  const blocks = (record, owner = 'B') => KappDossier.lockBlocks(record, { owner, now });
+  assert.equal(blocks({ status: 'started', owner: 'A', startedAt: now - 2 * minute }), true);
+  assert.equal(blocks({ status: 'started', owner: 'A', startedAt: now - 30 * minute, aliveAt: now - minute }), true);   // long, mais vivant
+  assert.equal(blocks({ status: 'started', owner: 'A', startedAt: now - 30 * minute, aliveAt: now - 11 * minute }), false);
+  assert.equal(blocks({ status: 'started', owner: 'A', startedAt: now - 2 * minute }, 'A'), false);                  // ce profil
+  assert.equal(blocks({ status: 'started', startedAt: now - 2 * 3600e3 }), false);                                    // ancien verrou de 3 h
+  assert.equal(blocks({ status: 'started', startedAt: now - 2 * minute }), true);                                     // ancien, récent
+  assert.equal(blocks({ status: 'published', owner: 'A', startedAt: now }), false);
+});
+
+test('un envoi interrompu ne repart pas seul : il passe « interrompu » au bout de 10 min sans nouvelles', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  project(disk.dir('CHAINE'), 'Episode', 'episode.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+  const path = 'CHAINE/Episode/episode.mp4';
+  await KappDossier.mark(path, 'started', { owner: 'profil-A' });
+  let v = (await KappDossier.scan({ now: Date.now() + 60000 })).videos[0];
+  assert.equal(v.running, true);
+  assert.equal(v.auto_ok, false);
+  v = (await KappDossier.scan({ now: Date.now() + 11 * 60000 })).videos[0];
+  assert.equal(v.running, false);
+  assert.equal(v.interrupted, true);
+  assert.match(v.auto_blocked, /interrompu/);
+});
+
+test('miniature refusée par Studio pendant l’envoi : la vidéo est marquée à compléter, puis libérée une fois appliquée', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  const dir = project(disk.dir('CHAINE'), 'Episode', 'episode.mp4', 1_000_000);
+  dir.file('miniature.jpg', 'jpg', { size: 1000 });
+  KappDossier._setTestRoot(disk);
+  const path = 'CHAINE/Episode/episode.mp4';
+  const hash = (await KappDossier.scan({ now: 10_000_000 })).videos[0].hash;
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk', hash, thumbPending: true });
+  let sent = (await KappDossier.scan({ now: 10_000_000 })).sent[0];
+  assert.equal(sent.thumb_pending, true);
+  assert.equal(sent.applied_hash, hash);
+  // essai raté : compté, la référence ne bouge pas
+  await KappDossier.mark(path, 'applied', { hash, champs: ['thumbnail'], thumbnail: false, error: 'refusée' });
+  sent = (await KappDossier.scan({ now: 10_000_000 })).sent[0];
+  assert.equal(sent.thumb_pending, true);
+  assert.equal(sent.thumb_tries, 1);
+  // une mise à jour du titre seul ne compte pas comme un essai de miniature
+  await KappDossier.mark(path, 'applied', { hash, champs: ['title'], thumbnail: false });
+  assert.equal((await KappDossier.scan({ now: 10_000_000 })).sent[0].thumb_tries, 1);
+  // appliquée : plus rien en attente
+  await KappDossier.mark(path, 'applied', { hash, champs: ['thumbnail'], thumbnail: true });
+  sent = (await KappDossier.scan({ now: 10_000_000 })).sent[0];
+  assert.equal(sent.thumb_pending, false);
+  assert.equal(sent.thumb_tries, 0);
+});
+
+test('une mise à jour d’un seul champ ne déplace pas la référence de la fiche (le reste suit tout seul)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  project(disk.dir('CHAINE'), 'Episode', 'episode.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+  const path = 'CHAINE/Episode/episode.mp4';
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk', hash: 'ancien' });
+  let rec = await KappDossier.mark(path, 'applied', { hash: 'nouveau', champs: ['title'] });
+  assert.equal(rec.appliedHash, 'ancien');
+  rec = await KappDossier.mark(path, 'applied', { hash: 'nouveau', champs: null });
+  assert.equal(rec.appliedHash, 'nouveau');
+});
+
+test('KappGen : une miniature de plus de 2 Mo ne part jamais toute seule (YouTube la refuserait)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('YOUTUBE');
+  const c = disk.dir('BOUDDHISME').dir('paz-nirvana').dir('contenus').dir('2026-10-15_009');
+  c.dir('06-rendu').file('video.mp4', '', { size: 6 * 1024 * 1024, lastModified: 1_000_000 });
+  c.dir('02-texte').file('fiche.md', '## Titre\n```\nUn titre\n```\n', { lastModified: 1_000_000 });
+  c.dir('07-miniature').file('miniature.png', 'png', { size: 3 * 1024 * 1024, lastModified: 1_000_000 });
+  KappDossier._setTestRoot(disk);
+  const v = (await KappDossier.scan({ now: 10_000_000 })).videos[0];
+  assert.equal(v.thumbnail_path, null);
+  assert.equal(v.auto_ok, false);
+  assert.match(v.auto_blocked, /plus de 2 Mo/);
+});
+
+test('description de 4000 caractères au plus, coupée à la fin d’une ligne (Roosevelt, 19/10)', () => {
+  const { KappFiches } = library();
+  const longue = Array.from({ length: 200 }, (_, i) => `${i}:00 Chapitre ${i}, une phrase assez longue pour la remplir.`).join('\n');
+  const r = KappFiches.cleanDescription(longue);
+  assert.ok(r.length <= 4000, String(r.length));
+  assert.ok(r.endsWith('remplir.'));
+  assert.equal(KappFiches.cleanDescription('courte <b>'), 'courte ‹b›');
+});

@@ -25,6 +25,7 @@ importScripts('lib/facebook-flow.js');
 importScripts('lib/studio-onglet.js');
 importScripts('lib/pinterest.js');
 importScripts('lib/mise-a-jour.js');
+importScripts('lib/maj-video.js');
 
 // The user's KappGen account (session cookie of kappgen.com). The local
 // Docker version is chosen in the panel's Help tab (http://localhost:8080).
@@ -519,11 +520,27 @@ async function postStep(tabId, name, args) {
   }
 }
 
-async function step(tabId, name, args, recoveryScript = 'studio.js') {
+// Studio recharge ou change de page pendant une étape : Chrome répond « Frame with ID 0 was removed » (Roosevelt, 19/10 :
+// « Mise à jour échouée : Frame with ID 0 was removed. »). C'est une page rechargée, comme window.__kappgen absent.
+const STEP_RELOAD_TRIES = 3;
+async function waitTabComplete(tabId, timeout = 30000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return;
+    if (tab.status === 'complete') return;
+    await sleep(700);
+  }
+}
+
+// relance : réessayer l'étape après une page rechargée en cours d'étape. Seulement sur Studio (jamais un « Publier » Facebook rejoué :
+// double publication) et jamais pour une étape qui a pu aboutir avant le rechargement (saveEdit : relance: false).
+async function step(tabId, name, args, recoveryScript = 'studio.js', { relance = recoveryScript === 'studio.js' } = {}) {
   ensureNotCancelled();
   // Studio and Facebook sometimes reload the page under their helper script:
-  // window.__kappgen is then gone. Reinject the helper for the current site
-  // and retry once instead of accidentally loading the Studio helper on Facebook.
+  // window.__kappgen is then gone (or the frame itself, mid-step). Reinject the
+  // helper for the current site and retry (STEP_RELOAD_TRIES times at most)
+  // instead of accidentally loading the Studio helper on Facebook.
   const run = async () => {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId },
@@ -539,12 +556,30 @@ async function step(tabId, name, args, recoveryScript = 'studio.js') {
     });
     return result;
   };
-  let result = await run();
-  if (result && result.missing) {
+  const attempt = () => run().catch((error) => {
+    if (KappMajVideo.pageRechargee(error)) return { missing: true, reloaded: true };
+    throw error;
+  });
+  const reloadError = () => new Error(recoveryScript === 'studio.js'
+    ? `YouTube Studio a rechargé la page pendant l’étape « ${name} » : réessaie.`
+    : `La page a été rechargée pendant l’étape « ${name} » : réessaie.`);
+  let result = await attempt();
+  if (result && result.reloaded && !relance) throw reloadError();
+  // window.__kappgen absent : une seule relance, comme avant ; frame supprimée (Studio) : jusqu'à STEP_RELOAD_TRIES.
+  const tries = result && result.reloaded ? STEP_RELOAD_TRIES : 1;
+  for (let n = 0; result && result.missing && n < tries; n += 1) {
+    ensureNotCancelled();
     await sleep(4000); // let the reloaded page settle
-    await injectScripts(tabId, [recoveryScript]);
-    result = await run();
+    await waitTabComplete(tabId);
+    try {
+      await injectScripts(tabId, [recoveryScript]);
+    } catch (error) {
+      if (!KappMajVideo.pageRechargee(error)) throw error;
+      continue; // the page is still changing: wait and try again
+    }
+    result = await attempt();
   }
+  if (result && result.reloaded) throw reloadError();
   if (!result || !result.ok) throw new Error((result && !result.missing && result.error) || `Étape « ${name} » impossible.`);
   return result.value;
 }
@@ -557,6 +592,8 @@ function friendly(error) {
   if (/error page|ERR_|Cannot access contents|No tab with id/i.test(message)) {
     return 'La page (YouTube Studio, Facebook…) n’a pas pu se charger (connexion Internet ?) ou l’onglet a été fermé. Relance l’envoi.';
   }
+  // « Frame with ID 0 was removed » : la page a été rechargée sous l'étape, jamais le texte anglais brut.
+  if (KappMajVideo.pageRechargee(message)) return 'La page a été rechargée pendant l’opération (YouTube Studio, Facebook…) : réessaie.';
   if (/Another debugger is already attached/i.test(message)) {
     return 'Ferme les outils de développement (DevTools) de l’onglet YouTube Studio, puis relance.';
   }
@@ -1078,6 +1115,18 @@ async function chooseVisibilityStep(tabId, args) {
   return result;
 }
 
+// Identifiant de CE profil Chrome, écrit dans le verrou d'un envoi (« owner ») : un verrou posé par ce profil ne le bloque jamais
+// (essai précédent interrompu), seul celui d'un autre profil, encore vivant, bloque. Gardé dans chrome.storage.local : il survit
+// aux mises à jour et aux rechargements de l'extension (Roosevelt, 19/10).
+async function profileId() {
+  const { profileId: known } = await chrome.storage.local.get('profileId');
+  if (known) return known;
+  const id = crypto.randomUUID();
+  await chrome.storage.local.set({ profileId: id });
+  return id;
+}
+const ALIVE_EVERY_MS = 2 * 60000; // le verrou d'un envoi est rafraîchi toutes les 2 min (frais 10 min : lib/dossier.js)
+
 // Same steps for both sources; only where the video comes from differs.
 async function publish(source, videoId, visibility, { auto = false } = {}) {
   await chrome.storage.session.set({ job: { running: true, source, kind: 'youtube', path: videoId, videoId, auto, message: 'Préparation…', startedAt: Date.now() } });
@@ -1088,6 +1137,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
   let marked = false; // only our own "started" mark may become "failed"
   let tabId = null;
   let job = null;
+  let alive = null;
   linkedYoutubeId = null;
   try {
     if (source === 'folder') {
@@ -1106,8 +1156,11 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       const fixed = video.schedule_at && video.schedule_at > Date.now() + 15 * 60000;
       if (visibility === 'CHANNEL') visibility = fixed ? 'SCHEDULE' : channelVisibility(own);
       if (visibility === 'SCHEDULE') scheduleAt = fixed ? video.schedule_at : await nextSlot(video.channel_key, own.times);
-      await folder('mark', { path: video.relative_path, status: 'started' });
+      const owner = await profileId();
+      await folder('mark', { path: video.relative_path, status: 'started', data: { owner } });
       marked = true;
+      // Tant que l'envoi vit, son verrou reste frais ; interrompu (extension rechargée, Chrome fermé), il périme seul en 10 min.
+      alive = setInterval(() => folder('mark', { path: video.relative_path, status: 'alive', data: { owner } }).catch(() => {}), ALIVE_EVERY_MS);
     } else {
       const { videos, host_storage_configured: configured } = await api('/studio-upload/queue');
       video = videos.find((v) => v.id === videoId);
@@ -1149,12 +1202,17 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
         // Not worth failing a whole upload over: tags can be added later.
         await step(tabId, 'fillTags', { tags: video.tags }).catch((error) => setJob({ warning: String(error.message || error) }));
       }
+      // Roosevelt, 19/10 : « il y a encore des vidéos qui partent sans miniature ». Une miniature que Studio n'a pas prise ici
+      // (champ Miniature absent, fichier illisible, plus de 2 Mo) n'est plus un simple avertissement : la vidéo est marquée
+      // « miniature à compléter » et la miniature est appliquée ensuite toute seule sur sa page d'édition (autoPass).
+      let thumbSent = false;
+      let thumbWhy = video.thumbnail_warning || (video.kind === 'kappgen' && !video.thumbnail_path ? 'pas encore de miniature dans le dossier' : '');
       if (video.thumbnail_path) {
         // Attendre le champ Miniature (Studio l'affiche après le traitement) : avant, la miniature partait silencieusement.
         await setJob({ message: 'Miniature…' });
         const picker = await step(tabId, 'waitForThumbnailPicker').then(() => true, () => false);
         if (!picker) {
-          await setJob({ warning: 'Miniature non envoyée : YouTube n’a pas affiché le champ Miniature pour cette chaîne. Terminez-la dans YouTube Studio, ou utilisez « Mettre à jour » après.' });
+          thumbWhy = 'YouTube n’a pas encore affiché le champ Miniature';
         } else {
           const thumbInput = 'thumbInput';
           try {
@@ -1164,10 +1222,18 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
             } else {
               await setLocalFile(tabId, thumbInput, video.thumbnail_path);
             }
+            thumbSent = true;
           } catch (error) {
-            await setJob({ warning: `Miniature non envoyée : ${friendly(error)}` });
+            thumbWhy = friendly(error);
           }
         }
+      }
+      if (source === 'folder' && KappMajVideo.miniatureAComplete({ kind: video.kind, thumbnailPath: video.thumbnail_path, previewPath: video.preview_path, envoyee: thumbSent })) {
+        job = { ...job, thumbPending: true };
+        await chrome.storage.local.set({ pending: job });
+        await setJob({ warning: `Miniature pas encore sur YouTube (${thumbWhy || 'refusée par Studio'}) : elle sera appliquée toute seule sur la vidéo juste après son envoi.` });
+      } else if (!thumbSent && video.thumbnail_path) {
+        await setJob({ warning: `Miniature non envoyée (${thumbWhy}) : utilise « Mettre à jour la miniature » une fois la vidéo en ligne.` });
       }
 
       // The draft exists on YouTube as soon as Studio shows its link. Record it
@@ -1176,11 +1242,13 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       // jour") instead of uploading the same file a second time.
       const early = await earlyLink(tabId);
       if (early) {
+        if (alive) { clearInterval(alive); alive = null; } // plus de verrou : la vidéo est notée avec son lien
         linkedYoutubeId = early;
         job = { ...job, youtubeId: early };
         await chrome.storage.local.set({ pending: job });
         if (source === 'folder') {
-          await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeId: early, visibility, channel: video.channel_key, hash: video.hash, draft: true } });
+          await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeId: early, visibility, channel: video.channel_key, hash: video.hash, draft: true,
+            ...(job.thumbPending ? { thumbPending: true } : {}) } });
         } else {
           await api(`/studio-upload/${videoId}/published`, { method: 'POST', body: JSON.stringify({ youtube_video_id: early }) }).catch(() => {});
         }
@@ -1205,6 +1273,8 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
     } else {
       if (!linkedYoutubeId) await api(`/studio-upload/${videoId}/failed`, { method: 'POST', body: JSON.stringify({ error: message }) }).catch(() => {});
     }
+  } finally {
+    if (alive) clearInterval(alive);
   }
 }
 
@@ -1334,7 +1404,8 @@ async function finishUpload(job) {
       // replace the long video's link, only be recorded next to it.
       await folder('mark', { path: video.relative_path, status: 'published', data: job.social
         ? { shortYoutubeId: youtubeId }
-        : { youtubeId, visibility, channel: video.channel_key, hash: video.hash, ...(scheduleAt ? { scheduleAt } : {}) } });
+        : { youtubeId, visibility, channel: video.channel_key, hash: video.hash, ...(scheduleAt ? { scheduleAt } : {}),
+          ...(job.thumbPending ? { thumbPending: true } : {}) } });
     } else {
       await api(`/studio-upload/${videoId}/published`, { method: 'POST', body: JSON.stringify({ youtube_video_id: youtubeId }) });
     }
@@ -1552,18 +1623,22 @@ async function resume() {
 
 // "Mettre à jour" on a video already sent: re-apply its sheet (title,
 // description, tags) and thumbnail from the folder on its YouTube edit page.
-async function updateVideo(relativePath, auto = false) {
+// champs (Roosevelt, 19/10) : null = tout ; ['thumbnail'] | ['title'] | ['description'] = ce champ seulement, le reste de la
+// page n'est pas touché. Jamais de nouvel envoi du fichier : seulement la page d'édition de la vidéo déjà en ligne.
+const CHAMP_NOMS = { thumbnail: 'Miniature', title: 'Titre', description: 'Description' };
+async function updateVideo(relativePath, auto = false, champs = null) {
+  const seul = Array.isArray(champs) && champs.length === 1 ? champs[0] : null;
   await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'update', path: relativePath, auto, message: 'Préparation de la mise à jour…', startedAt: Date.now() } });
   let tabId = null;
   let sentHash = null;
+  let thumbApplied = false;
   try {
     const { sent } = await folderQueue();
     const video = sent.find((v) => v.relative_path === relativePath);
     sentHash = video && video.hash;
-    if (!video || !video.youtube_id) throw new Error('Cette vidéo n’a pas de lien YouTube enregistré.');
-    if (!video.title && !video.description && !(video.tags || []).length && !video.thumbnail_path) {
-      throw new Error('Aucune fiche ni miniature trouvée pour cette vidéo dans le dossier.');
-    }
+    if (!video || !video.youtube_id) throw new Error('Cette vidéo n’a pas de lien YouTube enregistré : indique-le d’abord (⋮ › Indiquer le lien YouTube).');
+    const plan = KappMajVideo.champsAMettreAJour(champs, video);
+    if (plan.erreur) throw new Error(plan.erreur);
     await setJob({ title: video.title || relativePath.split('/').pop(), channel: video.channel_name, message: 'Ouverture de la vidéo dans YouTube Studio…' });
     const tab = await reuseOrOpen(studioTabToReuse, `https://studio.youtube.com/video/${video.youtube_id}/edit`);
     tabId = tab.id;
@@ -1579,12 +1654,13 @@ async function updateVideo(relativePath, auto = false) {
     await injectScripts(tabId, ['studio.js']);
     await whileShown(tabId, async () => {
       const thumbInput = 'editThumbInput';
-      if (video.thumbnail_path) {
+      if (plan.thumbnail) {
         await setJob({ message: 'Miniature…' });
         const src = await bridgeSource(tabId, video.thumbnail_path);
         // Studio sometimes reloads the edit page under the script (no answer:
         // « Étape impossible »): wait, inject again, try once more. A thumbnail
-        // that still cannot be set must not block the title and description.
+        // that still cannot be set must not block the title and description
+        // (but it is the whole job of « Mettre à jour la miniature »).
         const sendThumb = () => step(tabId, 'receiveFile', { selector: thumbInput, src, path: video.thumbnail_path });
         try {
           try {
@@ -1595,24 +1671,43 @@ async function updateVideo(relativePath, auto = false) {
             await injectScripts(tabId, ['studio.js']);
             await sendThumb();
           }
+          thumbApplied = true;
         } catch (error) {
+          if (seul === 'thumbnail') throw new Error(`Miniature non acceptée par YouTube Studio : ${friendly(error)}`);
           await setJob({ warning: `Miniature non mise à jour : ${friendly(error)}` });
         }
         await sleep(3000);
       }
-      await setJob({ message: 'Titre, description, mots-clés…' });
-      await step(tabId, 'editDetails', { title: video.title, description: video.description, tags: video.tags });
+      if (plan.title || plan.description || plan.tags) {
+        await setJob({ message: seul ? `${CHAMP_NOMS[seul]}…` : 'Titre, description, mots-clés…' });
+        await step(tabId, 'editDetails', { title: plan.title ? video.title : null, description: plan.description ? video.description : null,
+          tags: plan.tags ? video.tags : null });
+      }
       await setJob({ message: 'Enregistrement…' });
-      await step(tabId, 'saveEdit');
+      try {
+        // Pas de relance automatique : un rechargement juste après le clic sur Enregistrer, c'est souvent Studio qui a enregistré.
+        await step(tabId, 'saveEdit', {}, 'studio.js', { relance: false });
+      } catch (error) {
+        const message = String((error && error.message) || error);
+        if (/rechargé la page/.test(message)) {
+          await setJob({ warning: 'YouTube Studio a rechargé la page juste après « Enregistrer » : vérifie dans Studio que la modification est bien là.' });
+        } else if (seul && seul !== 'thumbnail' && /aucune modification/.test(message)) {
+          // Rien à enregistrer : le titre (ou la description) de YouTube est déjà celui du dossier.
+          await setJob({ warning: `${CHAMP_NOMS[seul]} déjà à jour sur YouTube.` });
+        } else throw error;
+      }
     });
     closeStudioTab(tabId);
-    await folder('mark', { path: relativePath, status: 'applied', data: { hash: video.hash } });
-    await setJob({ running: false, done: true, error: null, youtubeUrl: `https://youtu.be/${video.youtube_id}`, message: 'Vidéo mise à jour sur YouTube.' });
+    await folder('mark', { path: relativePath, status: 'applied', data: { hash: video.hash, champs: plan.tout ? null : champs, thumbnail: thumbApplied } });
+    await setJob({ running: false, done: true, error: null, youtubeUrl: `https://youtu.be/${video.youtube_id}`,
+      message: seul ? { thumbnail: 'Miniature mise à jour', title: 'Titre mis à jour', description: 'Description mise à jour' }[seul] + ' sur YouTube.' : 'Vidéo mise à jour sur YouTube.' });
   } catch (error) {
-    const message = friendly(error);
+    const raw = String((error && error.message) || error);
+    // « Frame with ID 0 was removed » : jamais le texte anglais brut.
+    const message = KappMajVideo.pageRechargee(raw) || /rechargé la page/.test(raw) ? KappMajVideo.MESSAGE_PAGE_RECHARGEE : friendly(error);
     await setJob({ running: false, done: false, error: message, message });
     // Automatic retries wait for the next change of the sheet; the button still works.
-    if (sentHash) await folder('mark', { path: relativePath, status: 'applied', data: { hash: sentHash, error: message } }).catch(() => {});
+    if (sentHash) await folder('mark', { path: relativePath, status: 'applied', data: { hash: sentHash, error: message, champs, thumbnail: thumbApplied } }).catch(() => {});
   }
 }
 
@@ -3003,16 +3098,29 @@ async function autoPass() {
   }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
   let stale = null;
+  let thumbOnly = null;
+  const enTransfert = await transfers(); // fichier encore en route vers YouTube : la miniature attend la fin du transfert
   const { archives: archivees } = await chrome.storage.local.get('archives');
   const archivee = new Set(Array.isArray(archivees) ? archivees : []);
   for (const v of networkOn(settings, 'youtube') ? sent : []) {
     if (!v.youtube_id || !v.has_content || ownOf(settings, v).auto === false || archivee.has(`p:${v.relative_path}`)) continue;     // archivée : plus de mise à jour toute seule
+    // Miniature que Studio n'a pas prise pendant l'envoi : appliquée seule (le titre fait à la main dans Studio n'est pas écrasé),
+    // ou avec le reste si la fiche a aussi changé. Jamais sur un brouillon inachevé.
+    if (!v.youtube_draft && !enTransfert[v.youtube_id] && KappMajVideo.miniatureARetenter(v, Date.now())) {
+      if (!thumbOnly) thumbOnly = v;
+      continue;
+    }
     if (!v.applied_hash && !v.force_update) {
       // first time this video is watched: what is on YouTube now is the reference
       await folder('mark', { path: v.relative_path, status: 'applied', data: { hash: v.hash } }).catch(() => {});
     } else if (v.applied_hash !== v.hash && v.update_tried_hash !== v.hash) {
       stale = stale || v;
     }
+  }
+  if (thumbOnly) {
+    await updateVideo(thumbOnly.relative_path, true, thumbOnly.applied_hash === thumbOnly.hash ? ['thumbnail'] : null);
+    autoTick();
+    return;
   }
   if (!stale) return;
   await updateVideo(stale.relative_path, true);
@@ -3223,7 +3331,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
-      updateVideo(message.path);
+      // message.champs : ['thumbnail'] | ['title'] | ['description'] (menu ⋮ de « Déjà publiés ») ; absent = tout.
+      const champs = Array.isArray(message.champs) ? message.champs.filter((c) => KappMajVideo.CHAMPS.includes(c)) : null;
+      updateVideo(message.path, false, champs && champs.length ? champs : null);
       return { started: true };
     },
     facebook: async () => {

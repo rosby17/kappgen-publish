@@ -36,7 +36,10 @@ const KappDossier = (() => {
   const MIN_SIZE = 5 * 1024 * 1024;
   const SETTLE_MS = 10 * 60 * 1000;            // still being written if touched within 10 min
   const LOOSE_MAX_AGE = 14 * 24 * 3600 * 1000; // loose videos without a sheet: recent ones only
-  const STARTED_LOCK_MS = 3 * 3600 * 1000;     // a "started" upload blocks other profiles for 3 h
+  // Un envoi « en cours » donne de ses nouvelles toutes les 2 min (aliveAt) : sans nouvelles depuis 10 min, il a été interrompu
+  // (extension rechargée ou mise à jour, Chrome fermé) et ne bloque plus personne (Roosevelt, 19/10 : « Un autre profil Chrome
+  // envoie déjà cette vidéo » avec un seul profil : l'ancien verrou de 3 h ne savait pas qui l'avait posé).
+  const LOCK_FRESH_MS = 10 * 60 * 1000;
   const MAX_DEPTH = 7;
 
   const VIDEO_EXT = /\.(mp4|m4v)$/i;
@@ -56,6 +59,14 @@ const KappDossier = (() => {
     'sortie', 'sorties', 'out', 'a publier', 'to publish', 'pret', 'prets', 'ready']);
   const CONTAINERS = new Set(['video', 'videos', 'videos longues', 'longues', 'long', 'shorts', 'episodes']);
   const SHEET_NAMES = /^(publication.*|youtube.*|metadata|meta|fiche.*)\.(md|json|txt)$|^(description|titre|title|tags)\.txt$/i;
+
+  // Le verrou d'un envoi bloque-t-il ce profil ? Seulement s'il vient d'un AUTRE profil (owner) et qu'il a donné de ses nouvelles
+  // récemment. Posé par ce profil : c'est un essai précédent interrompu (ce profil n'envoie qu'une publication à la fois).
+  function lockBlocks(record, { owner = null, now = Date.now() } = {}) {
+    if (!record || record.status !== 'started') return false;
+    if (owner && record.owner && record.owner === owner) return false;
+    return now - Math.max(record.startedAt || 0, record.aliveAt || 0) < LOCK_FRESH_MS;
+  }
 
   const norm = (name) => KappFiches.plain(name).replace(/[-_]+/g, ' ').trim();
   const stem = (name) => name.replace(/\.[^.]+$/, '');
@@ -657,13 +668,16 @@ const KappDossier = (() => {
         sent.push({ manual: record.status === 'ignored', relative_path: relativePath, channel_key: channelKey, channel_name: channelName, size_bytes: video.size,
           youtube_id: record.youtubeId || null, date: record.date, schedule_at: record.scheduleAt || null,
           title: sheet.title ? KappFiches.clean(sheet.title, 100) : null,
-          description: KappFiches.clean(sheet.description, 5000),
+          description: KappFiches.cleanDescription(sheet.description),
           tags: KappFiches.fitTags(sheet.tags),
           thumbnail_path: thumb && thumb.size <= 2 * 1024 * 1024 ? thumb.path : null,
           preview_path: thumb ? thumb.path : null,
           hash, has_content: !!(sheet.title || sheet.description || thumb),
           applied_hash: record.appliedHash || null, update_tried_hash: record.updateTriedHash || null,
           force_update: !!record.forceUpdate, update_error: record.updateError || null,
+          // miniature refusée par Studio pendant l'envoi : appliquée ensuite toute seule (lib/maj-video.js)
+          thumb_pending: !!record.thumbPending, thumb_tries: record.thumbTries || 0, applied_at: record.appliedAt || null,
+          thumbnail_warning: thumb && thumb.size > 2 * 1024 * 1024 ? 'miniature de plus de 2 Mo : YouTube la refuse' : null,
           vertical_path: vertical && vertical.path, vertical_size_bytes: vertical && vertical.size,
           // les autres formats faits par KappGen (reel-court-carre.mp4…), pour les réseaux qui les demandent (videos de reglages-publication.json)
           format_files: [...node.files.keys()].filter((name) => /^reel-(court|longue)-[a-z]+\.(mp4|m4v|mov)$/i.test(name)),
@@ -684,10 +698,11 @@ const KappDossier = (() => {
       channels.get(channelKey).videos += 1;
 
       const config = { ...(settings[channelKey] || {}), ...fileConfig };
-      const running = record.status === 'started' && now - (record.startedAt || 0) < STARTED_LOCK_MS;
-      // Started long ago and never finished: the video may already be on
+      const running = lockBlocks(record, { now });
+      // Started and silent for 10 min: the video may already be on
       // YouTube (Studio stuck, extension reloaded). Never re-send it alone.
       const interrupted = record.status === 'started' && !running;
+      const bigThumb = thumb && thumb.size > 2 * 1024 * 1024;
       // Quand la vidéo est devenue COMPLÈTE : la plus récente des dates de la vidéo, de sa miniature, de sa fiche et du publication.md
       // posé par KappGen (Roosevelt, 19/10 : une vidéo montée avant le choix du dossier, dont la miniature et la fiche sont arrivées
       // après, passait pour « déjà là » et attendait un clic). Un lien (hardlink) garde la date d'origine : c'est la bonne.
@@ -701,20 +716,21 @@ const KappDossier = (() => {
       if (config.auto === false) blocked = 'publication automatique désactivée pour cette chaîne';
       else if (!sheet.title) blocked = 'pas de fiche avec un titre : envoi manuel seulement';
       else if (unit.kind === 'kappgen' && !thumb) blocked = 'en attente de sa miniature : elle partira toute seule dès qu’elle sera prête';
+      // Une vidéo KappGen ne part jamais toute seule sans miniature : une miniature de plus de 2 Mo serait refusée par YouTube.
+      else if (unit.kind === 'kappgen' && bigThumb) blocked = 'miniature de plus de 2 Mo (YouTube la refuse) : réduis-la, la vidéo partira toute seule ensuite';
       else if (now - readyAt < SETTLE_MS) blocked = 'fichier modifié il y a moins de 10 min';
       else if (watchSince && readyAt < watchSince) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
       else if (record.status === 'failed') blocked = 'dernier envoi en échec : relance-le à la main';
       else if (running) blocked = 'envoi déjà en cours';
       else if (interrupted) blocked = 'envoi précédent interrompu : vérifie dans YouTube Studio qu’elle n’y est pas déjà, puis relance à la main';
 
-      const bigThumb = thumb && thumb.size > 2 * 1024 * 1024;
       videos.push({
         id: relativePath,
         relative_path: relativePath,
         title: KappFiches.clean(sheet.title || stem(video.name).replace(/[-_]+/g, ' '), 100),
         titles: sheet.titles || null,
         has_sheet: !!sheet.title,
-        description: KappFiches.clean(sheet.description, 5000),
+        description: KappFiches.cleanDescription(sheet.description),
         tags: KappFiches.fitTags(sheet.tags),
         comment: sheet.comment || null,
         sheet_path: sheet.sheetPath || null,
@@ -865,8 +881,16 @@ const KappDossier = (() => {
       const record = state[relativePath] || {};
       record.appliedAt = now;
       delete record.forceUpdate;
+      // data.champs : ce qui a été mis à jour (absent = tout) ; data.thumbnail : la miniature a bien été prise par Studio.
+      const partiel = Array.isArray(data.champs) && data.champs.length && data.champs.length < 4;
+      if (data.thumbnail) { delete record.thumbPending; delete record.thumbTries; }
+      else if (record.thumbPending && (!partiel || data.champs.includes('thumbnail'))) record.thumbTries = (record.thumbTries || 0) + 1;
       if (data.error) Object.assign(record, { updateError: data.error, updateTriedHash: data.hash });
-      else { record.appliedHash = data.hash; delete record.updateError; delete record.updateTriedHash; }
+      else {
+        // Une mise à jour d'un seul champ n'envoie pas le reste de la fiche : la référence ne bouge pas (le reste suit tout seul).
+        if (!partiel) record.appliedHash = data.hash;
+        delete record.updateError; delete record.updateTriedHash;
+      }
       state[relativePath] = record;
     } else if (status === 'schedule') {
       // Time chosen in the panel for this video (status unchanged).
@@ -887,6 +911,11 @@ const KappDossier = (() => {
         record.manual = { ...(record.manual || {}), [key]: new Date(now).toISOString() };
       }
       state[relativePath] = record;
+    } else if (status === 'alive') {
+      // L'envoi en cours donne de ses nouvelles (toutes les 2 min) : son verrou reste frais. Rien d'autre ne change.
+      const record = state[relativePath];
+      if (!record || record.status !== 'started' || (data.owner && record.owner && record.owner !== data.owner)) return record || null;
+      record.aliveAt = now;
     } else if (status === 'reset') {
       delete state[relativePath];
     } else if (status === 'resetYoutube') {
@@ -895,15 +924,21 @@ const KappDossier = (() => {
       const record = { ...(state[relativePath] || {}) };
       if (record.youtubeId && record.draft) record.brokenDraftIds = [...new Set([...(record.brokenDraftIds || []), record.youtubeId])];
       for (const key of ['status', 'youtubeId', 'youtubePublishedAt', 'publishedAt', 'visibility', 'channel', 'appliedHash', 'appliedAt', 'draft',
-        'youtubeError', 'updateError', 'updateTriedHash', 'forceUpdate', 'startedAt', 'date', 'error', 'shortError']) delete record[key];
+        'youtubeError', 'updateError', 'updateTriedHash', 'forceUpdate', 'startedAt', 'date', 'error', 'shortError',
+        'thumbPending', 'thumbTries', 'owner', 'aliveAt']) delete record[key];
       state[relativePath] = record;
     } else {
       const record = state[relativePath] || {};
       if (status === 'started') {
-        if (record.status === 'started' && now - (record.startedAt || 0) < STARTED_LOCK_MS) {
-          throw new Error('Un autre profil Chrome envoie déjà cette vidéo.');
+        if (lockBlocks(record, { owner: data.owner || null, now })) {
+          throw new Error('Un autre profil Chrome envoie déjà cette vidéo (il y a moins de 10 min). Attends la fin, ou réessaie dans 10 min s’il a été fermé.');
         }
         delete record.error;
+        delete record.aliveAt;
+        if (data.owner) record.owner = data.owner; else delete record.owner;
+      } else {
+        delete record.owner;
+        delete record.aliveAt;
       }
       const statusData = { status };
       // `publishedAt` is the date at which the long YouTube video was first
@@ -928,6 +963,8 @@ const KappDossier = (() => {
           record.youtubePublishedAt = record.publishedAt;
         }
         if (data.youtubeError && record.draft) record.youtubeError = data.youtubeError;
+        // Studio n'a pas pris la miniature pendant l'envoi : elle est appliquée ensuite sur la page de la vidéo.
+        if (data.thumbPending) { record.thumbPending = true; delete record.thumbTries; }
         if (data.shortYoutubeId) { record.shortYoutubeId = data.shortYoutubeId; delete record.shortError; }
         if (data.shortError) record.shortError = data.shortError;
         // Link given by hand: the sheet and thumbnail of the folder must be applied.
@@ -1333,6 +1370,6 @@ const KappDossier = (() => {
 
   return { NETS, POST_NETS, saveRoot, loadRoot, access, folders, saveNetRoot, loadNetRoot, clearNetRoot,
     saveFbRoot, loadFbRoot, clearFbRoot, fbAccess, fileAt, scan, mark, facebookPosts, markPost, deletePost, writePostText, replacePostMedia, exportState,
-    _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testNets.facebook = h; },
+    lockBlocks, _setTestRoot: (h) => { testRoot = h; }, _setTestFbRoot: (h) => { testNets.facebook = h; },
     _setTestNetRoot: (net, h) => { testNets[net] = h; } };
 })();
