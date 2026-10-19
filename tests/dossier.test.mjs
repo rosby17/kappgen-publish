@@ -560,3 +560,11 @@ test('Facebook a ses propres heures dans les réglages de la marque, indépendan
   marque.file('reglages-publication.json', JSON.stringify({ facebook: { heures: ['12:07'] } }));
   await assert.rejects(KappDossier.scan({ now: 10_000_000 }), /facebook\.heures/);
 });
+
+test('le panneau n’a jamais deux fonctions du même nom (la seconde écraserait la première en silence)', () => {
+  for (const fichier of ['extension/sidepanel.js', 'extension/background.js']) {
+    const noms = [...readFileSync(join(root, fichier), 'utf8').matchAll(/^(?:async\s+)?function\s+([\w$]+)\s*\(/gm)].map((m) => m[1]);
+    const doubles = noms.filter((n, i) => noms.indexOf(n) !== i);
+    assert.deepEqual(doubles, [], `${fichier} : ${doubles.join(', ')}`);
+  }
+});

@@ -228,6 +228,55 @@ function card({ path, preview, emptyLabel, title, details = [], status, actions 
   return item;
 }
 
+// Aperçu en grand avant de publier (Roosevelt, 19/10 : « cliquer pour agrandir un post ou une vidéo, voir de quoi il s'agit ») :
+// la miniature ou l'image en grand, la vidéo lisible (fichier du dossier), le titre et le texte. Rien n'est envoyé.
+function apercu({ title = '', text = '', imagePath = null, videoPath = null }) {
+  document.querySelector('.apercu-fond')?.remove();
+  const fond = el('div', 'apercu-fond');
+  const boite = el('div', 'apercu');
+  const fermer = el('button', 'icon-close apercu-fermer', '✕');
+  fermer.type = 'button';
+  fermer.title = 'Fermer l’aperçu';
+  const urls = [];
+  const quitter = () => { urls.forEach((u) => URL.revokeObjectURL(u)); fond.remove(); document.removeEventListener('keydown', touche); };
+  const touche = (event) => { if (event.key === 'Escape') quitter(); };
+  fermer.addEventListener('click', quitter);
+  fond.addEventListener('click', (event) => { if (event.target === fond) quitter(); });
+  document.addEventListener('keydown', touche);
+  const media = el('div', 'apercu-media', 'Chargement…');
+  boite.append(fermer, media);
+  if (title) boite.append(el('div', 'apercu-titre', title));
+  if (text) boite.append(el('div', 'apercu-texte', text));
+  fond.append(boite);
+  document.body.append(fond);
+  const montrer = async () => {
+    if (videoPath) {
+      const fichier = await KappDossier.fileAt(videoPath);
+      const url = URL.createObjectURL(fichier); urls.push(url);
+      const v = document.createElement('video');
+      v.src = url; v.controls = true; v.preload = 'metadata'; v.playsInline = true;
+      if (imagePath) {
+        const poster = await KappDossier.fileAt(imagePath).catch(() => null);
+        if (poster) { const pu = URL.createObjectURL(poster); urls.push(pu); v.poster = pu; }
+      }
+      media.replaceChildren(v);
+    } else if (imagePath) {
+      const fichier = await KappDossier.fileAt(imagePath);
+      const url = URL.createObjectURL(fichier); urls.push(url);
+      const img = document.createElement('img'); img.alt = ''; img.src = url;
+      media.replaceChildren(img);
+    } else media.textContent = 'Pas d’image ni de vidéo pour ce contenu.';
+  };
+  montrer().catch(() => { media.textContent = 'Impossible d’ouvrir le fichier (accès au dossier à autoriser ?).'; });
+}
+// Une miniature cliquable qui ouvre l'aperçu.
+function cliquablePourApercu(node, options) {
+  if (!node) return;
+  node.classList.add('apercu-cliquable');
+  node.title = 'Voir en grand';
+  node.addEventListener('click', (event) => { event.stopPropagation(); apercu(options()); });
+}
+
 // « Modifier l'heure »: a date and time field opened under the card.
 const pad2 = (n) => String(n).padStart(2, '0');
 const whenText = (ts) => new Date(ts).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -402,20 +451,15 @@ for (const tab of document.querySelectorAll('nav [data-tab]')) {
 // say so, show what is left, and open the settings once by ourselves.
 let setupOpened = false;
 async function renderSetup() {
-  const config = await settings();
   const folderOk = (await KappDossier.access()).state === 'granted';
-  // Only Facebook routes publications by a saved Page URL. Other networks
-  // publish to the account that is already connected in this Chrome profile.
-  const pagesOk = !networkIsOn(config, 'facebook') || !!pageUrlOf(config, 'facebook');
-  const fbOk = (await KappDossier.fbAccess().catch(() => ({}))).state === 'granted';
+  // Une seule étape (Roosevelt, 19/10) : le dossier des marques. Les dossiers par réseau ne servent plus (le dossier des marques sert
+  // à tous) ; la Page Facebook de chaque marque arrive de KappGen (reglages-publication.json), et l'onglet Facebook prévient si elle
+  // manque. La carte disparaît dès que le dossier est choisi.
   $('setup-folder').classList.toggle('done', folderOk);
-  $('setup-fb').classList.toggle('done', fbOk);
-  $('setup-pages').classList.toggle('done', pagesOk);
-  $('setup-pages').closest('li').hidden = !networkIsOn(config, 'facebook');
-  // The posts folder is optional: the card goes once the videos folder and the
-  // links are set, or for good when closed with its ✕.
   const { setupClosed } = await chrome.storage.local.get('setupClosed');
-  $('setup').hidden = !!setupClosed || (folderOk && pagesOk);
+  $('setup').hidden = !!setupClosed || folderOk;
+  // « Dossier de chaque réseau » : seulement pour qui en avait déjà choisi un (il reste modifiable), sinon caché.
+  $('set-net-folders').hidden = !Object.values(netHandles || {}).some(Boolean);
   if (!folderOk && !setupOpened) {
     setupOpened = true;
     document.querySelector('.topbar [data-tab="settings"]').click();
@@ -528,6 +572,8 @@ function videoItem(video) {
     ])],
   });
   if (video.thumbnail_warning && !video.last_error) item.querySelector('.info').append(pill('warn', video.thumbnail_warning));
+  cliquablePourApercu(item.querySelector('.thumb'), () => ({ title: video.title, text: video.description || '',
+    imagePath: video.preview_path || video.thumbnail_path, videoPath: video.relative_path }));
   item.dataset.ytKinds = 'video';
   item.dataset.ytFailed = video.last_error ? '1' : '';
   return item;
@@ -675,12 +721,9 @@ let ytFilter = '';
 function applyYtFilter() {
   const shown = (list) => [...document.querySelectorAll(`#${list} > li`)].filter((item) => {
     const kind = item.dataset.ytKinds || 'video';
-    item.hidden = (item.dataset.archived === '1' && !showArchived) || (ytFilter === 'echec' ? item.dataset.ytFailed !== '1' : !!ytFilter && kind !== ytFilter);
+    item.hidden = ytFilter === 'echec' ? item.dataset.ytFailed !== '1' : !!ytFilter && kind !== ytFilter;
     return !item.hidden;
   }).length;
-  const nArch = [...document.querySelectorAll('#sent > li')].filter((li) => li.dataset.archived === '1').length;
-  $('sent-archived').hidden = !nArch;
-  $('sent-archived').textContent = showArchived ? 'Cacher les archivées' : `Voir les archivées (${nArch})`;
   const waiting = shown('videos');
   const sent = shown('sent');
   const what = { video: ['Aucune vidéo en attente.', 'Vidéos déjà publiées'], short: ['Aucun Short en attente.', 'Shorts déjà publiés'],
@@ -688,9 +731,8 @@ function applyYtFilter() {
   $('no-videos').textContent = what[0];
   $('no-videos').hidden = waiting > 0 || !lastScan;
   $('sent-title').textContent = `${what[1]} (${sent})`;
-  $('sent-box').hidden = !sent && !nArch;
+  $('sent-box').hidden = !sent;
 }
-$('sent-archived').addEventListener('click', () => { showArchived = !showArchived; applyYtFilter(); });
 for (const chip of document.querySelectorAll('#yt-filters .chip')) {
   chip.addEventListener('click', () => {
     ytFilter = chip.dataset.type;
@@ -789,25 +831,29 @@ const retirePost = (path, net) => (net === 'facebook'
   ? KappDossier.markPost(path, { statut: RETIRED, retire_le: nowIso() })
   : KappDossier.markPost(path, { [net]: { statut: RETIRED, retire_le: nowIso() } }));
 
-// Archiver une publication passée (Roosevelt, 19/10 : « les publications déjà publiées gênent, je veux les archiver ») : elle quitte
-// la liste « Déjà publiés » ; rien n'est supprimé (ni fichier, ni vidéo sur YouTube), elle n'est plus mise à jour toute seule, et
-// « Voir les archivées » la montre de nouveau. Clés : « p:<chemin> » (vidéo du dossier), « h:<id> » (historique).
+// Supprimer une publication passée de la liste (Roosevelt, 19/10 : « je veux supprimer les publications déjà publiées ») : elle quitte
+// « Déjà publiés » pour de bon et n'est plus mise à jour toute seule. Rien n'est effacé sur le disque ni en ligne (la vidéo reste sur
+// YouTube) ; une ligne de l'historique est effacée de l'historique. Clés gardées dans « archives » : « p:<chemin> », « h:<id> ».
 let archives = new Set();
-let showArchived = false;
 async function loadArchives() {
   const { archives: a } = await chrome.storage.local.get('archives');
   archives = new Set(Array.isArray(a) ? a : []);
 }
-async function setArchived(key, on) {
+async function hideForGood(key) {
   await loadArchives();
-  if (on) archives.add(key); else archives.delete(key);
+  archives.add(key);
   await chrome.storage.local.set({ archives: [...archives] });
 }
-function archiveEntry(key, getItem) {
-  const on = archives.has(key);
-  return { label: on ? 'Remettre dans la liste' : 'Archiver', icon: 'archive',
-    title: on ? 'La publication revient dans « Déjà publiés »' : 'Retire la publication de la liste (rien n’est supprimé, ni le fichier ni la vidéo en ligne)',
-    run: async () => { await setArchived(key, !on); const item = getItem(); if (item) item.dataset.archived = on ? '' : '1'; applyYtFilter(); } };
+function removeEntry(key, getItem, { historyId = null } = {}) {
+  return { label: 'Supprimer de la liste', icon: 'trash', danger: true,
+    title: 'Retire cette publication de la liste « Déjà publiés » (la vidéo reste en ligne, aucun fichier n’est effacé)',
+    run: async () => {
+      await hideForGood(key);
+      if (historyId && typeof KappHistorique !== 'undefined' && KappHistorique.remove) await KappHistorique.remove(historyId).catch(() => {});
+      const item = getItem();
+      if (item) item.remove();
+      applyYtFilter();
+    } };
 }
 
 function sentItem(video) {
@@ -880,9 +926,8 @@ function sentItem(video) {
     path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
     title: video.title || video.relative_path.split('/').pop(),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
-    status, actions: [...actions.filter((a) => !(a.tagName === 'A' && /youtu\.be\//.test(a.href))), moreMenu([archiveEntry(`p:${video.relative_path}`, () => item)])], extra,
+    status, actions: [...actions.filter((a) => !(a.tagName === 'A' && /youtu\.be\//.test(a.href))), moreMenu([removeEntry(`p:${video.relative_path}`, () => item)])], extra,
   });
-  item.dataset.archived = archives.has(`p:${video.relative_path}`) ? '1' : '';
   // The video's thumbnail opens it on YouTube.
   const mini = item.querySelector('.mini');
   if (video.youtube_id && mini) {
@@ -1151,6 +1196,7 @@ function postRow(post) {
   }
   const mini = el('div', 'mini', POST_TYPES[post.type]);
   if (post.image_path) KappDossier.fileAt(post.image_path).then((file) => mini.replaceChildren(objectImage(file))).catch(() => {});
+  if (post.image_path || post.video_path) cliquablePourApercu(mini, () => ({ title: '', text: post.text || '', imagePath: post.image_path, videoPath: post.video_path }));
   const what = el('div', 'what');
   what.append(el('div', 't', post.text.split('\n')[0] || '(sans texte)'));
   const live = liveRegion();
@@ -1376,11 +1422,10 @@ function historyRow(entry) {
   }
   const cle = `h:${entry.id ?? `${entry.at}|${entry.title}`}`;
   let item = null;
-  actions.push(moreMenu([archiveEntry(cle, () => item)]));
+  actions.push(moreMenu([removeEntry(cle, () => item, { historyId: entry.id })]));
   item = mediaRow({ emptyLabel: HISTORY_KINDS[entry.kind] || 'Post', title: entry.title,
     detail: [HISTORY_KINDS[entry.kind], when, entry.channel].filter(Boolean).join(' · '),
     status: pill('ok', entry.manual ? 'Publié (marqué à la main)' : 'Publié'), actions });
-  item.dataset.archived = archives.has(cle) ? '1' : '';
   if (entry.thumb) {
     const img = document.createElement('img');
     img.alt = '';
@@ -2364,12 +2409,12 @@ async function renderOnYoutube(data, config) {
   await loadArchives();
   fbPlanned = ((await chrome.storage.local.get('fbPlanned')).fbPlanned) || {};
   // The long video and its Short: two rows, one under the other.
-  $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
+  $('sent').replaceChildren(...[...data.sent].filter((v) => !archives.has(`p:${v.relative_path}`)).sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
     .flatMap((v) => (v.short_youtube_id ? [sentItem(v), shortItem(v)] : [sentItem(v)])));
   await loadHistory();
   backfillHistory(videoHistoryItems(data.sent)).catch(() => {});
   const oldOnes = historyFor('youtube', data.sent.map((v) => v.relative_path));
-  $('sent').append(...oldOnes.map(historyRow));
+  $('sent').append(...oldOnes.filter((e) => !archives.has(`h:${e.id ?? `${e.at}|${e.title}`}`)).map(historyRow));
   applyYtFilter();
   applyJob();
   if (!data.sent.length && !oldOnes.length) $('sent-summary').textContent = 'Aucune vidéo publiée détectée dans ce dossier.';
@@ -2460,7 +2505,7 @@ const netHandles = {};
 async function loadNetHandles() {
   for (const [net] of FOLDER_NETS) netHandles[net] = await KappDossier.loadNetRoot(net).catch(() => null);
 }
-loadNetHandles();
+loadNetHandles().then(() => renderSetup().catch(() => {}));
 let fbRootHandle = null; // kept for the « Reprendre » button
 const netFolderSaid = (text) => {
   const status = $('net-folders-status');
