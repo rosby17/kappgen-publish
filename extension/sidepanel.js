@@ -93,6 +93,9 @@ const ICON_PATHS = {
   link: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
   short: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="m10.5 9.5 4 2.5-4 2.5z"/>',
   check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-9 8"/>',
+  text: '<path d="M4 6h16M4 11h16M4 16h10"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>',
   dots: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>',
 };
@@ -856,6 +859,51 @@ function removeEntry(key, getItem, { historyId = null } = {}) {
     } };
 }
 
+// « Déjà sur YouTube ? Colle son lien » : sous la ligne d'une vidéo sans lien, ou ouvert par ⋮ › Indiquer le lien YouTube.
+function youtubeLinkField(video, getItem, label = 'Déjà sur YouTube ? Colle son lien :') {
+  const group = el('div', 'input-group');
+  const input = document.createElement('input');
+  input.type = 'url';
+  input.placeholder = 'https://youtu.be/…';
+  if (video.youtube_id) input.value = `https://youtu.be/${video.youtube_id}`;
+  const save = button('Enregistrer', 'btn secondary', async () => {
+    const data = await act(getItem(), save, { type: 'linkYoutube', path: video.relative_path, url: input.value.trim() });
+    if (data) { getItem().say('busy', 'Lien enregistré : titre, description et miniature vont être appliqués…'); setTimeout(renderFolder, 1500); }
+  });
+  group.append(input, save);
+  const field = el('div', 'field');
+  field.append(el('label', null, label), group);
+  return field;
+}
+
+// ⋮ de « Déjà publiés » (Roosevelt, 19/10) : mettre à jour UN champ d'une vidéo déjà en ligne, sans la renvoyer.
+// La vidéo s'ouvre dans Studio (page d'édition) et seul ce champ est appliqué (updateVideo, champs).
+function updateEntries(video, getItem) {
+  if (!video.youtube_id || (video.youtube_draft && video.youtube_error)) return [];
+  const run = (champs, busy) => async () => {
+    const item = getItem();
+    const reply = await send({ type: 'update', path: video.relative_path, ...(champs ? { champs } : {}) });
+    if (!reply || !reply.ok) item.say('warn', reply ? reply.error : 'Action impossible.');
+    else item.say('busy', busy);
+  };
+  const entries = [];
+  if (video.thumbnail_path || video.preview_path) {
+    entries.push({ label: 'Mettre à jour la miniature', icon: 'image', title: 'Applique sur YouTube la miniature du dossier, sans toucher au reste',
+      run: run(['thumbnail'], 'Miniature en cours de mise à jour sur YouTube… (Studio s’ouvre)') });
+  }
+  if (video.title) {
+    entries.push({ label: 'Mettre à jour le titre', icon: 'pencil', title: 'Applique sur YouTube le titre de la fiche, sans toucher au reste',
+      run: run(['title'], 'Titre en cours de mise à jour sur YouTube… (Studio s’ouvre)') });
+  }
+  if (video.description) {
+    entries.push({ label: 'Mettre à jour la description', icon: 'text', title: 'Applique sur YouTube la description de la fiche, sans toucher au reste',
+      run: run(['description'], 'Description en cours de mise à jour sur YouTube… (Studio s’ouvre)') });
+  }
+  entries.push({ label: 'Tout mettre à jour', icon: 'refresh', title: 'Applique sur YouTube la miniature, le titre, la description et les mots-clés du dossier (sans renvoyer la vidéo)',
+    run: run(null, 'Mise à jour sur YouTube en cours…') });
+  return entries;
+}
+
 function sentItem(video) {
   const actions = [];
   const extra = [];
@@ -867,18 +915,7 @@ function sentItem(video) {
   } else if (!video.youtube_id) {
     // Sent, but its YouTube link is unknown: give it, or send it again.
     status = pill('warn', 'Lien YouTube pas enregistré.');
-    const group = el('div', 'input-group');
-    const input = document.createElement('input');
-    input.type = 'url';
-    input.placeholder = 'https://youtu.be/…';
-    const save = button('Enregistrer', 'btn secondary', async () => {
-      const data = await act(item, save, { type: 'linkYoutube', path: video.relative_path, url: input.value.trim() });
-      if (data) { item.say('busy', 'Lien enregistré : titre, description et miniature vont être appliqués…'); setTimeout(renderFolder, 1500); }
-    });
-    group.append(input, save);
-    const field = el('div', 'field');
-    field.append(el('label', null, 'Déjà sur YouTube ? Colle son lien :'), group);
-    extra.push(field);
+    extra.push(youtubeLinkField(video, () => item));
     const again = button('Republier', 'btn ghost', async () => {
       if (!confirm('La vidéo sera envoyée de nouveau sur YouTube, avec le titre, la description et la miniature du dossier.\n\nPense à supprimer l’ancienne version dans YouTube Studio.')) return;
       await act(item, again, { type: 'republish', path: video.relative_path }, 'Nouvel envoi vers YouTube en cours…');
@@ -905,7 +942,12 @@ function sentItem(video) {
     finished.title = 'Tu as terminé la mise en ligne toi-même dans YouTube Studio : la vidéo passe dans « Déjà publiés »';
     actions.push(finished, resend);
   } else {
+    const thumbStuck = video.thumb_pending && (video.thumb_tries || 0) >= 3;
     if (!video.has_content) status = pill('neutral', 'Aucune fiche ni miniature dans le dossier.');
+    // Studio n'a pas pris la miniature pendant l'envoi : elle est appliquée toute seule (3 essais), sinon à la main.
+    else if (thumbStuck) status = pill('warn', 'Miniature pas encore sur YouTube : Studio l’a refusée trois fois. Essaie ⋮ › Mettre à jour la miniature.');
+    else if (video.thumb_pending && video.thumbnail_path) status = pill('neutral', 'Miniature pas encore sur YouTube : appliquée toute seule dans quelques minutes.');
+    else if (video.thumb_pending) status = pill('warn', video.thumbnail_warning ? 'Miniature pas sur YouTube : celle du dossier fait plus de 2 Mo. Réduis-la, elle partira toute seule.' : 'Miniature pas encore sur YouTube : elle partira toute seule dès qu’elle sera dans le dossier.');
     else if (video.applied_hash === video.hash) status = pill('ok', 'À jour sur YouTube.');
     else if (video.update_error && video.update_tried_hash === video.hash) status = pill('warn', `Mise à jour échouée : ${video.update_error}`);
     else status = pill('neutral', 'Modifications à envoyer : mise à jour toute seule dans 5 à 10 min.');
@@ -926,7 +968,20 @@ function sentItem(video) {
     path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
     title: video.title || video.relative_path.split('/').pop(),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
-    status, actions: [...actions.filter((a) => !(a.tagName === 'A' && /youtu\.be\//.test(a.href))), moreMenu([removeEntry(`p:${video.relative_path}`, () => item)])], extra,
+    status, actions: [...actions.filter((a) => !(a.tagName === 'A' && /youtu\.be\//.test(a.href))), moreMenu([
+      ...updateEntries(video, () => item),
+      !(video.manual && !video.youtube_id) && { label: video.youtube_id ? 'Corriger le lien YouTube' : 'Indiquer le lien YouTube', icon: 'link',
+        title: 'Colle le lien de la vidéo sur YouTube : KappGen y applique la fiche et la miniature du dossier, sans la renvoyer',
+        run: () => {
+          // Un seul champ sous la ligne : un second clic le referme.
+          const open = item.querySelector('.link-field');
+          if (open) { open.remove(); return; }
+          const field = youtubeLinkField(video, () => item, 'Lien de la vidéo sur YouTube :');
+          field.classList.add('row-extra', 'link-field');
+          item.querySelector('.acts').before(field);
+          field.querySelector('input').focus();
+        } },
+      removeEntry(`p:${video.relative_path}`, () => item)].filter(Boolean))], extra,
   });
   // The video's thumbnail opens it on YouTube.
   const mini = item.querySelector('.mini');
@@ -940,7 +995,8 @@ function sentItem(video) {
     link.append(mini);
   }
   item.dataset.ytKinds = 'video';
-  item.dataset.ytFailed = (video.update_error && video.update_tried_hash === video.hash) || (video.youtube_draft && video.youtube_error) ? '1' : '';
+  item.dataset.ytFailed = (video.update_error && video.update_tried_hash === video.hash) || (video.youtube_draft && video.youtube_error)
+    || (video.thumb_pending && (video.thumb_tries || 0) >= 3) ? '1' : '';
   return item;
 }
 
