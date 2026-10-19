@@ -441,8 +441,10 @@ for (const stepButton of document.querySelectorAll('.setup-steps button')) {
 
 // A chosen folder shows as "✓ Dossier sélectionné : NAME" and its big button
 // disappears; "changer" stays available. Same for the Facebook folder.
+let kappgenLocal = null;     // { dossier, nom, port } : KappGen trouvé sur cet ordinateur (renderKappgenLocal)
 function showFolder(prefix, access) {
   const granted = access.state === 'granted';
+  if (!prefix && $('folder-kappgen')) $('folder-kappgen').hidden = granted || !kappgenLocal;
   $(`${prefix}folder-chosen`).hidden = !granted;
   $(`${prefix}folder-name`).textContent = access.name || '';
   $(`${prefix}folder-actions`).hidden = granted;
@@ -1039,7 +1041,12 @@ async function saveSetting(patch) {
 for (const b of $('yt-visibility').querySelectorAll('button')) {
   b.addEventListener('click', async () => {
     const value = b.dataset.value;
-    if (value === 'PUBLIC' && !confirm('Chaque vidéo prête sera PUBLIÉE directement sur YouTube, sans que tu la valides.')) return;
+    // Enregistré au clic, sans fenêtre de confirmation (Roosevelt, 19/10 : « Publique » revenait à « Non répertoriée » : Chrome bloque
+    // parfois confirm() dans ce panneau, qui répond alors « Annuler » sans rien montrer). Le texte sous les boutons dit ce que ça fait.
+    // Un ancien réglage par chaîne (plus d'interface pour le changer) ne doit plus l'emporter en silence.
+    const current = await settings();
+    for (const own of Object.values(current.channels || {})) if (own && typeof own === 'object') delete own.visibility;
+    await chrome.storage.local.set({ folder: current });
     await saveSetting({ visibility: value });
   });
 }
@@ -2339,10 +2346,39 @@ function youtubeItem(video) {
   return item;
 }
 
+// KappGen sur cet ordinateur : le bouton dit « Choisir le dossier de mes marques » et le chemin est affiché (lib/kappgen-local.js).
+async function renderKappgenLocal() {
+  kappgenLocal = await KappLocal.dossier().catch(() => null);
+  const box = $('folder-kappgen');
+  if (!box) return;
+  box.hidden = !kappgenLocal || !$('folder-chosen').hidden;
+  if (!kappgenLocal) return;
+  $('folder-kappgen-path').textContent = kappgenLocal.dossier;
+  $('pick').textContent = 'Choisir le dossier de mes marques';
+  $('folder-hint').hidden = true;
+}
+$('folder-kappgen-copy').addEventListener('click', async () => {
+  if (!kappgenLocal) return;
+  await navigator.clipboard.writeText(kappgenLocal.dossier).catch(() => {});
+  $('folder-kappgen-copy').textContent = 'Copié ✓';
+});
+renderKappgenLocal();
+
 async function pickFolder() {
   try {
-    rootHandle = await window.showDirectoryPicker({ id: 'kappgen-videos', mode: 'readwrite' });
+    const choisi = await window.showDirectoryPicker({ id: 'kappgen-videos', mode: 'readwrite', startIn: 'documents' });
+    // Dossier choisi au-dessus des marques (Documents, Motion…) : on se place sur la racine des marques posée par KappGen.
+    const racine = await KappLocal.racineDans(choisi).catch(() => null);
+    rootHandle = racine || choisi;
+    if (racine && racine.name !== choisi.name) {
+      $('folder-status').hidden = false;
+      $('folder-status').className = 'status';
+      $('folder-status').textContent = `Placée sur le dossier de tes marques : « ${racine.name} ».`;
+    }
+    const avant = await KappDossier.loadRoot().catch(() => null);
+    const meme = avant && (await avant.isSameEntry(rootHandle).catch(() => false));
     await KappDossier.saveRoot(rootHandle);
+    if (meme) { renderFolder(); renderPosts(); return; }   // même dossier choisi de nouveau : rien ne repart de zéro
     // Watching starts now: what is already in the folder waits for a click.
     const current = await settings();
     current.watchSince = Date.now();
