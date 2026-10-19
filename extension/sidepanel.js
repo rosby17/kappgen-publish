@@ -86,6 +86,7 @@ function liveRegion() {
 
 // Small line icons (no emoji): clock, link, play, refresh.
 const ICON_PATHS = {
+  archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
   pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2h8.8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -479,10 +480,15 @@ const visibilityOf = (key) => VISIBILITY_LABELS[autoVisibility.get(key)] ? autoV
 let showChannels = false;
 const chan = (name) => (showChannels ? name : null);
 
+// Heure prévue de chaque vidéo qui partira toute seule (KappSchedule.plan, calculée à chaque lecture du dossier) : affichée sur sa
+// carte AVANT l'envoi (Roosevelt, 19/10 : « chacun doit avoir son heure de publication, pour ne pas improviser »).
+let plannedAt = new Map();
 function videoItem(video) {
-  const planned = video.schedule_at && video.schedule_at > Date.now();
+  const chosen = video.schedule_at && video.schedule_at > Date.now();
+  const prevue = !chosen && plannedAt.get(video.id);
   const status = video.last_error ? pill('warn', video.last_error)
-    : planned ? pill('ok', `Programmée : publique sur YouTube le ${whenText(video.schedule_at)}${video.auto_ok ? ' (envoyée à YouTube dès maintenant)' : ''}.`)
+    : chosen ? pill('ok', `Programmée : publique sur YouTube le ${whenText(video.schedule_at)}${video.auto_ok ? ' (envoyée à YouTube dès maintenant)' : ''}.`)
+    : prevue ? pill('ok', `Prévue le ${whenText(prevue)} : envoyée à YouTube à l’avance, publique à cette heure.`)
       : video.auto_ok ? pill('ok', visibilityOf(video.channel_key) === 'SCHEDULE' ? 'Partira toute seule, au prochain horaire.' : `Partira toute seule (${VISIBILITY_LABELS[visibilityOf(video.channel_key)]}).`)
         : pill('neutral', video.auto_blocked || 'Envoi manuel.');
   // « Publier maintenant »: out now, with the chosen visibility (never a later slot).
@@ -669,9 +675,12 @@ let ytFilter = '';
 function applyYtFilter() {
   const shown = (list) => [...document.querySelectorAll(`#${list} > li`)].filter((item) => {
     const kind = item.dataset.ytKinds || 'video';
-    item.hidden = ytFilter === 'echec' ? item.dataset.ytFailed !== '1' : !!ytFilter && kind !== ytFilter;
+    item.hidden = (item.dataset.archived === '1' && !showArchived) || (ytFilter === 'echec' ? item.dataset.ytFailed !== '1' : !!ytFilter && kind !== ytFilter);
     return !item.hidden;
   }).length;
+  const nArch = [...document.querySelectorAll('#sent > li')].filter((li) => li.dataset.archived === '1').length;
+  $('sent-archived').hidden = !nArch;
+  $('sent-archived').textContent = showArchived ? 'Cacher les archivées' : `Voir les archivées (${nArch})`;
   const waiting = shown('videos');
   const sent = shown('sent');
   const what = { video: ['Aucune vidéo en attente.', 'Vidéos déjà publiées'], short: ['Aucun Short en attente.', 'Shorts déjà publiés'],
@@ -679,8 +688,9 @@ function applyYtFilter() {
   $('no-videos').textContent = what[0];
   $('no-videos').hidden = waiting > 0 || !lastScan;
   $('sent-title').textContent = `${what[1]} (${sent})`;
-  $('sent-box').hidden = !sent;
+  $('sent-box').hidden = !sent && !nArch;
 }
+$('sent-archived').addEventListener('click', () => { showArchived = !showArchived; applyYtFilter(); });
 for (const chip of document.querySelectorAll('#yt-filters .chip')) {
   chip.addEventListener('click', () => {
     ytFilter = chip.dataset.type;
@@ -779,6 +789,27 @@ const retirePost = (path, net) => (net === 'facebook'
   ? KappDossier.markPost(path, { statut: RETIRED, retire_le: nowIso() })
   : KappDossier.markPost(path, { [net]: { statut: RETIRED, retire_le: nowIso() } }));
 
+// Archiver une publication passée (Roosevelt, 19/10 : « les publications déjà publiées gênent, je veux les archiver ») : elle quitte
+// la liste « Déjà publiés » ; rien n'est supprimé (ni fichier, ni vidéo sur YouTube), elle n'est plus mise à jour toute seule, et
+// « Voir les archivées » la montre de nouveau. Clés : « p:<chemin> » (vidéo du dossier), « h:<id> » (historique).
+let archives = new Set();
+let showArchived = false;
+async function loadArchives() {
+  const { archives: a } = await chrome.storage.local.get('archives');
+  archives = new Set(Array.isArray(a) ? a : []);
+}
+async function setArchived(key, on) {
+  await loadArchives();
+  if (on) archives.add(key); else archives.delete(key);
+  await chrome.storage.local.set({ archives: [...archives] });
+}
+function archiveEntry(key, getItem) {
+  const on = archives.has(key);
+  return { label: on ? 'Remettre dans la liste' : 'Archiver', icon: 'archive',
+    title: on ? 'La publication revient dans « Déjà publiés »' : 'Retire la publication de la liste (rien n’est supprimé, ni le fichier ni la vidéo en ligne)',
+    run: async () => { await setArchived(key, !on); const item = getItem(); if (item) item.dataset.archived = on ? '' : '1'; applyYtFilter(); } };
+}
+
 function sentItem(video) {
   const actions = [];
   const extra = [];
@@ -843,12 +874,15 @@ function sentItem(video) {
       actions.push(update);
     }
   }
+  const fbAt = fbPlanned[video.relative_path];
+  if (fbAt && fbAt > Date.now() && !video.facebook_published_at && !video.facebook_reel_at) extra.push(pill('neutral', `Facebook prévu le ${whenText(fbAt)}.`));
   item = mediaRow({
     path: video.relative_path, preview: video.preview_path, youtubeId: video.youtube_id,
     title: video.title || video.relative_path.split('/').pop(),
     detail: [chan(video.channel_name), video.date ? new Date(video.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null].filter(Boolean).join(' · '),
-    status, actions: actions.filter((a) => !(a.tagName === 'A' && /youtu\.be\//.test(a.href))), extra,
+    status, actions: [...actions.filter((a) => !(a.tagName === 'A' && /youtu\.be\//.test(a.href))), moreMenu([archiveEntry(`p:${video.relative_path}`, () => item)])], extra,
   });
+  item.dataset.archived = archives.has(`p:${video.relative_path}`) ? '1' : '';
   // The video's thumbnail opens it on YouTube.
   const mini = item.querySelector('.mini');
   if (video.youtube_id && mini) {
@@ -1340,9 +1374,13 @@ function historyRow(entry) {
     link.rel = 'noopener noreferrer';
     actions.push(link);
   }
-  const item = mediaRow({ emptyLabel: HISTORY_KINDS[entry.kind] || 'Post', title: entry.title,
+  const cle = `h:${entry.id ?? `${entry.at}|${entry.title}`}`;
+  let item = null;
+  actions.push(moreMenu([archiveEntry(cle, () => item)]));
+  item = mediaRow({ emptyLabel: HISTORY_KINDS[entry.kind] || 'Post', title: entry.title,
     detail: [HISTORY_KINDS[entry.kind], when, entry.channel].filter(Boolean).join(' · '),
     status: pill('ok', entry.manual ? 'Publié (marqué à la main)' : 'Publié'), actions });
+  item.dataset.archived = archives.has(cle) ? '1' : '';
   if (entry.thumb) {
     const img = document.createElement('img');
     img.alt = '';
@@ -1898,6 +1936,13 @@ async function renderFolderOnce() {
   defaultVisibility = config.schedule === 'times' ? 'SCHEDULE' : (VISIBILITY_LABELS[config.visibility] ? config.visibility : 'UNLISTED');
   showChannels = new Set([...data.videos, ...data.sent].map((v) => v.channel_key)).size > 1;
   for (const [key, own] of Object.entries(config.channels)) autoVisibility.set(key, own.visibility);
+  const { scheduled } = await chrome.storage.local.get('scheduled');
+  plannedAt = KappSchedule.plan(data.videos, (v) => {
+    if (!v.auto_ok) return null;
+    const own = { ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) };
+    const vis = own.visibility || (config.schedule === 'times' ? 'SCHEDULE' : config.visibility);
+    return vis === 'SCHEDULE' ? (own.times || config.times || '18:00') : null;
+  }, scheduled || {});
   const order = (v) => (v.schedule_at && v.schedule_at > Date.now() ? v.schedule_at : v.auto_ok ? Date.now() : Infinity);
   const shortsWaiting = data.sent.filter((v) => v.youtube_id && v.vertical_path && !v.short_youtube_id).map(shortItem);
   $('videos').replaceChildren(...[...data.videos].sort((a, b) => order(a) - order(b)).map(videoItem), ...shortsWaiting);
@@ -2314,7 +2359,10 @@ async function renderFacebook(data) {
 // What KappGen sent from the selected publication folder. No channel
 // selection is required here: the folder and its manifest identify each
 // publication.
+let fbPlanned = {};      // créneaux Facebook prévus (background.js planFacebook)
 async function renderOnYoutube(data, config) {
+  await loadArchives();
+  fbPlanned = ((await chrome.storage.local.get('fbPlanned')).fbPlanned) || {};
   // The long video and its Short: two rows, one under the other.
   $('sent').replaceChildren(...[...data.sent].sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
     .flatMap((v) => (v.short_youtube_id ? [sentItem(v), shortItem(v)] : [sentItem(v)])));

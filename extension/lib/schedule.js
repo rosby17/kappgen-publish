@@ -29,5 +29,43 @@ const KappSchedule = (() => {
     }
   }
 
-  return { parseTimes, normalizeTimes };
+  // Créneaux libres successifs d'une chaîne : au moins une heure après maintenant, jamais un créneau déjà pris par une vidéo programmée.
+  function freeSlots(timesText, taken = [], count = 1, now = Date.now(), delay = 3600 * 1000) {
+    const pris = new Set((taken || []).map(Number));
+    const earliest = now + delay;
+    const out = [];
+    for (let day = 0; day < 400 && out.length < count; day += 1) {
+      for (const [hour, minute] of parseTimes(timesText)) {
+        const date = new Date(now);
+        date.setDate(date.getDate() + day);
+        date.setHours(hour, minute, 0, 0);
+        if (date.getTime() >= earliest && !pris.has(date.getTime())) { out.push(date.getTime()); if (out.length >= count) break; }
+      }
+    }
+    return out;
+  }
+
+  // Heure prévue de chaque vidéo qui partira toute seule (Roosevelt, 19/10 : « chacun doit avoir son heure de publication ») :
+  // pour chaque chaîne programmée, dans l'ordre où elles partiront, le créneau libre suivant. Une heure choisie à la main reste la sienne.
+  // videos : [{ id, channel_key, schedule_at }] ; scheduleOf(video) -> null (pas programmée) ou le texte des heures.
+  function plan(videos, scheduleOf, scheduled = {}, now = Date.now()) {
+    const out = new Map();
+    const parChaine = new Map();
+    for (const v of videos) {
+      if (v.schedule_at && v.schedule_at > now) { out.set(v.id, v.schedule_at); continue; }
+      const times = scheduleOf(v);
+      if (!times) continue;
+      if (!parChaine.has(v.channel_key)) parChaine.set(v.channel_key, { times, list: [] });
+      parChaine.get(v.channel_key).list.push(v);
+    }
+    for (const [key, { times, list }] of parChaine) {
+      const pris = [...((scheduled || {})[key] || []), ...videos.filter((v) => v.channel_key === key && v.schedule_at > now).map((v) => v.schedule_at)];
+      let slots;
+      try { slots = freeSlots(times, pris, list.length, now); } catch { continue; }
+      list.forEach((v, i) => { if (slots[i]) out.set(v.id, slots[i]); });
+    }
+    return out;
+  }
+
+  return { parseTimes, normalizeTimes, freeSlots, plan };
 })();
