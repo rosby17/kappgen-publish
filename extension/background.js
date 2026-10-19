@@ -845,17 +845,9 @@ function parseTimes(text) {
 // video, at least one hour from now.
 async function nextSlot(channelKey, timesText) {
   const { scheduled } = await chrome.storage.local.get('scheduled');
-  const taken = new Set(((scheduled || {})[channelKey] || []).map(Number));
-  const earliest = Date.now() + 3600 * 1000;
-  for (let day = 0; day < 400; day += 1) {
-    for (const [hour, minute] of parseTimes(timesText)) {
-      const date = new Date();
-      date.setDate(date.getDate() + day);
-      date.setHours(hour, minute, 0, 0);
-      if (date.getTime() >= earliest && !taken.has(date.getTime())) return date.getTime();
-    }
-  }
-  throw new Error('Aucun créneau de programmation libre.');
+  const [slot] = KappSchedule.freeSlots(timesText, (scheduled || {})[channelKey] || [], 1);      // le même calcul que l'heure affichée
+  if (!slot) throw new Error('Aucun créneau de programmation libre.');
+  return slot;
 }
 
 async function rememberSlot(channelKey, time) {
@@ -1342,7 +1334,7 @@ async function finishUpload(job) {
       // replace the long video's link, only be recorded next to it.
       await folder('mark', { path: video.relative_path, status: 'published', data: job.social
         ? { shortYoutubeId: youtubeId }
-        : { youtubeId, visibility, channel: video.channel_key, hash: video.hash } });
+        : { youtubeId, visibility, channel: video.channel_key, hash: video.hash, ...(scheduleAt ? { scheduleAt } : {}) } });
     } else {
       await api(`/studio-upload/${videoId}/published`, { method: 'POST', body: JSON.stringify({ youtube_video_id: youtubeId }) });
     }
@@ -1398,7 +1390,10 @@ async function finishUpload(job) {
   let socialMessage = '';
   let socialFailure = null;
   let socialWarning = null;
-  if (source === 'folder') {
+  // Programmée plus tard sur YouTube : Facebook et les autres réseaux attendent la même heure (spreadNext s'en charge alors).
+  const plusTard = scheduleAt && scheduleAt > Date.now();
+  if (plusTard) socialMessage = ` Publique sur YouTube le ${new Date(scheduleAt).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} ; Facebook part à son heure à lui.`;
+  if (source === 'folder' && !plusTard) {
     try {
       const settings = await folderSettings();
       const { sent: sentNow } = await folderQueue();
@@ -2628,6 +2623,28 @@ async function mergeFolderSetting(patch) {
   await chrome.storage.local.set({ folder: { ...(folder || {}), ...patch } });
 }
 
+// Facebook à ses propres heures (facebook.heures des réglages de la marque) : chaque vidéo publiée sur YouTube reçoit UNE fois son
+// créneau Facebook (le prochain libre, jamais avant maintenant), gardé dans chrome.storage.local « fbPlanned » ; elle part quand il
+// arrive. Le panneau l'affiche sur la carte (« Facebook prévu le … »).
+async function planFacebook(settings, videos) {
+  const { fbPlanned } = await chrome.storage.local.get('fbPlanned');
+  const prevu = fbPlanned && typeof fbPlanned === 'object' ? fbPlanned : {};
+  let change = false;
+  for (const v of videos) {
+    const ch = ownOf(settings, v);
+    if (!ch.facebookTimes || !ch.facebook || prevu[v.relative_path] || v.facebook_published_at || v.facebook_reel_at) continue;
+    const pris = videos.filter((x) => x.channel_key === v.channel_key).map((x) => prevu[x.relative_path]).filter(Boolean);
+    try {
+      const [slot] = KappSchedule.freeSlots(ch.facebookTimes, pris, 1, Date.now(), 0);
+      if (slot) { prevu[v.relative_path] = slot; change = true; }
+    } catch { /* heures illisibles : Facebook suit YouTube */ }
+  }
+  const limite = Date.now() - 7 * 24 * 3600 * 1000;               // anciens créneaux déjà passés depuis une semaine : oubliés
+  for (const [k, at] of Object.entries(prevu)) if (at < limite) { delete prevu[k]; change = true; }
+  if (change) await chrome.storage.local.set({ fbPlanned: prevu });
+  return prevu;
+}
+
 async function spreadNext(settings, sent, own) {
   const on = (net) => networkOn(settings, net);
   // « Mes vidéos YouTube sur ma Page » is on by default: without a start
@@ -2656,9 +2673,15 @@ async function spreadNext(settings, sent, own) {
   };
   const videos = sent.filter((v) => v.youtube_id).sort((a, b) => (a.published_at || 0) - (b.published_at || 0));
   const todo = [];
+  const fbPrevu = await planFacebook(settings, videos);
   for (const v of videos) {
     const ch = ownOf(settings, v);
-    const fb = on('facebook') && ch.facebook && ch.facebookPageUrl && after(v, ch.facebookSince || 1);
+    // Programmée sur YouTube : les autres réseaux attendent qu'elle y soit publique. Facebook, s'il a ses propres heures (stratégie de la
+    // marque), part à son créneau à lui, prévu à l'avance (planFacebook).
+    const ytAttend = !!(v.schedule_at && v.schedule_at > Date.now());
+    const fbAttend = ch.facebookTimes ? !(fbPrevu[v.relative_path] && fbPrevu[v.relative_path] <= Date.now()) : ytAttend;
+    if (ytAttend && fbAttend) continue;
+    const fb = on('facebook') && ch.facebook && ch.facebookPageUrl && after(v, ch.facebookSince || 1) && !fbAttend;
     // Avec le réglage de KappGen (ch.videos) : un réseau ne reçoit QUE les vidéos choisies pour lui, dans leur format ; le reste ne part pas.
     const plan = (net) => planVideos(ch, net);
     const veut = (net, kind) => { const p = plan(net); return p ? !!videoFile(v, p[kind]) : null; };
@@ -2684,7 +2707,7 @@ async function spreadNext(settings, sent, own) {
       [on('linkedin') && !own('linkedin') && recoit('linkedin', settings.linkedinFromYoutube !== false) && !v.linkedin_published_at && !v.linkedin_error && after(v, settings.linkedinSince),
         () => publishLinkedinVideo(v.relative_path, { auto: true })],
     ];
-    const step = steps.find(([due]) => due);
+    const step = steps.find(([due], i) => due && (!ytAttend || i === 1 || i === 2));       // pendant l'attente YouTube : Facebook seul
     // The oldest publication first, video or post.
     if (step) { todo.push([v.published_at || 0, step[1]]); break; }
   }
@@ -2980,8 +3003,10 @@ async function autoPass() {
   }
   // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
   let stale = null;
+  const { archives: archivees } = await chrome.storage.local.get('archives');
+  const archivee = new Set(Array.isArray(archivees) ? archivees : []);
   for (const v of networkOn(settings, 'youtube') ? sent : []) {
-    if (!v.youtube_id || !v.has_content || ownOf(settings, v).auto === false) continue;
+    if (!v.youtube_id || !v.has_content || ownOf(settings, v).auto === false || archivee.has(`p:${v.relative_path}`)) continue;     // archivée : plus de mise à jour toute seule
     if (!v.applied_hash && !v.force_update) {
       // first time this video is watched: what is on YouTube now is the reference
       await folder('mark', { path: v.relative_path, status: 'applied', data: { hash: v.hash } }).catch(() => {});

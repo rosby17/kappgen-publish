@@ -531,3 +531,32 @@ test('le dossier des marques est trouvé dans un dossier choisi plus haut, grâc
   assert.equal(await context.KappLocal.racineDans(documents.children.get('Factures')), null);
   assert.equal(await context.KappLocal.dossier(), null);                                     // KappGen absent : aucune erreur
 });
+
+test('chaque vidéo programmée reçoit son heure à l’avance : les créneaux libres suivants, dans l’ordre d’envoi (Roosevelt, 19/10)', () => {
+  const S = scheduleLibrary();
+  const now = new Date(2026, 9, 19, 3, 0).getTime();                       // lundi 19/10 à 3 h
+  const at = (d, h, m = 0) => new Date(2026, 9, d, h, m).getTime();
+  const videos = [{ id: 'a', channel_key: 'paz' }, { id: 'b', channel_key: 'paz' }, { id: 'c', channel_key: 'paz' },
+    { id: 'd', channel_key: 'libre' }, { id: 'e', channel_key: 'paz', schedule_at: at(25, 12) }];
+  const plan = S.plan(videos, (v) => (v.channel_key === 'paz' ? '06:00, 18:00' : null), { paz: [at(19, 6)] }, now);
+  assert.equal(plan.get('a'), at(19, 18));            // 06:00 déjà pris par une vidéo programmée
+  assert.equal(plan.get('b'), at(20, 6));
+  assert.equal(plan.get('c'), at(20, 18));
+  assert.equal(plan.has('d'), false);                 // chaîne « dès que prête » : pas d’heure
+  assert.equal(plan.get('e'), at(25, 12));            // heure choisie à la main : gardée
+  assert.equal(S.freeSlots('06:00', [], 1, at(19, 5, 30))[0], at(20, 6));      // jamais moins d’une heure après maintenant
+});
+
+test('Facebook a ses propres heures dans les réglages de la marque, indépendantes de YouTube (Roosevelt, 19/10)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('MARQUES');
+  const marque = disk.dir('paz');
+  marque.file('reglages-publication.json', JSON.stringify({ youtube: { visibilite: 'programmee', heures: ['06:00', '18:00'] }, facebook: { heures: ['12:00', '20h30'] } }));
+  project(marque, 'Video', 'video.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+  const v = (await KappDossier.scan({ now: 10_000_000 })).videos[0];
+  assert.equal(v.channel_config.facebookTimes, '12:00, 20:30');
+  assert.equal(v.channel_config.times, '06:00, 18:00');
+  marque.file('reglages-publication.json', JSON.stringify({ facebook: { heures: ['12:07'] } }));
+  await assert.rejects(KappDossier.scan({ now: 10_000_000 }), /facebook\.heures/);
+});

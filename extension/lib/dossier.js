@@ -311,6 +311,15 @@ const KappDossier = (() => {
       out.facebook = !/^(non|no|off|rien)$/.test(mode);
       out.facebookMode = /reel|short|vertical/.test(mode) ? 'reel' : 'video';
     }
+    // Heures propres à Facebook (sa stratégie, indépendante de YouTube : Roosevelt, 19/10).
+    if (fb.heures != null) {
+      const fbTimes = (Array.isArray(fb.heures) ? fb.heures.join(', ') : String(fb.heures)).trim();
+      const jetons = fbTimes.split(/[,;\s]+/).filter(Boolean);
+      if (!jetons.every((h) => /^([01]?\d|2[0-3])[:hH][0-5]\d$/.test(h) && Number(h.slice(-2)) % 15 === 0)) {
+        throw new Error(`${CHANNEL_FILE} : facebook.heures doit contenir des quarts d’heure valides (ex. 12:00, 20:30).`);
+      }
+      if (jetons.length) out.facebookTimes = jetons.map((h) => h.replace(/[hH]/, ':').padStart(5, '0')).join(', ');
+    }
     if (fb.page) {
       if (!validFacebookPage(fb.page)) throw new Error(`${CHANNEL_FILE} : facebook.page doit être un lien https://www.facebook.com/…`);
       out.facebookPageUrl = String(fb.page).trim();
@@ -646,7 +655,7 @@ const KappDossier = (() => {
       const hash = hashOf([sheet.title, sheet.description, (sheet.tags || []).join(','), thumb && thumb.path.split('/').pop(), thumb && thumb.size, thumb && thumb.modified]);
       if (isSent) {
         sent.push({ manual: record.status === 'ignored', relative_path: relativePath, channel_key: channelKey, channel_name: channelName, size_bytes: video.size,
-          youtube_id: record.youtubeId || null, date: record.date,
+          youtube_id: record.youtubeId || null, date: record.date, schedule_at: record.scheduleAt || null,
           title: sheet.title ? KappFiches.clean(sheet.title, 100) : null,
           description: KappFiches.clean(sheet.description, 5000),
           tags: KappFiches.fitTags(sheet.tags),
