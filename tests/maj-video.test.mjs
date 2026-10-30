@@ -76,3 +76,39 @@ test('l’envoi marque la miniature à compléter au lieu d’un simple avertiss
   assert.match(bloc, /thumbPending: true/);
   assert.match(fond, /status: 'started', data: \{ owner \}/);
 });
+
+// Roosevelt, 30/10 : Dharma Vivant 013 et 016 en ligne avec une image de la vidéo, alors que l'envoi passait pour réussi.
+test('miniature contrôlée sur YouTube : quand comparer', () => {
+  const now = 100 * 86400000;
+  const base = { youtube_id: 'abcdefghijk', thumbnail_path: 'C/E/miniature.png', thumb_sig: 'miniature.png|10|1', published_at: now - 3600000 };
+  assert.equal(maj.miniatureAVerifier(base, now), true);
+  assert.equal(maj.miniatureAVerifier({ ...base, thumb_ok_sig: base.thumb_sig }, now), false, 'déjà vue sur YouTube');
+  assert.equal(maj.miniatureAVerifier({ ...base, thumb_ok_sig: 'miniature.png|11|2' }, now), true, 'fichier changé : on recontrôle');
+  assert.equal(maj.miniatureAVerifier({ ...base, published_at: now - 60000 }, now), false, 'YouTube n’a pas encore traité');
+  assert.equal(maj.miniatureAVerifier({ ...base, applied_at: now - 60000 }, now), false, 'réappliquée il y a une minute');
+  assert.equal(maj.miniatureAVerifier({ ...base, thumb_checked_at: now - 60000 }, now), false, 'contrôlée il y a une minute');
+  assert.equal(maj.miniatureAVerifier({ ...base, thumb_pending: true }, now), false, 'déjà en attente de réapplication');
+  assert.equal(maj.miniatureAVerifier({ ...base, youtube_draft: true }, now), false);
+  assert.equal(maj.miniatureAVerifier({ ...base, thumb_misses: maj.VERIF_MAX }, now), false, 'abandon après 3 essais');
+  assert.equal(maj.miniatureAVerifier({ ...base, published_at: now - 40 * 86400000 }, now), false, 'vieille vidéo jamais touchée');
+  assert.equal(maj.miniatureAVerifier({ ...base, thumbnail_path: null }, now), false);
+});
+
+test('miniature contrôlée sur YouTube : même image ou pas', () => {
+  const image = Array.from({ length: 256 }, (_, i) => (i * 37) % 255);
+  const proche = image.map((g, i) => g + (i % 5) - 2);
+  const autre = Array.from({ length: 256 }, (_, i) => (i * 91 + 40) % 255);
+  const a = maj.empreinte(image);
+  assert.equal(maj.miniatureDifferente(maj.ecartEmpreintes(a, maj.empreinte(image))), false);
+  assert.equal(maj.miniatureDifferente(maj.ecartEmpreintes(a, maj.empreinte(proche))), false);
+  assert.equal(maj.miniatureDifferente(maj.ecartEmpreintes(a, maj.empreinte(autre))), true);
+  assert.equal(maj.miniatureDifferente(null), false, 'rien de comparable : pas de réapplication');
+});
+
+test('le passage automatique contrôle la miniature sans ouvrir Studio', () => {
+  assert.match(fond, /KappMajVideo\.miniatureAVerifier\(v, Date\.now\(\)\)/);
+  const bloc = fond.slice(fond.indexOf('async function verifyThumb'), fond.indexOf('// "Chrome connecté"'));
+  assert.match(bloc, /folder\('thumbCheck'/);
+  assert.match(bloc, /status: 'thumbCheck'/);
+  assert.doesNotMatch(bloc, /studio\.js|chrome\.tabs|injectScripts/);
+});
