@@ -945,6 +945,8 @@ function sentItem(video) {
     const thumbStuck = video.thumb_pending && (video.thumb_tries || 0) >= 3;
     if (!video.has_content) status = pill('neutral', 'Aucune fiche ni miniature dans le dossier.');
     // Studio n'a pas pris la miniature pendant l'envoi : elle est appliquée toute seule (3 essais), sinon à la main.
+    // Contrôle sur YouTube (30/10) : la miniature montrée n'est toujours pas celle du dossier après 3 essais.
+    else if (video.thumb_check_error) status = pill('warn', video.thumb_check_error);
     else if (thumbStuck) status = pill('warn', 'Miniature pas encore sur YouTube : Studio l’a refusée trois fois. Essaie ⋮ › Mettre à jour la miniature.');
     else if (video.thumb_pending && video.thumbnail_path) status = pill('neutral', 'Miniature pas encore sur YouTube : appliquée toute seule dans quelques minutes.');
     else if (video.thumb_pending) status = pill('warn', video.thumbnail_warning ? 'Miniature pas sur YouTube : celle du dossier fait plus de 2 Mo. Réduis-la, elle partira toute seule.' : 'Miniature pas encore sur YouTube : elle partira toute seule dès qu’elle sera dans le dossier.');

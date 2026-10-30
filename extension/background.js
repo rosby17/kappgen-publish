@@ -3122,9 +3122,26 @@ async function autoPass() {
     autoTick();
     return;
   }
+  // Miniature contrôlée sur YouTube (Roosevelt, 30/10) : Studio peut ignorer le fichier sans rien dire. Une vidéo par passage,
+  // sans ouvrir Studio ; différente de celle du dossier → réappliquée au passage suivant (thumbPending, ci-dessus).
+  const aVerifier = networkOn(settings, 'youtube') ? sent.find((v) => ownOf(settings, v).auto !== false && !archivee.has(`p:${v.relative_path}`)
+    && !enTransfert[v.youtube_id] && KappMajVideo.miniatureAVerifier(v, Date.now())) : null;
+  if (aVerifier) await verifyThumb(aVerifier).catch((error) => console.warn('Contrôle de la miniature :', error));
   if (!stale) return;
   await updateVideo(stale.relative_path, true);
   autoTick();
+}
+
+async function verifyThumb(v) {
+  const { ecart } = await folder('thumbCheck', { path: v.thumbnail_path, youtubeId: v.youtube_id });
+  // Rien de comparable (miniature pas en 16:9) : on ne revient pas dessus tant que le fichier ne change pas.
+  if (ecart === null || !KappMajVideo.miniatureDifferente(ecart)) {
+    await folder('mark', { path: v.relative_path, status: 'thumbCheck', data: { ok: true, sig: v.thumb_sig } });
+    return;
+  }
+  const retry = (v.thumb_misses || 0) + 1 < KappMajVideo.VERIF_MAX;
+  await folder('mark', { path: v.relative_path, status: 'thumbCheck', data: { ok: false, retry,
+    error: retry ? null : 'Miniature toujours absente sur YouTube après 3 essais : mets-la à la main dans Studio (⋮ › Mettre à jour la miniature).' } });
 }
 
 // "Chrome connecté" in the app: check in with KappGen every minute.

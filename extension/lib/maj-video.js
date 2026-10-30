@@ -53,10 +53,39 @@
     return essais === 0 || now - (v.applied_at || 0) >= ECART_ESSAIS_MS;
   }
 
+  // Miniature vérifiée sur YouTube (Roosevelt, 30/10 : Dharma Vivant 013 et 016 en ligne avec une image tirée de la vidéo).
+  // Studio peut ignorer le fichier sans rien dire : l'envoi passait pour réussi. Après chaque envoi ou mise à jour, la miniature
+  // que YouTube montre (i.ytimg.com, ouvert à tous) est comparée à celle du dossier ; différente → réappliquée toute seule.
+  const VERIF_DELAI_MS = 15 * 60000;          // YouTube met quelques minutes à servir la nouvelle miniature
+  const VERIF_ECART_MS = 30 * 60000;          // entre deux contrôles d'une même vidéo
+  const VERIF_FENETRE_MS = 30 * 86400000;     // vidéos plus anciennes : jamais touchées (miniature changée à la main dans Studio)
+  const VERIF_MAX = 3;                        // au-delà, on arrête de réappliquer et on le signale
+  const SEUIL_ECART = 64;                     // sur 256 : même image ≈ 0 à 10, image différente ≈ 110 à 140
+
+  // v : vidéo de « sent ». La miniature du dossier est-elle à comparer avec YouTube maintenant ?
+  function miniatureAVerifier(v = {}, now = Date.now()) {
+    if (!v.youtube_id || !v.thumbnail_path || !v.thumb_sig || v.youtube_draft || v.thumb_pending) return false;
+    if (v.thumb_ok_sig === v.thumb_sig) return false;                       // déjà vue sur YouTube, fichier inchangé
+    if ((v.thumb_misses || 0) >= VERIF_MAX) return false;
+    const envoi = Math.max(Number(v.published_at) || 0, Number(v.applied_at) || 0);
+    if (!envoi || now - envoi < VERIF_DELAI_MS) return false;
+    if (now - (Number(v.published_at) || 0) > VERIF_FENETRE_MS) return false;
+    return !v.thumb_checked_at || now - v.thumb_checked_at >= VERIF_ECART_MS;
+  }
+
+  // Empreinte d'une image réduite à 16 × 16 en gris (256 valeurs) : chaque point plus clair ou non que la moyenne.
+  function empreinte(gris = []) {
+    const moyenne = gris.reduce((a, b) => a + b, 0) / (gris.length || 1);
+    return gris.map((g) => g > moyenne);
+  }
+  const ecartEmpreintes = (a = [], b = []) => a.reduce((n, x, i) => n + (x !== b[i] ? 1 : 0), 0) + Math.abs(a.length - b.length);
+  const miniatureDifferente = (ecart) => Number.isFinite(ecart) && ecart >= SEUIL_ECART;
+
   const pageRechargee = (message) => PAGE_RECHARGEE.test(String((message && message.message) || message || ''));
 
   const api = Object.freeze({ CHAMPS, ESSAIS_MINIATURE, ECART_ESSAIS_MS, MESSAGE_PAGE_RECHARGEE,
-    champsAMettreAJour, miniatureAComplete, miniatureARetenter, pageRechargee });
+    VERIF_DELAI_MS, VERIF_ECART_MS, VERIF_FENETRE_MS, VERIF_MAX, SEUIL_ECART,
+    champsAMettreAJour, miniatureAComplete, miniatureARetenter, miniatureAVerifier, empreinte, ecartEmpreintes, miniatureDifferente, pageRechargee });
   root.KappMajVideo = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

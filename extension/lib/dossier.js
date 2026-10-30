@@ -677,6 +677,10 @@ const KappDossier = (() => {
           force_update: !!record.forceUpdate, update_error: record.updateError || null,
           // miniature refusée par Studio pendant l'envoi : appliquée ensuite toute seule (lib/maj-video.js)
           thumb_pending: !!record.thumbPending, thumb_tries: record.thumbTries || 0, applied_at: record.appliedAt || null,
+          // miniature contrôlée sur YouTube (lib/maj-video.js, miniatureAVerifier) : refaite quand le fichier change
+          thumb_sig: thumb ? [thumb.path.split('/').pop(), thumb.size, thumb.modified].join('|') : null,
+          thumb_ok_sig: record.thumbOkSig || null, thumb_checked_at: record.thumbCheckedAt || null, thumb_misses: record.thumbMisses || 0,
+          thumb_check_error: record.thumbCheckError || null,
           thumbnail_warning: thumb && thumb.size > 2 * 1024 * 1024 ? 'miniature de plus de 2 Mo : YouTube la refuse' : null,
           vertical_path: vertical && vertical.path, vertical_size_bytes: vertical && vertical.size,
           // les autres formats faits par KappGen (reel-court-carre.mp4…), pour les réseaux qui les demandent (videos de reglages-publication.json)
@@ -892,6 +896,18 @@ const KappDossier = (() => {
         delete record.updateError; delete record.updateTriedHash;
       }
       state[relativePath] = record;
+    } else if (status === 'thumbCheck') {
+      // Miniature comparée avec celle que YouTube montre. Différente : réappliquée toute seule (thumbPending), 3 fois au plus.
+      const record = state[relativePath] || {};
+      record.thumbCheckedAt = now;
+      if (data.ok) { record.thumbOkSig = data.sig || null; delete record.thumbMisses; delete record.thumbCheckError; }
+      else {
+        record.thumbMisses = (record.thumbMisses || 0) + 1;
+        delete record.thumbOkSig;
+        if (data.retry) { record.thumbPending = true; delete record.thumbTries; }
+        if (data.error) record.thumbCheckError = data.error;
+      }
+      state[relativePath] = record;
     } else if (status === 'schedule') {
       // Time chosen in the panel for this video (status unchanged).
       const record = state[relativePath] || {};
@@ -925,7 +941,7 @@ const KappDossier = (() => {
       if (record.youtubeId && record.draft) record.brokenDraftIds = [...new Set([...(record.brokenDraftIds || []), record.youtubeId])];
       for (const key of ['status', 'youtubeId', 'youtubePublishedAt', 'publishedAt', 'visibility', 'channel', 'appliedHash', 'appliedAt', 'draft',
         'youtubeError', 'updateError', 'updateTriedHash', 'forceUpdate', 'startedAt', 'date', 'error', 'shortError',
-        'thumbPending', 'thumbTries', 'owner', 'aliveAt']) delete record[key];
+        'thumbPending', 'thumbTries', 'thumbOkSig', 'thumbCheckedAt', 'thumbMisses', 'thumbCheckError', 'owner', 'aliveAt']) delete record[key];
       state[relativePath] = record;
     } else {
       const record = state[relativePath] || {};

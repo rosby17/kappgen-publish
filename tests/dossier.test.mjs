@@ -143,6 +143,30 @@ test('social updates never move the original YouTube publication timestamp', asy
   assert.equal(social.publishedAt, publishedAt);
 });
 
+test('miniature différente sur YouTube : réappliquée toute seule, puis abandon signalé après 3 essais', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  const channel = disk.dir('CHAINE');
+  project(channel, 'Episode', 'episode.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+
+  const path = 'CHAINE/Episode/episode.mp4';
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk' });
+  let record = await KappDossier.mark(path, 'thumbCheck', { ok: false, retry: true });
+  assert.equal(record.thumbPending, true);
+  assert.equal(record.thumbMisses, 1);
+  record = await KappDossier.mark(path, 'applied', { hash: 'h', champs: ['thumbnail'], thumbnail: true });
+  assert.equal(record.thumbPending, undefined);
+  assert.equal(record.thumbMisses, 1, 'les essais ne repartent pas de zéro après une réapplication');
+  record = await KappDossier.mark(path, 'thumbCheck', { ok: false, retry: false, error: 'toujours absente' });
+  assert.equal(record.thumbPending, undefined);
+  assert.equal(record.thumbCheckError, 'toujours absente');
+  record = await KappDossier.mark(path, 'thumbCheck', { ok: true, sig: 'miniature.png|1|2' });
+  assert.equal(record.thumbOkSig, 'miniature.png|1|2');
+  assert.equal(record.thumbMisses, undefined);
+  assert.equal(record.thumbCheckError, undefined);
+});
+
 test('invalid publication.json is visible and can never be ready', async () => {
   const { KappDossier } = library();
   const disk = new MemoryDirectory('VIDEOS');
