@@ -554,9 +554,21 @@ const KappDossier = (() => {
 
     const units = [];
 
+    // Dossier d'une vidéo KappGen (<marque>/contenus/<vidéo>/, avec statut.json ou 06-rendu) : seule 06-rendu contient la vidéo à publier.
+    // Les montages de travail (05-plan/renders, 09-formats…) ne sont jamais proposés (Roosevelt, 31/10 : la copie de travail d'une vidéo
+    // déjà publiée, dont 06-rendu avait été vidé, revenait en « Publier maintenant » sans titre ni miniature).
+    function copieDeTravail(node) {
+      for (let n = node; n && n.parent; n = n.parent) {
+        if (norm(n.parent.name) === 'contenus' && (n.files.has('statut.json') || n.dirs.some((d) => norm(d.name) === '06 rendu'))) {
+          return !(norm(node.name) === '06 rendu' && node.parent === n);
+        }
+      }
+      return false;
+    }
+
     async function visit(node) {
       await stateFor(node);
-      const videos = await videosOf(node);
+      const videos = copieDeTravail(node) ? [] : await videosOf(node);
       // Dossier de travail d'une vidéo KappGen (<marque>/contenus/<vidéo>/06-rendu/video.mp4) : son titre est dans 02-texte/fiche.md et
       // sa miniature dans 07-miniature/ (Roosevelt, 17/10 : « video · sans miniature · pas de fiche » quand le dossier choisi contient aussi
       // les dossiers de travail). La copie rangée dans « KappGen - à publier » est préférée plus bas (doublons).
