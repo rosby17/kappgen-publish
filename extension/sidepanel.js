@@ -532,8 +532,12 @@ const chan = (name) => (showChannels ? name : null);
 let plannedAt = new Map();
 function videoItem(video) {
   const chosen = video.schedule_at && video.schedule_at > Date.now();
-  const prevue = !chosen && plannedAt.get(video.id);
+  // Programmée par KappGen (programmation.json) : elle attend son heure dans l'extension, comme un post Facebook programmé.
+  const kgPlan = !video.last_error && video.planned_at;
+  const prevue = !chosen && !kgPlan && plannedAt.get(video.id);
   const status = video.last_error ? pill('warn', video.last_error)
+    : kgPlan && video.planned_at > Date.now() ? pillIcon('neutral', `Programmée · ${whenText(video.planned_at)}`, 'clock')
+    : kgPlan && video.auto_ok ? pill('ok', `Son heure est arrivée (${whenText(video.planned_at)}) : elle part maintenant.`)
     : chosen ? pill('ok', `Programmée : publique sur YouTube le ${whenText(video.schedule_at)}${video.auto_ok ? ' (envoyée à YouTube dès maintenant)' : ''}.`)
     : prevue ? pill('ok', `Prévue le ${whenText(prevue)} : envoyée à YouTube à l’avance, publique à cette heure.`)
       : video.auto_ok ? pill('ok', visibilityOf(video.channel_key) === 'SCHEDULE' ? 'Partira toute seule, au prochain horaire.' : `Partira toute seule (${VISIBILITY_LABELS[visibilityOf(video.channel_key)]}).`)
@@ -2041,12 +2045,12 @@ async function renderFolderOnce() {
   for (const [key, own] of Object.entries(config.channels)) autoVisibility.set(key, own.visibility);
   const { scheduled } = await chrome.storage.local.get('scheduled');
   plannedAt = KappSchedule.plan(data.videos, (v) => {
-    if (!v.auto_ok) return null;
+    if (!v.auto_ok || v.planned_at) return null;
     const own = { ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) };
     const vis = own.visibility || (config.schedule === 'times' ? 'SCHEDULE' : config.visibility);
     return vis === 'SCHEDULE' ? (own.times || config.times || '18:00') : null;
   }, scheduled || {});
-  const order = (v) => (v.schedule_at && v.schedule_at > Date.now() ? v.schedule_at : v.auto_ok ? Date.now() : Infinity);
+  const order = (v) => (v.planned_at ? v.planned_at : v.schedule_at && v.schedule_at > Date.now() ? v.schedule_at : v.auto_ok ? Date.now() : Infinity);
   const shortsWaiting = data.sent.filter((v) => v.youtube_id && v.vertical_path && !v.short_youtube_id).map(shortItem);
   $('videos').replaceChildren(...[...data.videos].sort((a, b) => order(a) - order(b)).map(videoItem), ...shortsWaiting);
   queueMicrotask(applyJob);

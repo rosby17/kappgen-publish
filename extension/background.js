@@ -862,6 +862,7 @@ function ownOf(settings, video) {
 // ------------------------------------------------- visibility & schedule
 
 const VISIBILITIES = ['UNLISTED', 'PUBLIC', 'PRIVATE', 'SCHEDULE'];
+const PLANNED_GAP_MS = 20 * 60000;      // vidéos programmées en retard : une par marque toutes les 20 min au plus
 const channelVisibility = (own) => (VISIBILITIES.includes(own.visibility) ? own.visibility : 'UNLISTED');
 
 async function rememberChannel(channelKey, youtubeChannelId) {
@@ -2659,6 +2660,8 @@ async function planNextDue() {
   const { catchUp, paceNext } = await chrome.storage.local.get(['catchUp', 'paceNext']);
   if (catchUp && catchUp.next > Date.now()) next = Math.min(next, catchUp.next);
   if (paceNext && paceNext > Date.now()) next = Math.min(next, paceNext); // the rhythm chosen in Réglages: the next moment allowed
+  const { videoDueAt } = await chrome.storage.local.get('videoDueAt');            // vidéo programmée par KappGen : réveil à son heure
+  if (videoDueAt && videoDueAt > Date.now()) next = Math.min(next, videoDueAt);
   await chrome.storage.local.set({ nextDueAt: Number.isFinite(next) ? next : null });
   if (Number.isFinite(next)) await chrome.alarms.create('due', { when: next + 5000 });
   else await chrome.alarms.clear('due');
@@ -3079,7 +3082,15 @@ async function autoPass() {
   if (!paced && await ownPostNext(settings)) { await paceRecord(); await chainIfDone(passAt); return; }
   let next = null;
   const pleins = Object.keys(await transfers()).length >= MAX_TRANSFERTS;      // assez de transferts en cours : la suivante attend
-  for (const candidate of !paced && !pleins && networkOn(settings, 'youtube') ? videos.filter((v) => v.auto_ok) : []) {
+  // Prochaine vidéo programmée par KappGen : l'extension se réveille à son heure (planNextDue).
+  const videoDue = videos.filter((v) => v.planned_at && v.planned_at > Date.now()).reduce((min, v) => Math.min(min, v.planned_at), Infinity);
+  await chrome.storage.local.set({ videoDueAt: Number.isFinite(videoDue) ? videoDue : null });
+  // Vidéos programmées : la plus ancienne heure d'abord. Après une absence (Chrome fermé), une seule par marque toutes les 20 min,
+  // jamais toutes en même temps (KappGen redonne de lui-même un créneau libre à celles qui ont trop de retard).
+  const recentes = new Set(sent.filter((s) => s.published_at && Date.now() - s.published_at < PLANNED_GAP_MS).map((s) => s.channel_key));
+  const parHeure = videos.filter((v) => v.auto_ok).sort((a, b) => (a.planned_at || 0) - (b.planned_at || 0));
+  for (const candidate of !paced && !pleins && networkOn(settings, 'youtube') ? parHeure : []) {
+    if (candidate.planned_at && recentes.has(candidate.channel_key)) continue;
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
       await folder('mark', { path: candidate.relative_path, status: 'ignored', data: { reason: 'déjà sur la chaîne (même titre)' } }).catch(() => {});
       continue;
@@ -3090,7 +3101,9 @@ async function autoPass() {
   if (next) {
     // Per channel: unlisted by default (the creator makes it public himself),
     // or straight to public for news channels where timing matters.
-    const visibility = channelVisibility(ownOf(settings, next));
+    // Vidéo programmée par KappGen : son heure est arrivée, elle est publiée maintenant (jamais reprogrammée plus loin par YouTube).
+    const vis = channelVisibility(ownOf(settings, next));
+    const visibility = next.planned_at && vis === 'SCHEDULE' ? 'PUBLIC' : vis;
     await paceRecord();
     await publish('folder', next.id, visibility, { auto: true });
     autoTick(); // more may be waiting
