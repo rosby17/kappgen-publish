@@ -506,6 +506,29 @@ test('KappGen work folder: sheet and thumbnail found, and the published copy win
   assert.match(queue.videos[0].relative_path, /^KappGen - à publier\//);
 });
 
+test('KappGen : les montages de travail d\'une vidéo (05-plan/renders) ne sont jamais proposés, seule 06-rendu compte (Roosevelt, 31/10)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('YOUTUBE');
+  const marque = disk.dir('SANTE').dir('next-age-health').dir('contenus');
+  // vidéo déjà publiée : 06-rendu vidé par une vidange du disque, la copie de travail est restée dans 05-plan/renders
+  const reins = marque.dir('2026-10-07_006_reins');
+  reins.file('statut.json', '{}');
+  reins.dir('05-plan').dir('renders').file('reins.mp4', '', { size: 90_423_342, lastModified: 1 });
+  reins.dir('06-rendu').file('publication.md', '## Titre\n```\nReins après 60 ans\n```\n');
+  // montage arrêté avant 06-rendu
+  const constipation = marque.dir('2026-10-13_012_constipation');
+  constipation.file('statut.json', '{}');
+  constipation.dir('05-plan').dir('renders').file('constipation.mp4', '', { size: 117_642_293, lastModified: 1 });
+  constipation.dir('09-formats').file('vertical.mp4', '', { size: 9_000_000, lastModified: 1 });
+  // vidéo prête : elle seule est proposée
+  const prete = marque.dir('2026-10-20_014_sommeil');
+  prete.dir('06-rendu').file('video.mp4', '', { size: 80_000_000, lastModified: 1 });
+  prete.dir('02-texte').file('fiche.md', '## Titre\n```\nMieux dormir\n```\n');
+  KappDossier._setTestRoot(disk);
+  const queue = await KappDossier.scan({ now: 10_000_000 });
+  assert.equal(queue.videos.map((v) => v.relative_path).join(' | '), 'SANTE/next-age-health/contenus/2026-10-20_014_sommeil/06-rendu/video.mp4');
+});
+
 test('KappGen : une vidéo montée AVANT le choix du dossier part seule dès que sa miniature et sa fiche sont là (Roosevelt, 19/10)', async () => {
   const { KappDossier } = library();
   const disk = new MemoryDirectory('YOUTUBE');
