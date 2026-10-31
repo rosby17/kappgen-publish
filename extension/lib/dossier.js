@@ -33,6 +33,9 @@ const KappDossier = (() => {
   // Visible in Finder: tells at a glance that the folder's video is on YouTube.
   const MARKER_FILE = 'DEJA-PUBLIEE.txt';
   const CHANNEL_FILE = 'reglages-publication.json';
+  // Date et heure de publication d'une vidéo, écrites par KappGen dans son 06-rendu (comme publication.json pour les posts).
+  const PLAN_FILE = 'programmation.json';
+  const whenFr = (t) => new Date(t).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const MIN_SIZE = 5 * 1024 * 1024;
   const SETTLE_MS = 10 * 60 * 1000;            // still being written if touched within 10 min
   const LOOSE_MAX_AGE = 14 * 24 * 3600 * 1000; // loose videos without a sheet: recent ones only
@@ -728,14 +731,26 @@ const KappDossier = (() => {
         if (fiche) readyAt = Math.max(readyAt, (await fiche.getFile()).lastModified);
         if (node.files.has('publication.md')) readyAt = Math.max(readyAt, (await node.files.get('publication.md').getFile()).lastModified);
       }
+      // Date et heure de publication données par KappGen (06-rendu/programmation.json, Roosevelt 31/10) : la vidéo reste « Programmée »
+      // et ne part qu'à cette heure-là, jamais avant, même si plusieurs vidéos sont prêtes en même temps.
+      let plannedAt = null;
+      let planError = null;
+      if (node.files.has(PLAN_FILE)) {
+        const plan = await readObjectResult(node.handle, PLAN_FILE);
+        if (plan.error) planError = plan.error;
+        else if (plan.value) { try { plannedAt = dueTime(plan.value, ''); } catch (error) { planError = error.message || String(error); } }
+      }
       let blocked = null;
       if (config.auto === false) blocked = 'publication automatique désactivée pour cette chaîne';
       else if (!sheet.title) blocked = 'pas de fiche avec un titre : envoi manuel seulement';
       else if (unit.kind === 'kappgen' && !thumb) blocked = 'en attente de sa miniature : elle partira toute seule dès qu’elle sera prête';
       // Une vidéo KappGen ne part jamais toute seule sans miniature : une miniature de plus de 2 Mo serait refusée par YouTube.
       else if (unit.kind === 'kappgen' && bigThumb) blocked = 'miniature de plus de 2 Mo (YouTube la refuse) : réduis-la, la vidéo partira toute seule ensuite';
+      else if (planError) blocked = `${PLAN_FILE} illisible (${planError}) : envoi manuel seulement`;
+      else if (unit.kind === 'kappgen' && !plannedAt) blocked = 'en attente de sa date de publication : KappGen la donne dès que la vidéo est prête';
+      else if (plannedAt && plannedAt > now) blocked = `programmée le ${whenFr(plannedAt)}`;
       else if (now - readyAt < SETTLE_MS) blocked = 'fichier modifié il y a moins de 10 min';
-      else if (watchSince && readyAt < watchSince) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
+      else if (watchSince && readyAt < watchSince && !plannedAt) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
       else if (record.status === 'failed') blocked = 'dernier envoi en échec : relance-le à la main';
       else if (running) blocked = 'envoi déjà en cours';
       else if (interrupted) blocked = 'envoi précédent interrompu : vérifie dans YouTube Studio qu’elle n’y est pas déjà, puis relance à la main';
@@ -764,6 +779,7 @@ const KappDossier = (() => {
         running,
         last_error: record.status === 'failed' ? record.error : null,
         schedule_at: record.scheduleAt || null,
+        planned_at: plannedAt,
         vertical_path: vertical && vertical.path,
         vertical_size_bytes: vertical && vertical.size,
         channel_config: fileConfig,

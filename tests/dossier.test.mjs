@@ -534,7 +534,8 @@ test('KappGen : une vidéo montée AVANT le choix du dossier part seule dès que
   const disk = new MemoryDirectory('YOUTUBE');
   const fiche = '## Titre\n```\nPourquoi tu t\'épuises\n```\n';
   const c = disk.dir('BOUDDHISME').dir('paz-nirvana').dir('contenus').dir('2026-10-15_002');
-  c.dir('06-rendu').file('video.mp4', '', { size: 553771273, lastModified: 1_000_000 });          // montée le 16/10
+  const rendu = c.dir('06-rendu');
+  rendu.file('video.mp4', '', { size: 553771273, lastModified: 1_000_000 });          // montée le 16/10
   c.dir('02-texte').file('fiche.md', fiche, { lastModified: 1_000_000 });
   const mini = c.dir('07-miniature');
   KappDossier._setTestRoot(disk);
@@ -542,14 +543,18 @@ test('KappGen : une vidéo montée AVANT le choix du dossier part seule dès que
   let v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
   assert.equal(v.auto_ok, false);
   assert.match(v.auto_blocked, /en attente de sa miniature/);
-  // miniature arrivée APRÈS le choix du dossier : la vidéo est complète maintenant, elle part toute seule
+  // miniature arrivée APRÈS le choix du dossier : la vidéo est complète, elle attend sa date de publication donnée par KappGen (31/10)
   mini.file('miniature.jpg', 'jpg', { size: 1000, lastModified: 8_000_000 });
   v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
+  assert.match(v.auto_blocked, /en attente de sa date de publication/);
+  // KappGen l'a programmée, l'heure est passée : elle part toute seule
+  rendu.file('programmation.json', JSON.stringify({ date_locale: '1970-01-01', heure_prevue: '00:00' }));
+  v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
   assert.equal(v.auto_ok, true, v.auto_blocked);
-  // tout était complet avant le choix : elle attend un clic, comme avant
+  // tout était complet avant le choix du dossier : programmée par KappGen, elle n'attend pas de clic
   mini.file('miniature.jpg', 'jpg', { size: 1000, lastModified: 2_000_000 });
   v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
-  assert.match(v.auto_blocked, /déjà dans le dossier/);
+  assert.equal(v.auto_ok, true, v.auto_blocked);
   // miniature toute fraîche (moins de 10 min) : on attend qu'elle soit stable
   mini.file('miniature.jpg', 'jpg', { size: 1000, lastModified: 9_900_000 });
   v = (await KappDossier.scan({ watchSince: 5_000_000, now: 10_000_000 })).videos[0];
@@ -729,4 +734,45 @@ test('description de 4000 caractères au plus, coupée à la fin d’une ligne (
   assert.ok(r.length <= 4000, String(r.length));
   assert.ok(r.endsWith('remplir.'));
   assert.equal(KappFiches.cleanDescription('courte <b>'), 'courte ‹b›');
+});
+
+test('KappGen programme les vidéos : chacune reste « programmée » jusqu\'à son heure, jamais avant (Roosevelt, 31/10)', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('YOUTUBE');
+  const marque = disk.dir('TECHNOLOGIE').dir('izivoice');
+  const avant = Date.parse('2026-11-01T07:00:00');
+  const contenus = marque.dir('contenus');
+  const rendus = {};
+  const faire = (nom, date, heure) => {
+    const c = contenus.dir(nom);
+    const r = rendus[nom] = c.dir('06-rendu');
+    r.file('video.mp4', '', { size: 6 * 1024 * 1024 + Object.keys(rendus).length, lastModified: 1_000_000 });   // tailles différentes : trois vidéos distinctes
+    r.file('miniature.jpg', 'jpg', { size: 1000, lastModified: 1_000_000 });
+    c.dir('02-texte').file('fiche.md', `## Titre\n\`\`\`\n${nom}\n\`\`\`\n`, { lastModified: 1_000_000 });
+    if (date) r.file('programmation.json', JSON.stringify({ date_locale: date, heure_prevue: heure, statut: 'programme' }));
+  };
+  faire('2026-11-01_010_jour-05', '2026-11-01', '08:00');
+  faire('2026-11-02_011_jour-06', '2026-11-02', '08:00');
+  faire('2026-11-02_012_sans-date');
+  KappDossier._setTestRoot(disk);
+  const scan = async (now) => Object.fromEntries((await KappDossier.scan({ now })).videos.map((v) => [v.title, v]));
+  let v = await scan(avant);
+  assert.equal(v['2026-11-01_010_jour-05'].auto_ok, false);
+  assert.match(v['2026-11-01_010_jour-05'].auto_blocked, /^programmée le /);
+  assert.equal(v['2026-11-01_010_jour-05'].planned_at, Date.parse('2026-11-01T08:00:00'));
+  assert.match(v['2026-11-02_012_sans-date'].auto_blocked, /en attente de sa date de publication/);
+  v = await scan(Date.parse('2026-11-01T08:01:00'));          // son heure est arrivée : elle seule part
+  assert.equal(v['2026-11-01_010_jour-05'].auto_ok, true, v['2026-11-01_010_jour-05'].auto_blocked);
+  assert.equal(v['2026-11-02_011_jour-06'].auto_ok, false);
+  // un fichier de programmation abîmé : jamais envoyée seule
+  rendus['2026-11-02_011_jour-06'].file('programmation.json', JSON.stringify({ date_locale: 'demain', heure_prevue: '08:00' }));
+  v = await scan(Date.parse('2026-11-03T08:01:00'));
+  assert.match(v['2026-11-02_011_jour-06'].auto_blocked, /programmation\.json illisible/);
+});
+
+test('la passe automatique publie les vidéos programmées à leur heure, la plus ancienne d\'abord, et se réveille pour la suivante', () => {
+  const src = readFileSync(join(root, 'extension/background.js'), 'utf8');
+  assert.match(src, /sort\(\(a, b\) => \(a\.planned_at \|\| 0\) - \(b\.planned_at \|\| 0\)\)/);
+  assert.match(src, /next\.planned_at && vis === 'SCHEDULE' \? 'PUBLIC' : vis/);
+  assert.match(src, /videoDueAt && videoDueAt > Date\.now\(\)\) next = Math\.min\(next, videoDueAt\)/);
 });
