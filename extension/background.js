@@ -54,8 +54,22 @@ function safeRedirectUrl(value) {
   return url.toString();
 }
 
+// La mémoire de l'extension (chrome.storage.local) peut ne plus jamais répondre : vu le 02/11 dans tous les profils,
+// Chrome resté ouvert plusieurs jours après la fermeture des fenêtres des profils. Sans délai, le panneau attendait le
+// compte sans fin et restait vide ; avec, il dit quoi faire (stuck : le panneau affiche la carte « ne répond plus »).
+const STUCK_MESSAGE = 'KappGen Publish ne répond plus : quitte complètement Chrome, puis rouvre-le.';
+async function localGet(keys, ms = 5000) {
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(STUCK_MESSAGE), { stuck: true })), ms); });
+  try {
+    return await Promise.race([chrome.storage.local.get(keys), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function appUrl() {
-  const { appUrl: saved } = await chrome.storage.local.get('appUrl');
+  const { appUrl: saved } = await localGet('appUrl');
   // Les profils déjà configurés sur l'ancienne API passent d'office sur le nouveau site.
   if (saved && /^https:\/\/api\.kappgen\.com\/?$/.test(saved)) return normalizeAppUrl(DEFAULT_APP_URL);
   return normalizeAppUrl(saved || DEFAULT_APP_URL);
@@ -3547,6 +3561,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   };
   const handler = handlers[message.type];
   if (!handler) return false;
-  handler().then((data) => sendResponse({ ok: true, data }), (error) => sendResponse({ ok: false, error: String(error.message || error) }));
+  handler().then((data) => sendResponse({ ok: true, data }),
+    (error) => sendResponse({ ok: false, error: String(error.message || error), ...(error && error.stuck ? { stuck: true } : {}) }));
   return true;
 });

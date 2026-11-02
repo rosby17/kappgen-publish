@@ -658,6 +658,8 @@ li.row.media .what .t { white-space: normal; display: -webkit-box; -webkit-line-
 #account .login a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 #account .login .login-forgot a, #account .login .login-legal a { color: var(--muted); }
 .login .login-error { margin: 0 0 10px; font-size: 12.5px; color: var(--danger); }
+.stuck .login-sub { margin-bottom: 10px; }
+.stuck .small { margin: 0; }
 .login-submit { width: 100%; height: 42px; border: 0; border-radius: 8px; background: var(--login-cta); color: var(--login-cta-text);
   font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .login-submit:hover { opacity: 0.9; }

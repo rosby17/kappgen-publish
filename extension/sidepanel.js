@@ -4,11 +4,16 @@
 // open while Chrome's folder picker is shown.
 const $ = (id) => document.getElementById(id);
 
-function send(message) {
-  return new Promise((resolve) => chrome.runtime.sendMessage(message, (reply) => {
-    const error = chrome.runtime.lastError;
-    resolve(error ? { ok: false, error: error.message || 'Le service KappGen Publish ne répond pas.' } : reply);
-  }));
+// timeout : au-delà, le service de l'extension est tenu pour bloqué (stuck) au lieu d'attendre sans fin.
+function send(message, { timeout = 0 } = {}) {
+  return new Promise((resolve) => {
+    const timer = timeout ? setTimeout(() => resolve({ ok: false, stuck: true, error: 'KappGen Publish ne répond plus.' }), timeout) : 0;
+    chrome.runtime.sendMessage(message, (reply) => {
+      clearTimeout(timer);
+      const error = chrome.runtime.lastError;
+      resolve(error ? { ok: false, error: error.message || 'Le service KappGen Publish ne répond pas.' } : reply);
+    });
+  });
 }
 
 const size = (bytes) => (!bytes ? '' : bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} Go` : `${Math.round(bytes / 1e6)} Mo`);
@@ -2946,8 +2951,27 @@ showThemeButton();
 // --------------------------------------------------------------- account
 
 // Everything else waits for the KappGen account to be connected.
+// Service ou mémoire de l'extension bloqués (vu le 02/11 : Chrome ouvert depuis des jours) : la carte « ne répond plus »
+// remplace la connexion, qui n'y changerait rien, et le panneau réessaie tout seul.
+let stuckRetry = 0;
+function showStuck(stuck) {
+  $('stuck').hidden = !stuck;
+  if (!stuck || stuckRetry) return;
+  stuckRetry = setTimeout(() => { stuckRetry = 0; start(); }, 30000);
+}
+
 async function renderAccount() {
-  const reply = await send({ type: 'account' });
+  const reply = await send({ type: 'account' }, { timeout: 35000 });   // 35 s : délai du serveur (20 s) + de la mémoire (5 s)
+  const stuck = !!(reply && reply.stuck);
+  showStuck(stuck);
+  if (stuck) {
+    $('profile').hidden = true;
+    $('account').hidden = false;
+    $('login').hidden = true;
+    $('main').hidden = true;
+    $('paywall').hidden = true;
+    return false;
+  }
   const user = reply && reply.ok && reply.data && typeof reply.data === 'object' ? reply.data : null;
   $('profile').hidden = !user;
   $('account').hidden = !!user; // the login card only when signed out
