@@ -733,7 +733,7 @@ const KappDossier = (() => {
       }
       // Date et heure de publication données par KappGen (06-rendu/programmation.json, Roosevelt 31/10) : la vidéo reste « Programmée »
       // et ne part qu'à cette heure-là, jamais avant, même si plusieurs vidéos sont prêtes en même temps.
-      let plannedAt = null;
+      let plannedAt = null;   // 0 est une vraie heure (1er janvier 1970 à minuit UTC) : toujours comparer à null
       let planError = null;
       if (node.files.has(PLAN_FILE)) {
         const plan = await readObjectResult(node.handle, PLAN_FILE);
@@ -747,10 +747,10 @@ const KappDossier = (() => {
       // Une vidéo KappGen ne part jamais toute seule sans miniature : une miniature de plus de 2 Mo serait refusée par YouTube.
       else if (unit.kind === 'kappgen' && bigThumb) blocked = 'miniature de plus de 2 Mo (YouTube la refuse) : réduis-la, la vidéo partira toute seule ensuite';
       else if (planError) blocked = `${PLAN_FILE} illisible (${planError}) : envoi manuel seulement`;
-      else if (unit.kind === 'kappgen' && !plannedAt) blocked = 'en attente de sa date de publication : KappGen la donne dès que la vidéo est prête';
-      else if (plannedAt && plannedAt > now) blocked = `programmée le ${whenFr(plannedAt)}`;
+      else if (unit.kind === 'kappgen' && plannedAt === null) blocked = 'en attente de sa date de publication : KappGen la donne dès que la vidéo est prête';
+      else if (plannedAt !== null && plannedAt > now) blocked = `programmée le ${whenFr(plannedAt)}`;
       else if (now - readyAt < SETTLE_MS) blocked = 'fichier modifié il y a moins de 10 min';
-      else if (watchSince && readyAt < watchSince && !plannedAt) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
+      else if (watchSince && readyAt < watchSince && plannedAt === null) blocked = 'déjà dans le dossier quand tu l’as choisi : clique « Publier sur YouTube » pour l’envoyer';
       else if (record.status === 'failed') blocked = 'dernier envoi en échec : relance-le à la main';
       else if (running) blocked = 'envoi déjà en cours';
       else if (interrupted) blocked = 'envoi précédent interrompu : vérifie dans YouTube Studio qu’elle n’y est pas déjà, puis relance à la main';
