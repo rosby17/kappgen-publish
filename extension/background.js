@@ -1104,7 +1104,13 @@ async function chooseVisibilityStep(tabId, args) {
   let result = await step(tabId, 'chooseVisibility', args);
   const start = Date.now();
   let asked = '';
-  while (result && result.attente) {
+  while (result && (result.attente || result.fenetrePerdue)) {
+    if (result.fenetrePerdue) {
+      if (asked) chrome.notifications.clear(PERSON_NOTICE, () => void chrome.runtime.lastError);
+      const error = new Error(`La fenêtre d’envoi de YouTube Studio s’est fermée avant l’étape « Visibilité ».${result.detail || ''}`);
+      error.fenetrePerdue = true;
+      throw error;
+    }
     const what = PERSON_WHAT[result.attente] || 'ton choix';
     if (asked !== result.attente) {
       asked = result.attente;
@@ -1270,7 +1276,16 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       }
 
       await setJob({ message: 'Visibilité…' });
-      await chooseVisibilityStep(tabId, { visibility, monetization, scheduleAt });
+      try {
+        await chooseVisibilityStep(tabId, { visibility, monetization, scheduleAt });
+      } catch (error) {
+        // Fenêtre d'envoi fermée alors que la vidéo a déjà son lien (allon-viral, 04/11 : onglet resté sur Données analytiques) :
+        // le brouillon est terminé depuis sa page, après le transfert, au lieu d'attendre qu'on le finisse à la main.
+        if (!error.fenetrePerdue || !early) throw error;
+        job = { ...job, stage: 'saved', youtubeId: early, saveStuck: true, dialogLost: true };
+        await chrome.storage.local.set({ pending: job });
+        await setJob({ message: 'La fenêtre d’envoi de Studio s’est fermée : la vidéo sera terminée depuis sa page dès la fin du transfert…' });
+      }
     });
     if (scheduleAt) await rememberSlot(video.channel_key, scheduleAt);
 
@@ -1463,7 +1478,17 @@ async function finishUpload(job) {
   if (calm < 3) throw new Error('Le transfert YouTube n’a pas pu être confirmé après huit heures. Vérifie son état dans Studio avant toute relance.');
   // Transfer over and the upload dialog never finished saving: the video
   // exists (it has its link), so set its visibility from its own page.
-  if (job.saveStuck && await step(tabId, 'saveState').catch(() => 'closed') !== 'closed') {
+  if (job.dialogLost) {
+    await setJob({ message: 'Transfert terminé : visibilité réglée depuis la page de la vidéo…' });
+    await applyVisibilityFromEdit(tabId, youtubeId, visibility, scheduleAt);
+    // Le brouillon devient une vidéo publiée (plus « Pas terminée sur YouTube »).
+    if (source === 'folder') {
+      await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeId, visibility, channel: video.channel_key, hash: video.hash,
+        ...(scheduleAt ? { scheduleAt } : {}), ...(job.thumbPending ? { thumbPending: true } : {}) } });
+    } else {
+      await api(`/studio-upload/${videoId}/published`, { method: 'POST', body: JSON.stringify({ youtube_video_id: youtubeId }) }).catch(() => {});
+    }
+  } else if (job.saveStuck && await step(tabId, 'saveState').catch(() => 'closed') !== 'closed') {
     await setJob({ message: 'Studio bloqué sur « Saving… » : visibilité réglée depuis la page de la vidéo…' });
     await applyVisibilityFromEdit(tabId, youtubeId, visibility);
   }
@@ -1563,8 +1588,12 @@ async function saveUntilClosed(tabId) {
   return state === 'closed';
 }
 
-async function applyVisibilityFromEdit(tabId, youtubeId, visibility) {
-  if (!['UNLISTED', 'PUBLIC', 'PRIVATE'].includes(visibility)) {
+async function applyVisibilityFromEdit(tabId, youtubeId, visibility, scheduleAt = null) {
+  // Programmée : l'heure encore à venir est posée sur la page de la vidéo ; déjà passée (long transfert), elle sort tout de suite.
+  if (visibility === 'SCHEDULE' && scheduleAt) {
+    if (scheduleAt < Date.now() + 15 * 60000) { visibility = 'PUBLIC'; scheduleAt = null; }
+  } else scheduleAt = null;
+  if (!['UNLISTED', 'PUBLIC', 'PRIVATE'].includes(visibility) && !scheduleAt) {
     throw new Error(`Vidéo envoyée (https://youtu.be/${youtubeId}) mais Studio est resté bloqué : règle sa programmation à la main dans Studio.`);
   }
   await chrome.tabs.update(tabId, { url: `https://studio.youtube.com/video/${youtubeId}/edit` });
@@ -1575,7 +1604,7 @@ async function applyVisibilityFromEdit(tabId, youtubeId, visibility) {
     await sleep(700);
   }
   await injectScripts(tabId, ['studio.js']);
-  await whileShown(tabId, () => step(tabId, 'setVisibilityOnEdit', { visibility }));
+  await whileShown(tabId, () => step(tabId, 'setVisibilityOnEdit', { visibility, ...(scheduleAt ? { scheduleAt } : {}) }));
 }
 
 // After the extension is updated or reloaded (or the browser restarted):
