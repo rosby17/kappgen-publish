@@ -309,7 +309,9 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     if (!expand) throw new Error('YouTube Studio : option « Programmer » introuvable.');
     click(expand);
     await sleep(1000);
-    const dateTrigger = await waitFor(() => document.querySelector(S('dateTrigger')), { timeout: 10000, what: 'la date de programmation' });
+    // Page de la vidéo (pas de fenêtre d'envoi) : mêmes champs, dans la fenêtre Visibilité.
+    const dateTrigger = await waitFor(() => document.querySelector(S('dateTrigger')) || document.querySelector('#datepicker-trigger'),
+      { timeout: 10000, what: 'la date de programmation' });
     click(dateTrigger);
     const dateInput = await waitFor(() => {
       const input = document.querySelector(S('dateInput'));
@@ -317,7 +319,7 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     }, { timeout: 10000, what: 'le champ Date' });
     await typeInput(dateInput, new Intl.DateTimeFormat(lang, { day: 'numeric', month: 'short', year: 'numeric' }).format(when));
     const timeInput = await waitFor(() => {
-      const input = document.querySelector(S('timeInput'));
+      const input = document.querySelector(S('timeInput')) || document.querySelector('#time-of-day-container input');
       return visible(input) ? input : null;
     }, { timeout: 10000, what: 'le champ Heure' });
     await typeInput(timeInput, new Intl.DateTimeFormat(lang, { hour: 'numeric', minute: '2-digit' }).format(when));
@@ -483,6 +485,7 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
       // disabled while Studio is busy (checks, processing): wait for it.
       const start = Date.now();
       let stuck = 0;
+      let lostSince = 0;
       while (Date.now() - start < 180000) {
         const radio = document.querySelector(S('visibilityRadio', { name }));
         if (visible(radio)) {
@@ -492,6 +495,16 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
           await sleep(800);
           return true;
         }
+        // Fenêtre d'envoi fermée (onglet parti sur une autre page de Studio, allon-viral 04/11) : rien à cliquer ici,
+        // le service la termine depuis la page de la vidéo au lieu de chercher « Visibilité » pendant 3 minutes.
+        const dlg = dialog();
+        if (!dlg || !visible(dlg)) {
+          if (!lostSince) lostSince = Date.now();
+          else if (Date.now() - lostSince > 10000) return { fenetrePerdue: true, detail: whatIsShown() };
+          await sleep(700);
+          continue;
+        }
+        lostSince = 0;
         const money = await monetizationStep(monetization, waitPerson === 'monetisation');
         if (money === PERSON) return { attente: 'monetisation', detail: lastMonetizationDetail };
         if (money) continue;
@@ -571,18 +584,25 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     // Fallback when the upload dialog never finishes saving: the video
     // already exists, so its visibility is set from its edit page
     // (studio.youtube.com/video/<id>/edit), then Save.
-    async setVisibilityOnEdit({ visibility }) {
+    // scheduleAt (fenêtre d'envoi perdue d'une vidéo programmée) : programmée depuis la même fenêtre Visibilité.
+    async setVisibilityOnEdit({ visibility, scheduleAt = null }) {
+      const schedule = visibility === 'SCHEDULE' && scheduleAt;
       const name = ['PRIVATE', 'UNLISTED', 'PUBLIC'].includes(visibility) ? visibility : 'UNLISTED';
       const trigger = await waitFor(() => {
         const t = document.querySelector(S('visibilityTrigger'));
         return visible(t) ? t : null;
       }, { timeout: 60000, what: 'le réglage Visibilité de la page de la vidéo' });
       click(trigger);
-      const radio = await waitFor(() => {
-        const r = document.querySelector(S('visibilityRadio', { name }));
-        return visible(r) ? r : null;
-      }, { timeout: 15000, what: 'le choix de visibilité' });
-      click(radio);
+      if (schedule) {
+        await sleep(1000);
+        await scheduleFor(scheduleAt);
+      } else {
+        const radio = await waitFor(() => {
+          const r = document.querySelector(S('visibilityRadio', { name }));
+          return visible(r) ? r : null;
+        }, { timeout: 15000, what: 'le choix de visibilité' });
+        click(radio);
+      }
       await sleep(600);
       const done = await waitFor(() => findByText(S('buttons'), X('done')), { timeout: 10000, what: 'le bouton Terminé' });
       click(done);
