@@ -103,6 +103,58 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     return [...document.querySelectorAll(selector)].find((node) => visible(node) && pattern.test(textOf(node))) || null;
   }
 
+  // Page de la vidéo (studio.youtube.com/video/<id>/edit) : la carte Visibilité et ce qu'elle affiche.
+  const VISIBILITY_LABEL = /^(Visibilité|Visibility|Visibilidad|Visibilidade|Sichtbarkeit|Visibilità)$/i;
+  const VISIBILITY_SHOWN = {
+    UNLISTED: /non r[ée]pertori|unlisted|no listado|n[ãa]o listado|nicht gelistet|non in elenco/i,
+    PUBLIC: /(^|[^a-zà-ÿ])(publique|public|p[úu]blico|p[úu]blica|öffentlich|pubblico)([^a-zà-ÿ]|$)/i,
+    PRIVATE: /(^|[^a-zà-ÿ])(priv[ée]e|private|privado|privada|privat|privato)([^a-zà-ÿ]|$)/i,
+  };
+  const VISIBILITY_CHOICE = {
+    UNLISTED: /^(non r[ée]pertori|unlisted|no listado|n[ãa]o listado|nicht gelistet|non in elenco)/i,
+    PUBLIC: /^(publique|public|p[úu]blico|p[úu]blica|öffentlich|pubblico)/i,
+    PRIVATE: /^(priv[ée]e|private|privado|privada|privat|privato)/i,
+  };
+  const SCHEDULED_SHOWN = /programm|planifi|scheduled|geplant/i;
+  const CLICKABLE = 'ytcp-dropdown-trigger, #select-button, [role="button"], button, tp-yt-paper-icon-button, ytcp-icon-button';
+
+  function visibilityLabels() {
+    const labels = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const el = node.parentElement;
+      if (el && VISIBILITY_LABEL.test((node.nodeValue || '').trim()) && visible(el) && !el.closest(SIDE_MENU)) labels.push(el);
+    }
+    return labels;
+  }
+
+  // { button, card } : le bouton qui ouvre le choix, et la carte dont le texte dit la visibilité actuelle.
+  function visibilityOnEdit() {
+    const fromRecipe = document.querySelector(S('visibilityTrigger'));
+    if (visible(fromRecipe)) return { button: fromRecipe, card: fromRecipe.closest('ytcp-video-metadata-visibility') || fromRecipe };
+    for (const label of visibilityLabels()) {
+      let card = label;
+      for (let i = 0; i < 6 && card.parentElement; i += 1) {
+        card = card.parentElement;
+        if (textOf(card).length <= textOf(label).length) continue;   // encore le seul titre : remonter
+        const button = card.matches(CLICKABLE) ? card : [...card.querySelectorAll(CLICKABLE)].find(visible);
+        if (button) return { button, card };
+      }
+    }
+    return null;
+  }
+
+  // Pour le message d'erreur : où l'on était et ce qui entoure le mot « Visibilité ».
+  function editPageDetail() {
+    const path = (location.pathname || '').slice(0, 60);
+    const seen = visibilityLabels().slice(0, 2).map((label) => {
+      const chain = [];
+      for (let el = label; el && chain.length < 4; el = el.parentElement) chain.push(el.tagName.toLowerCase() + (el.id ? `#${el.id}` : ''));
+      return `${chain.join(' < ')} « ${textOf(label.parentElement || label).slice(0, 60)} »`;
+    });
+    return `${path} | ${seen.length ? seen.join(' | ') : 'aucun titre « Visibilité » visible'}`;
+  }
+
 
   // Monetized channels get a "Monetization" step (and, once ads are on, an
   // "Ad suitability" questionnaire) before Visibility. mode comes from the
@@ -585,21 +637,31 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     // already exists, so its visibility is set from its edit page
     // (studio.youtube.com/video/<id>/edit), then Save.
     // scheduleAt (fenêtre d'envoi perdue d'une vidéo programmée) : programmée depuis la même fenêtre Visibilité.
+    // Dharma Vivant, 02/11 et 05/11 : la nouvelle page de la vidéo range la Visibilité dans une carte de la colonne de droite,
+    // que le sélecteur de la recette ne trouvait plus ; la vidéo était pourtant déjà « Non répertoriée ». La carte est donc aussi
+    // cherchée par son titre, et si elle montre déjà la visibilité voulue il n'y a rien à faire (ni clic, ni Enregistrer).
     async setVisibilityOnEdit({ visibility, scheduleAt = null }) {
       const schedule = visibility === 'SCHEDULE' && scheduleAt;
       const name = ['PRIVATE', 'UNLISTED', 'PUBLIC'].includes(visibility) ? visibility : 'UNLISTED';
-      const trigger = await waitFor(() => {
-        const t = document.querySelector(S('visibilityTrigger'));
-        return visible(t) ? t : null;
-      }, { timeout: 60000, what: 'le réglage Visibilité de la page de la vidéo' });
-      click(trigger);
+      let trigger = null;
+      try {
+        trigger = await waitFor(() => visibilityOnEdit(), { timeout: 60000, what: 'le réglage Visibilité de la page de la vidéo' });
+      } catch (error) {
+        error.message = `${error.message.replace(/\.$/, '')}. Vu sur la page : ${editPageDetail()}`;
+        throw error;
+      }
+      const shown = textOf(trigger.card);
+      if (!schedule && VISIBILITY_SHOWN[name].test(shown) && !SCHEDULED_SHOWN.test(shown)) return { deja: true };
+      click(trigger.button);
       if (schedule) {
         await sleep(1000);
         await scheduleFor(scheduleAt);
       } else {
         const radio = await waitFor(() => {
           const r = document.querySelector(S('visibilityRadio', { name }));
-          return visible(r) ? r : null;
+          if (visible(r)) return r;
+          return [...document.querySelectorAll('[role="radio"], tp-yt-paper-radio-button, [role="option"], [role="menuitemradio"]')]
+            .find((n) => visible(n) && !n.closest(SIDE_MENU) && VISIBILITY_CHOICE[name].test(textOf(n))) || null;
         }, { timeout: 15000, what: 'le choix de visibilité' });
         click(radio);
       }
