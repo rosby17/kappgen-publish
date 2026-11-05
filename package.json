@@ -1,6 +1,6 @@
 {
   "name": "kappgen-publish",
-  "version": "1.26.2",
+  "version": "1.26.3",
   "private": true,
   "description": "Quality checks for the KappGen Publish Chrome extension",
   "scripts": {

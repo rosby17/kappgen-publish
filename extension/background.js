@@ -870,6 +870,9 @@ function ownOf(settings, video) {
   if (own.facebook === undefined) own.facebook = settings.facebookFromYoutube !== false;
   if (!own.facebookSince) own.facebookSince = settings.facebookFromYoutubeSince || 1;
   if (!networkOn(settings, 'facebook')) own.facebook = false;
+  // Pas de page Facebook liée (chaîne sans page) : Facebook est ignoré après YouTube au lieu d'interrompre la distribution
+  // avec « Lien de page ou de groupe Facebook invalide » (Dharma Vivant, 05/11). Le bouton « Publier sur Facebook » garde son message.
+  if (!own.facebookPageUrl) own.facebook = false;
   return own;
 }
 
