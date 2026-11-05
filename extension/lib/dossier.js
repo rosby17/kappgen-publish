@@ -962,6 +962,13 @@ const KappDossier = (() => {
       record.aliveAt = now;
     } else if (status === 'reset') {
       delete state[relativePath];
+    } else if (status === 'release') {
+      // Envoi abandonné par un profil sans accès à la chaîne : seule sa marque « en cours » est retirée (Facebook, liens… gardés),
+      // la vidéo redevient libre pour un autre profil. Jamais sur une vidéo déjà publiée.
+      const record = state[relativePath];
+      if (!record || record.status !== 'started') return record || null;
+      for (const key of ['status', 'startedAt', 'date', 'owner', 'aliveAt', 'error', 'failedAt']) delete record[key];
+      if (Object.keys(record).length) state[relativePath] = record; else delete state[relativePath];
     } else if (status === 'resetYoutube') {
       // Unfinished YouTube draft: send the video to YouTube again, keep every
       // other network's own record (Facebook already posted is not re-posted).
