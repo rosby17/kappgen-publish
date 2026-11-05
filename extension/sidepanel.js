@@ -547,14 +547,17 @@ function videoItem(video) {
     : prevue ? pill('ok', `Prévue le ${whenText(prevue)} : envoyée à YouTube à l’avance, publique à cette heure.`)
       : video.auto_ok ? pill('ok', visibilityOf(video.channel_key) === 'SCHEDULE' ? 'Partira toute seule, au prochain horaire.' : `Partira toute seule (${VISIBILITY_LABELS[visibilityOf(video.channel_key)]}).`)
         : pill('neutral', video.auto_blocked || 'Envoi manuel.');
-  // « Publier maintenant »: out now, with the chosen visibility (never a later slot).
-  const go = button('Publier maintenant', 'btn primary', async () => {
+  // « Publier maintenant »: out now, with the chosen visibility (never a later slot). Une vidéo programmée par KappGen part tout de suite
+  // sur YouTube mais reste « Programmée » jusqu'à sa date (lib/visibilite.js, 05/11) : le bouton le dit.
+  const enAvance = video.planned_at != null && video.planned_at > Date.now() + 15 * 60000;
+  const go = button(enAvance ? 'Envoyer (programmée)' : 'Publier maintenant', 'btn primary', async () => {
     const config = await settings();
     const own = config.channels[video.channel_key] || {};
     const base = ['PUBLIC', 'UNLISTED', 'PRIVATE'].includes(own.visibility) ? own.visibility
       : ['PUBLIC', 'UNLISTED', 'PRIVATE'].includes(config.visibility) ? config.visibility : 'UNLISTED';
     await act(item, go, { type: 'publish', source: 'folder', videoId: video.id, visibility: base }, 'Envoi vers YouTube en cours…');
   });
+  if (enAvance) go.title = `Envoyée à YouTube maintenant, publique seulement le ${whenText(video.planned_at)} (date donnée par KappGen).`;
   go.dataset.publish = '1';
   const plan = timeButton(() => item, video.schedule_at, async (at) => {
     await KappDossier.mark(video.relative_path, 'schedule', { at });

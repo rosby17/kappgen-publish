@@ -21,6 +21,7 @@
 
 importScripts('lib/schedule.js');
 importScripts('lib/rythme.js');
+importScripts('lib/visibilite.js');
 importScripts('lib/facebook-flow.js');
 importScripts('lib/studio-onglet.js');
 importScripts('lib/pinterest.js');
@@ -1176,10 +1177,12 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       // id typed by hand in older versions still wins.
       channelId = channelIdOf(own.channelId) || channelIdOf(own.youtubeChannelId);
       monetization = own.monetization || 'on';
-      // A time chosen for this video in the panel wins (YouTube makes it public then).
-      const fixed = video.schedule_at && video.schedule_at > Date.now() + 15 * 60000;
-      if (visibility === 'CHANNEL') visibility = fixed ? 'SCHEDULE' : channelVisibility(own);
-      if (visibility === 'SCHEDULE') scheduleAt = fixed ? video.schedule_at : await nextSlot(video.channel_key, own.times);
+      // Date de KappGen (programmation.json), heure choisie dans le panneau, réglages de la chaîne : mêmes règles pour l'envoi
+      // automatique et pour « Publier maintenant » (lib/visibilite.js). Une vidéo programmée par KappGen ne part jamais publique avant sa date.
+      const choix = KappVisibilite.choisir({ demandee: visibility, fichier: video.channel_config && video.channel_config.visibility,
+        canal: channelVisibility(own), plannedAt: video.planned_at ?? null, scheduleAt: video.schedule_at || null, now: Date.now() });
+      visibility = choix.visibility;
+      if (visibility === 'SCHEDULE') scheduleAt = choix.scheduleAt || await nextSlot(video.channel_key, own.times);
       const owner = await profileId();
       await folder('mark', { path: video.relative_path, status: 'started', data: { owner } });
       marked = true;
@@ -3145,11 +3148,8 @@ async function autoPass() {
     break;
   }
   if (next) {
-    // Per channel: unlisted by default (the creator makes it public himself),
-    // or straight to public for news channels where timing matters.
-    // Vidéo programmée par KappGen : son heure est arrivée, elle est publiée maintenant (jamais reprogrammée plus loin par YouTube).
-    const vis = channelVisibility(ownOf(settings, next));
-    const visibility = next.planned_at && vis === 'SCHEDULE' ? 'PUBLIC' : vis;
+    // Vidéo programmée par KappGen dont l'heure est arrivée : publique maintenant (jamais reprogrammée plus loin par YouTube).
+    const visibility = 'CHANNEL';   // choisie dans publish() (lib/visibilite.js) : date KappGen, réglages de la chaîne, panneau
     await paceRecord();
     await publish('folder', next.id, visibility, { auto: true });
     autoTick(); // more may be waiting

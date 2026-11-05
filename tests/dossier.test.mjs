@@ -773,6 +773,7 @@ test('KappGen programme les vidéos : chacune reste « programmée » jusqu\'à 
 test('la passe automatique publie les vidéos programmées à leur heure, la plus ancienne d\'abord, et se réveille pour la suivante', () => {
   const src = readFileSync(join(root, 'extension/background.js'), 'utf8');
   assert.match(src, /sort\(\(a, b\) => \(a\.planned_at \|\| 0\) - \(b\.planned_at \|\| 0\)\)/);
-  assert.match(src, /next\.planned_at && vis === 'SCHEDULE' \? 'PUBLIC' : vis/);
+  // l'heure arrivée, la visibilité (publique) est choisie dans publish() par lib/visibilite.js (tests/visibilite.test.mjs)
+  assert.match(src, /plannedAt: video\.planned_at \?\? null/);
   assert.match(src, /videoDueAt && videoDueAt > Date\.now\(\)\) next = Math\.min\(next, videoDueAt\)/);
 });
