@@ -392,8 +392,13 @@ async function act(item, buttonNode, message, busyText) {
     item.say('warn', reply ? reply.error : 'Action impossible.');
     return null;
   }
+  const data = reply.data || {};
+  if (data.queued) {
+    item.say('busy', `En file d’attente (n° ${data.position}) : elle part dès que la publication en cours est réglée dans Studio.`);
+    return data;
+  }
   if (busyText) item.say('busy', busyText);
-  return reply.data || {};
+  return data;
 }
 
 async function settings() {
@@ -535,6 +540,12 @@ const chan = (name) => (showChannels ? name : null);
 // Heure prévue de chaque vidéo qui partira toute seule (KappSchedule.plan, calculée à chaque lecture du dossier) : affichée sur sa
 // carte AVANT l'envoi (Roosevelt, 19/10 : « chacun doit avoir son heure de publication, pour ne pas improviser »).
 let plannedAt = new Map();
+// File d'attente des vidéos lancées pendant une autre publication (chrome.storage.local « fileAttente », tenue par le service).
+let fileAttenteCache = [];
+function rangEnFile(videoId) {
+  return fileAttenteCache.findIndex((x) => x && x.source === 'folder' && x.videoId === videoId) + 1;
+}
+
 function videoItem(video) {
   const chosen = video.schedule_at && video.schedule_at > Date.now();
   // Programmée par KappGen (programmation.json) : elle attend son heure dans l'extension, comme un post Facebook programmé.
@@ -557,8 +568,11 @@ function videoItem(video) {
       : ['PUBLIC', 'UNLISTED', 'PRIVATE'].includes(config.visibility) ? config.visibility : 'UNLISTED';
     await act(item, go, { type: 'publish', source: 'folder', videoId: video.id, visibility: base }, 'Envoi vers YouTube en cours…');
   });
+  // En file d'attente (lancée pendant une autre publication) : dit sur la carte, même après un nouvel affichage du panneau.
+  const rang = rangEnFile(video.id);
+  if (rang) setTimeout(() => item.say && item.say('busy', `En file d’attente (n° ${rang}) : elle part dès que la publication en cours est réglée dans Studio.`), 0);
   if (enAvance) go.title = `Envoyée à YouTube maintenant, publique seulement le ${whenText(video.planned_at)} (date donnée par KappGen).`;
-  go.dataset.publish = '1';
+  go.dataset.publish = 'file';
   const plan = timeButton(() => item, video.schedule_at, async (at) => {
     await KappDossier.mark(video.relative_path, 'schedule', { at });
     send({ type: 'autoNow' });
@@ -2031,6 +2045,8 @@ function renderFolder() {
 
 async function renderFolderOnce() {
   renderSetup().catch(() => {});
+  const { fileAttente } = await chrome.storage.local.get('fileAttente');
+  fileAttenteCache = Array.isArray(fileAttente) ? fileAttente : [];
   const lists = ['videos', 'sent', 'facebook'].map($);
   if (!(await renderAccess())) {
     lists.forEach((list) => { list.textContent = ''; });
@@ -3121,7 +3137,9 @@ let jobHideTimer = null;
 function applyJob() {
   const job = currentJob;
   for (const node of document.querySelectorAll('[data-publish]')) {
-    node.disabled = !!(job && job.running) || node.dataset.publishAvailable === '0';
+    // « Publier maintenant » d'une vidéo YouTube reste cliquable pendant une publication : elle entre dans la file d'attente.
+    const enFile = node.dataset.publish === 'file';
+    node.disabled = (!enFile && !!(job && job.running)) || node.dataset.publishAvailable === '0';
   }
   if (!job || !job.path) return;
   // A job's news shows on its own network's tab only (a YouTube failure is
@@ -3151,7 +3169,7 @@ function renderJob(job) {
     const jobDetails = [job.channel, job.message].filter(Boolean);
     if (job.warning && !String(job.message || '').includes(job.warning)) jobDetails.push(job.warning);
     $('job-message').textContent = jobDetails.join(' — ')
-      + (job.running ? ' Les autres boutons « Publier » attendent la fin.' : '');
+      + (job.running ? ' Tu peux lancer d’autres vidéos YouTube : elles se mettent en file et partent l’une après l’autre.' : '');
     $('job-link').hidden = !job.youtubeUrl;
     if (job.youtubeUrl) $('job-link').href = job.youtubeUrl;
     $('job-clear').hidden = jobRunning;
@@ -3176,6 +3194,8 @@ setInterval(() => { if (currentJob && currentJob.running) renderJob(currentJob);
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'session' && changes.job) renderJob(changes.job.newValue);
+  // Une vidéo entre dans la file d'attente ou en sort : les cartes le disent (pendant un envoi, la fin de l'envoi réaffiche tout).
+  if (area === 'local' && changes.fileAttente && !jobRunning) renderFolder();
 });
 
 $('job-clear').addEventListener('click', async () => {
@@ -3242,6 +3262,8 @@ async function renderAutoStatus() {
     text = 'Publication automatique : démarrage…';
   } else if (autoStatus && autoStatus.state === 'subscription') {
     tone = 'warn'; text = 'Publication automatique en pause : ton abonnement n’est plus actif.';
+  } else if (autoStatus && autoStatus.state === 'noaccess') {
+    tone = 'warn'; text = 'YouTube en pause dans ce profil : il n’a pas accès à la chaîne dans YouTube Studio. Ses vidéos restent en attente pour le profil connecté à la chaîne. Connecte ce profil à la chaîne, ou coupe YouTube dans ses Réglages.';
   } else if (now - lastAutoTick > 12 * 60000) {
     tone = 'warn'; text = `Pas de vérification depuis ${clock(lastAutoTick)} (Chrome fermé ou ordinateur en veille). Ce qui était prévu part maintenant.`;
   } else if (autoStatus && autoStatus.state === 'paced' && autoStatus.next) {

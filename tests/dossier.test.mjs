@@ -777,3 +777,28 @@ test('la passe automatique publie les vidéos programmées à leur heure, la plu
   assert.match(src, /plannedAt: video\.planned_at \?\? null/);
   assert.match(src, /videoDueAt && videoDueAt > Date\.now\(\)\) next = Math\.min\(next, videoDueAt\)/);
 });
+
+test('profil sans accès à la chaîne : la vidéo est rendue (release), ni en échec ni bloquée pour un autre profil', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('VIDEOS');
+  const channel = disk.dir('CHAINE');
+  project(channel, 'Episode', 'episode.mp4', 1_000_000);
+  KappDossier._setTestRoot(disk);
+
+  const path = 'CHAINE/Episode/episode.mp4';
+  await KappDossier.mark(path, 'published', { facebookPublishedAt: '2026-11-05T10:00:00.000Z' });
+  await KappDossier.mark(path, 'resetYoutube');
+  const started = await KappDossier.mark(path, 'started', { owner: 'profil-sans-chaine' });
+  assert.equal(started.status, 'started');
+  const released = await KappDossier.mark(path, 'release');
+  assert.equal(released && released.status, undefined);
+  assert.equal(released.owner, undefined);
+  assert.equal(released.facebookPublishedAt, '2026-11-05T10:00:00.000Z', 'le reste du suivi est gardé');
+  // Un autre profil peut la prendre tout de suite.
+  const other = await KappDossier.mark(path, 'started', { owner: 'profil-de-la-chaine' });
+  assert.equal(other.owner, 'profil-de-la-chaine');
+  // Jamais sur une vidéo publiée.
+  await KappDossier.mark(path, 'published', { youtubeId: 'abcdefghijk' });
+  const kept = await KappDossier.mark(path, 'release');
+  assert.equal(kept.status, 'published');
+});

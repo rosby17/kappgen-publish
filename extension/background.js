@@ -24,6 +24,7 @@ importScripts('lib/rythme.js');
 importScripts('lib/visibilite.js');
 importScripts('lib/facebook-flow.js');
 importScripts('lib/studio-onglet.js');
+importScripts('lib/file-attente.js');
 importScripts('lib/pinterest.js');
 importScripts('lib/mise-a-jour.js');
 importScripts('lib/maj-video.js');
@@ -121,6 +122,11 @@ async function setJob(patch) {
   // Every publication that ends (sent or failed) goes into the day's log,
   // told in one e-mail in the evening (no message for each one).
   if (job && job.running && patch.running === false && REPORTED_KINDS.has(job.kind)) await logDay(next).catch(() => {});
+  // Vidéos lancées pendant cette publication (file d'attente) : la suivante part tout de suite.
+  if (job && job.running && patch.running === false) {
+    const { fileAttente } = await chrome.storage.local.get('fileAttente');
+    if (Array.isArray(fileAttente) && fileAttente.length) setTimeout(() => autoTick().catch(() => {}), 1500);
+  }
 
   // A new version waiting for this publication to end installs a minute later (tabs swept first).
   if (patch.running === false) chrome.alarms.create('maj', { delayInMinutes: 1 });
@@ -734,6 +740,10 @@ async function reuseOrOpen(findTab, url, { sameIfStartsWith = null, normalize = 
   return tab;
 }
 
+// Profil Chrome sans accès à la chaîne dans YouTube Studio : la vidéo n'est pas notée en échec, elle est laissée aux autres profils.
+const PAS_CONNECTE_YOUTUBE = 'Connecte-toi d’abord à YouTube Studio dans ce navigateur, puis relance.';
+function sansAccesYoutube(message) { return Object.assign(new Error(message), { noAccess: true }); }
+
 // reuse: upload in the creator's own Studio tab (clicks); otherwise a tab of
 // its own in the background (automatic uploads, so the tab the creator is
 // working in is never taken over).
@@ -745,16 +755,18 @@ async function openStudioUpload(channelId, active = true, { reuse = false } = {}
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   if (reuse || active) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
   const start = Date.now();
+  let surConnexion = null;   // depuis quand l'onglet est sur accounts.google.com (souvent un simple passage : on attend 20 s)
   while (Date.now() - start < 90000) {
     ensureNotCancelled();
     const current = await chrome.tabs.get(tab.id);
     const url = current.url || current.pendingUrl || '';
-    if (url.startsWith('https://accounts.google.com')) {
-      throw new Error('Connecte-toi d’abord à YouTube Studio dans ce navigateur, puis relance.');
-    }
+    const connexion = KappFileAttente.etatConnexion(url, surConnexion);
+    if (connexion === 'sans-acces') throw sansAccesYoutube(PAS_CONNECTE_YOUTUBE);
+    if (connexion === 'attendre') { if (surConnexion == null) surConnexion = Date.now(); await sleep(700); continue; }
+    surConnexion = null;
     if (url.startsWith('https://studio.youtube.com') && /\/upload|[?&]d=ud/.test(url) && current.status === 'complete') {
       if (channelId && !url.includes(channelId)) {
-        throw new Error(`Ce profil Chrome n’a pas accès à la chaîne ${channelId} dans YouTube Studio.`);
+        throw sansAccesYoutube(`Ce profil Chrome n’a pas accès à la chaîne ${channelId} dans YouTube Studio.`);
       }
       await injectScripts(tab.id, ['studio.js']);
       return tab.id;
@@ -1164,6 +1176,8 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
   let job = null;
   let alive = null;
   linkedYoutubeId = null;
+  // Un envoi lancé à la main réessaie un profil mis en pause faute d'accès à Studio.
+  if (!auto) await chrome.storage.local.remove('youtubeSansAcces');
   try {
     if (source === 'folder') {
       if (!await askAccess({ wait: true })) {
@@ -1297,6 +1311,17 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
 
     await finishUpload(job);
   } catch (error) {
+    // Profil sans accès à Studio : la vidéo retourne en attente (un autre profil connecté à la chaîne l'enverra), ce profil
+    // arrête ses envois YouTube automatiques 6 h au lieu de noter chaque vidéo en échec, une par une.
+    const sansAcces = !!(error && error.noAccess) && !linkedYoutubeId && source === 'folder' && !(job && job.social);
+    if (sansAcces) {
+      await chrome.storage.local.set({ youtubeSansAcces: { at: Date.now(), message: String(error.message || '') } });
+      if (marked) await folder('mark', { path: video.relative_path, status: 'release' }).catch(() => {});
+      const note = `${friendly(error)} La vidéo n’est pas notée en échec : elle reste en attente pour un profil connecté à la chaîne. Les envois YouTube automatiques de ce profil s’arrêtent 6 h (« Publier maintenant » réessaie tout de suite).`;
+      await setJob({ running: false, done: false, error: note, message: note });
+      await chrome.storage.local.remove('pending');
+      return;
+    }
     const message = friendly(error);
     const draftNote = linkedYoutubeId ? ` Le brouillon existe déjà sur YouTube (https://studio.youtube.com/video/${linkedYoutubeId}/edit) : termine-le là ou utilise « Mettre à jour », sans renvoyer la vidéo.` : '';
     await setJob({ running: false, done: false, error: message + draftNote, message: message + draftNote });
@@ -1693,10 +1718,14 @@ async function updateVideo(relativePath, auto = false, champs = null) {
     const tab = await reuseOrOpen(studioTabToReuse, `https://studio.youtube.com/video/${video.youtube_id}/edit`);
     tabId = tab.id;
     const start = Date.now();
+    let surConnexion = null;
     for (;;) {
       const current = await chrome.tabs.get(tabId);
       const url = current.url || current.pendingUrl || '';
-      if (url.startsWith('https://accounts.google.com')) throw new Error('Connecte-toi d’abord à YouTube Studio dans ce navigateur, puis relance.');
+      const connexion = KappFileAttente.etatConnexion(url, surConnexion);
+      if (connexion === 'sans-acces') throw sansAccesYoutube(PAS_CONNECTE_YOUTUBE);
+      if (connexion === 'attendre') { if (surConnexion == null) surConnexion = Date.now(); }
+      else surConnexion = null;
       if (url.startsWith('https://studio.youtube.com') && current.status === 'complete') break;
       if (Date.now() - start > 90000) throw new Error('YouTube Studio ne s’est pas ouvert.');
       await sleep(700);
@@ -3054,8 +3083,22 @@ async function ensureWindow() {
   } catch { /* the publication reports its own error */ }
 }
 
+// Prochaine vidéo de la file d'attente (lancées à la main pendant une autre publication). Rend true si une est partie.
+async function fileAttenteSuivante() {
+  const { job } = await chrome.storage.session.get('job');
+  if (job && job.running) return false;
+  const { fileAttente } = await chrome.storage.local.get('fileAttente');
+  const { item, file } = KappFileAttente.prendre(fileAttente);
+  if (!item) return false;
+  await chrome.storage.local.set({ fileAttente: file });
+  await publish(item.source, item.videoId, item.visibility);
+  return true;
+}
+
 async function autoPass() {
   await chrome.storage.local.set({ lastAutoTick: Date.now() });
+  // Vidéos lancées à la main pendant une autre publication : elles passent avant tout le reste, pause comprise (c'est un clic).
+  if (await fileAttenteSuivante()) { autoTick(); return; }
   // « Pause » in the panel: nothing goes out on its own until « Reprendre ».
   if (await isPaused()) { await autoState('paused'); exportState('pause').catch(() => {}); return; }
   const { job } = await chrome.storage.session.get('job');
@@ -3138,7 +3181,11 @@ async function autoPass() {
   // jamais toutes en même temps (KappGen redonne de lui-même un créneau libre à celles qui ont trop de retard).
   const recentes = new Set(sent.filter((s) => s.published_at && Date.now() - s.published_at < PLANNED_GAP_MS).map((s) => s.channel_key));
   const parHeure = videos.filter((v) => v.auto_ok).sort((a, b) => (a.planned_at || 0) - (b.planned_at || 0));
-  for (const candidate of !paced && !pleins && networkOn(settings, 'youtube') ? parHeure : []) {
+  // Profil sans accès à YouTube Studio constaté il y a moins de 6 h : ses vidéos restent pour un profil connecté à la chaîne.
+  const { youtubeSansAcces } = await chrome.storage.local.get('youtubeSansAcces');
+  const youtubeBloque = KappFileAttente.youtubeEnPause(youtubeSansAcces);
+  if (youtubeBloque) await autoState('noaccess', { message: youtubeSansAcces.message || PAS_CONNECTE_YOUTUBE });
+  for (const candidate of !paced && !pleins && !youtubeBloque && networkOn(settings, 'youtube') ? parHeure : []) {
     if (candidate.planned_at && recentes.has(candidate.channel_key)) continue;
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
       await folder('mark', { path: candidate.relative_path, status: 'ignored', data: { reason: 'déjà sur la chaîne (même titre)' } }).catch(() => {});
@@ -3398,10 +3445,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     publish: async () => {
       await requireAccess();
       const { job } = await chrome.storage.session.get('job');
-      if (job && job.running) throw new Error('Un envoi est déjà en cours.');
+      const source = message.source || 'app';
+      if (job && job.running) {
+        // Une publication tourne déjà : celle-ci attend son tour dans la file et part juste après (Roosevelt, 05/11).
+        if (job.videoId === message.videoId && job.source === source) throw new Error('Cette vidéo est déjà en cours d’envoi.');
+        const { fileAttente } = await chrome.storage.local.get('fileAttente');
+        const { file, position } = KappFileAttente.ajouter(fileAttente, { source, videoId: message.videoId, visibility: message.visibility });
+        if (!position) throw new Error(`La file d’attente est pleine (${KappFileAttente.MAX_FILE} vidéos) : attends qu’une partie soit envoyée.`);
+        await chrome.storage.local.set({ fileAttente: file });
+        return { queued: true, position };
+      }
       // runs on; the popup follows chrome.storage
-      publish(message.source || 'app', message.videoId, message.visibility);
+      publish(source, message.videoId, message.visibility);
       return { started: true };
+    },
+    unqueue: async () => {
+      const { fileAttente } = await chrome.storage.local.get('fileAttente');
+      await chrome.storage.local.set({ fileAttente: KappFileAttente.retirer(fileAttente, message.source || 'app', message.videoId) });
+      return { ok: true };
     },
     update: async () => {
       await requireAccess();
