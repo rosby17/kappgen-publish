@@ -25,6 +25,7 @@ importScripts('lib/visibilite.js');
 importScripts('lib/facebook-flow.js');
 importScripts('lib/studio-onglet.js');
 importScripts('lib/file-attente.js');
+importScripts('lib/reprise.js');
 importScripts('lib/pinterest.js');
 importScripts('lib/mise-a-jour.js');
 importScripts('lib/maj-video.js');
@@ -326,8 +327,66 @@ async function injectScripts(tabId, files) {
   }
   const recipe = await publishRecipe();
   await chrome.scripting.executeScript({ target: { tabId }, func: (data) => { window.__kappgenRecipe = data; }, args: [recipe] });
-  // studio.js : reconnaissance des choix de monétisation (lib/monetisation.js).
-  await injectFiles(tabId, ['lib/recette.js', ...(files.includes('studio.js') ? ['lib/monetisation.js'] : []), ...files]);
+  // studio.js : reconnaissance des choix de monétisation (lib/monetisation.js), nom du fichier d'une reprise (lib/reprise.js).
+  await injectFiles(tabId, ['lib/recette.js', ...(files.includes('studio.js') ? ['lib/monetisation.js', 'lib/reprise.js'] : []), ...files]);
+}
+
+// ---------------------------------------------------------- reprendre les mises en ligne interrompues
+// Roosevelt, 06/11 : Studio demande « 2026-11-03_038_….mp4 » (nom du dossier donné par l'extension) et le fichier s'appelle
+// autrement dans 06-rendu : on ne le retrouvait pas. Chaque ligne « Mise en ligne interrompue » des onglets Studio ouverts est
+// reprise ici : le fichier est retrouvé dans le dossier (lib/reprise.js) et remis à Studio comme à l'envoi.
+
+// Monde de la page Studio : quand KappGen attend une reprise, le sélecteur de fichier que Studio veut ouvrir est gardé
+// (attribut data-kappgen-reprise) au lieu d'ouvrir la fenêtre de choix du Mac. Hors reprise, rien ne change.
+function relaisReprise() {
+  if (window.__kappgenRelaisReprise) return;
+  window.__kappgenRelaisReprise = true;
+  const garder = (input) => {
+    if (!input || input.type !== 'file' || !document.documentElement.hasAttribute('data-kappgen-reprise-attendue')) return false;
+    input.setAttribute('data-kappgen-reprise', '1');
+    if (!input.isConnected) { input.style.display = 'none'; document.body.append(input); }
+    return true;
+  };
+  const clic = HTMLInputElement.prototype.click;
+  HTMLInputElement.prototype.click = function () { if (!garder(this)) return clic.call(this); };
+  const choisir = HTMLInputElement.prototype.showPicker;
+  if (choisir) HTMLInputElement.prototype.showPicker = function () { if (!garder(this)) return choisir.call(this); };
+}
+
+async function reprendreInterrompues() {
+  const { pending } = await chrome.storage.local.get('pending');
+  const occupes = new Set([workTabId, pending && pending.tabId].filter((x) => x != null));
+  const onglets = (await chrome.tabs.query({ url: 'https://studio.youtube.com/*' })).filter((t) => !occupes.has(t.id));
+  if (!onglets.length) throw new Error('Ouvre la liste des vidéos de la chaîne dans YouTube Studio (Contenu), puis réessaie.');
+  const scan = await folderQueue();
+  const videos = [...(scan.videos || []), ...(scan.sent || [])];
+  const reprises = [];
+  const introuvables = [];
+  const echecs = [];
+  for (const onglet of onglets) {
+    let lignes = [];
+    try {
+      await injectScripts(onglet.id, ['studio.js']);
+      lignes = await step(onglet.id, 'interrompues', undefined, 'studio.js', { relance: false });
+    } catch { continue; }                      // onglet sans liste de vidéos (ou qui ne répond pas)
+    if (!Array.isArray(lignes) || !lignes.length) continue;
+    await chrome.scripting.executeScript({ target: { tabId: onglet.id }, world: 'MAIN', func: relaisReprise });
+    for (const { nom } of lignes) {
+      const trouve = KappReprise.cheminPour(nom, videos);
+      if (!trouve) { introuvables.push(nom); continue; }
+      try {
+        // Studio n'avance que dans l'onglet affiché : l'onglet passe devant le temps de la reprise (sans toucher à la publication en cours).
+        await chrome.tabs.update(onglet.id, { active: true });
+        const src = await bridgeSource(onglet.id, trouve.path);
+        await step(onglet.id, 'reprendre', { nom, src, path: trouve.path }, 'studio.js', { relance: false });
+        reprises.push({ nom, path: trouve.path, title: trouve.title });
+        await sleep(2000);
+      } catch (error) {
+        echecs.push({ nom, error: friendly(error) });
+      }
+    }
+  }
+  return { reprises, introuvables, echecs };
 }
 
 async function recipeSelector(network, key) {
@@ -3458,6 +3517,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // runs on; the popup follows chrome.storage
       publish(source, message.videoId, message.visibility);
       return { started: true };
+    },
+    resumeInterrupted: async () => {
+      await requireAccess();
+      return reprendreInterrompues();
     },
     unqueue: async () => {
       const { fileAttente } = await chrome.storage.local.get('fileAttente');

@@ -67,6 +67,28 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     el.click();
   }
 
+  // Boutons « Reprendre l'importation » de la liste des vidéos, avec le nom du fichier que Studio demande sur leur ligne.
+  const REPRENDRE = /^(reprendre l[’']importation|reprendre la mise en ligne|resume upload(ing)?)$/i;
+  function lignesInterrompues() {
+    const texte = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
+    const boutons = [...document.querySelectorAll('button, ytcp-button, [role="button"]')]
+      .filter((b) => REPRENDRE.test(texte(b)) && visible(b))
+      .filter((b, _, tous) => !tous.some((x) => x !== b && b.contains(x)));      // le plus intérieur : un clic par bouton
+    const vus = new Set();
+    const sortie = [];
+    for (const bouton of boutons) {
+      let ligne = bouton.closest('ytcp-video-row');
+      for (let el = bouton.parentElement, n = 0; !ligne && el && n < 10; el = el.parentElement, n += 1) {
+        if (/\.(mp4|mov|m4v|webm|mkv|avi)\b/i.test(el.textContent || '')) ligne = el;
+      }
+      const nom = ligne && window.KappReprise ? window.KappReprise.nomDemande(ligne.innerText || ligne.textContent) : null;
+      if (!nom || vus.has(ligne)) continue;
+      vus.add(ligne);
+      sortie.push({ nom, bouton, ligne });
+    }
+    return sortie;
+  }
+
   function uploadProgress() {
     const label = document.querySelector(S('progressLabel'));
     return (label && label.textContent || '').replace(/\s+/g, ' ').trim();
@@ -367,10 +389,10 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     // Videos from the chosen folder: a hidden extension frame (bridge.html)
     // reads the file and posts it here; it is then given to Studio's picker
     // as if dropped by hand.
-    async receiveFile({ selector, src, path }) {
+    async receiveFile({ selector, css, src, path }) {
       const token = new URL(src).searchParams.get('token');
       if (!token) throw new Error('YouTube Studio : autorisation du fichier absente.');
-      const input = await waitFor(() => document.querySelector(selector ? S(selector) : S('videoInput')), { timeout: 120000, what: 'le sélecteur de fichier' });
+      const input = await waitFor(() => document.querySelector(css || (selector ? S(selector) : S('videoInput'))), { timeout: 120000, what: 'le sélecteur de fichier' });
       const file = await new Promise((resolve, reject) => {
         const frame = document.createElement('iframe');
         frame.style.display = 'none';
@@ -537,6 +559,28 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     progress() {
       const label = uploadProgress();
       return { label, youtubeId: youtubeIdOnPage(), transferring: X('transferring').test(label) };
+    },
+
+    // Lignes « Mise en ligne interrompue » de la liste des vidéos : [{ nom }] = fichier demandé par Studio (lib/reprise.js).
+    interrompues() {
+      return lignesInterrompues().map((l) => ({ nom: l.nom }));
+    },
+
+    // Reprend la ligne dont Studio demande `nom` : « Reprendre l'importation », puis le fichier remis comme à l'envoi.
+    // Le background a posé avant (monde de la page) un relais qui garde le sélecteur de fichier au lieu d'ouvrir la
+    // fenêtre du Mac ; il le marque avec l'attribut data-kappgen-reprise.
+    async reprendre({ nom, src, path }) {
+      const ligne = lignesInterrompues().find((l) => l.nom === nom);
+      if (!ligne) throw new Error(`YouTube Studio : la ligne « ${nom} » n’est plus interrompue (déjà reprise ?).`);
+      document.querySelectorAll('input[data-kappgen-reprise]').forEach((x) => x.removeAttribute('data-kappgen-reprise'));
+      document.documentElement.setAttribute('data-kappgen-reprise-attendue', '1');
+      click(ligne.bouton);
+      try {
+        await waitFor(() => document.querySelector('input[data-kappgen-reprise]'), { timeout: 20000, what: 'le sélecteur de fichier de la reprise' });
+      } finally {
+        document.documentElement.removeAttribute('data-kappgen-reprise-attendue');
+      }
+      return this.receiveFile({ css: 'input[data-kappgen-reprise]', src, path });
     },
 
     // True while Studio still shows a transfer (dialog or video list).

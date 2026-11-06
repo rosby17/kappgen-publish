@@ -2769,6 +2769,25 @@ $('grant').addEventListener('click', async () => {
 
 $('rescan').addEventListener('click', () => { renderFolder(); renderApp(); renderPosts(); });
 
+// Mises en ligne interrompues dans Studio : le fichier demandé (nom du dossier de la vidéo) est retrouvé et remis par l'extension.
+$('resume-interrupted').addEventListener('click', async () => {
+  const bouton = $('resume-interrupted');
+  const sortie = $('resume-result');
+  bouton.disabled = true;
+  sortie.hidden = false;
+  sortie.textContent = 'Recherche des mises en ligne interrompues dans YouTube Studio…';
+  const reply = await send({ type: 'resumeInterrupted' });
+  bouton.disabled = false;
+  if (!reply || !reply.ok) { sortie.textContent = (reply && reply.error) || 'La reprise n’a pas pu se faire.'; return; }
+  const { reprises = [], introuvables = [], echecs = [] } = reply.data || {};
+  const lignes = [];
+  if (!reprises.length && !introuvables.length && !echecs.length) lignes.push('Aucune mise en ligne interrompue dans les onglets YouTube Studio ouverts (ouvre la liste Contenu de la chaîne).');
+  if (reprises.length) lignes.push(`${reprises.length} reprise${reprises.length > 1 ? 's' : ''} : ${reprises.map((r) => r.title || r.path.split('/').slice(-3, -2)[0] || r.nom).join(', ')}. Garde l’onglet Studio ouvert jusqu’à la fin du transfert.`);
+  if (introuvables.length) lignes.push(`Fichier introuvable dans le dossier : ${introuvables.join(', ')}.`);
+  for (const e of echecs) lignes.push(`${e.nom} : ${e.error}`);
+  sortie.textContent = lignes.join(' ');
+});
+
 // ---------------------------------------------------------- subscription
 
 let paywallBack = false; // paywall opened from the menu while still subscribed
