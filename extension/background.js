@@ -22,6 +22,7 @@
 importScripts('lib/schedule.js');
 importScripts('lib/rythme.js');
 importScripts('lib/visibilite.js');
+importScripts('lib/rattrapage.js');
 importScripts('lib/facebook-flow.js');
 importScripts('lib/studio-onglet.js');
 importScripts('lib/file-attente.js');
@@ -112,14 +113,97 @@ async function api(path, options = {}) {
   return data;
 }
 
+let recipeCache = null;
+let creatingOffscreen = null;
+const followed = new Set();
+const AUTO_EVERY_MINUTES = 5;
+const PERSON_NOTICE = 'kappgen-studio-choix';
+
+// Voies de publication (Roosevelt, 06/11) : jusqu'à VOIES_YOUTUBE vidéos YouTube en même temps (YouTube en accepte 15), et Facebook
+// et les autres réseaux à part, sans attendre YouTube. yt1 est la voie principale : elle garde les anciens noms en mémoire (job,
+// pending), les mises à jour des vidéos déjà en ligne et les onglets de la personne ; les autres voies ouvrent leur propre fenêtre.
+const VOIES_YOUTUBE = 3;
+const VOIE_PRINCIPALE = 'yt1';
+const VOIE_RESEAUX = 'rs';
+// Réseaux en parallèle (Roosevelt, 06/11 : « il pensait que ça lançait en parallèle ») : les clics « Publier » partent dans jusqu'à
+// VOIES_RESEAUX fenêtres ; le passage automatique (rattrapage, un post toutes les quelques minutes) reste dans la seule voie « rs ».
+const VOIES_RESEAUX = 3;
+const IDS_RESEAUX = [VOIE_RESEAUX, ...Array.from({ length: VOIES_RESEAUX - 1 }, (_, i) => `rs${i + 2}`)];
+const IDS_VOIES = [...Array.from({ length: VOIES_YOUTUBE }, (_, i) => `yt${i + 1}`), ...IDS_RESEAUX];
+const voies = new Map();   // remplie juste après le modèle
+
+// Une chose à la fois : chaque appel attend la fin du précédent (lire puis réécrire la mémoire commune sans écraser une autre voie).
+function fileUnique() {
+  let fin = Promise.resolve();
+  return (fn) => {
+    const suite = fin.then(() => fn());
+    fin = suite.catch(() => {});
+    return suite;
+  };
+}
+const enSerie = fileUnique();
+const enRoutage = fileUnique();
+
+// Vidéo prise par une voie : aucune autre ne l'envoie en même temps (même profil, même dossier, donc même verrou « started »).
+const prises = new Map();   // `${source}:${videoId}` → { voie, chaine }
+const clePrise = (source, videoId) => `${source}:${videoId}`;
+function revendiquer(cle, voie, chaine = null) {
+  const deja = prises.get(cle);
+  if (deja && deja.voie !== voie) return false;
+  prises.set(cle, { voie, chaine: chaine || (deja && deja.chaine) || null });
+  return true;
+}
+function liberer(cle, voie) {
+  const p = prises.get(cle);
+  if (p && p.voie === voie) prises.delete(cle);
+}
+const priseParUneAutre = (cle, voie) => { const p = prises.get(cle); return !!(p && p.voie !== voie); };
+
+// Onglets de travail de toutes les voies (jamais fermés par un rangement, jamais repris par une autre voie).
+function ongletsDeTravail() {
+  return new Set([...voies.values()].map((v) => v.ongletDeTravail()).filter((id) => id != null));
+}
+// Onglets qu'une voie ne doit pas toucher : ceux où travaillent les autres et tout ce qui est dans leurs fenêtres.
+async function ongletsDesAutres(voie) {
+  const pris = new Set();
+  for (const [id, v] of voies) {
+    if (id === voie) continue;
+    if (v.ongletDeTravail() != null) pris.add(v.ongletDeTravail());
+    const fenetre = await v.fenetre();
+    if (fenetre) for (const t of await chrome.tabs.query({ windowId: fenetre }).catch(() => [])) pris.add(t.id);
+  }
+  return pris;
+}
+// Un onglet où une voie remplit encore une vidéo (son « pending ») : son suivi de transfert ne le ferme pas.
+async function ongletRempli(tabId) {
+  const cles = [...voies.values()].map((v) => v.CLE_PENDING);
+  const lu = await chrome.storage.local.get(cles);
+  return cles.some((k) => lu[k] && lu[k].tabId === tabId);
+}
+async function ongletsOccupes() {
+  const cles = [...voies.values()].map((v) => v.CLE_PENDING);
+  const lu = await chrome.storage.local.get(cles);
+  return new Set([...ongletsDeTravail(), ...cles.map((k) => lu[k] && lu[k].tabId).filter((x) => x != null)]);
+}
+
+// ---------------------------------------------------------- voies de publication
+// Une voie = une publication à la fois, dans SA fenêtre, avec sa mémoire (job, pending), son onglet de travail et son
+// annulation. Plusieurs voies tournent en même temps (Roosevelt, 06/11) : VOIES_YOUTUBE vidéos YouTube et une voie pour
+// Facebook et les autres réseaux. Tout ce qui suit jusqu'à la fin de creerVoie existe une fois par voie.
+function creerVoie(VOIE) {
+const PRINCIPALE = VOIE === VOIE_PRINCIPALE;
+const ROLE = IDS_RESEAUX.includes(VOIE) ? 'reseaux' : 'youtube';
+const CLE_JOB = PRINCIPALE ? 'job' : `job:${VOIE}`;
+const CLE_PENDING = PRINCIPALE ? 'pending' : `pending:${VOIE}`;
+
 async function setJob(patch) {
   if (patch.running === false) workTabId = null;
-  const { job } = await chrome.storage.session.get('job');
+  const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
   // A publication ends: whatever tab it left open (error, timeout) is closed shortly after. A new one starts: tabs left by earlier ones too.
   if (patch.running === false && job && job.running) setTimeout(() => sweepOwnTabs({ minAge: 15000 }).catch(() => {}), 20000);
   if (patch.running === true && !(job && job.running)) sweepOwnTabs({ minAge: 60000 }).catch(() => {});
   const next = { ...(job || {}), ...patch, updatedAt: Date.now() };
-  await chrome.storage.session.set({ job: next });
+  await chrome.storage.session.set({ [CLE_JOB]: next });
   // Every publication that ends (sent or failed) goes into the day's log,
   // told in one e-mail in the evening (no message for each one).
   if (job && job.running && patch.running === false && REPORTED_KINDS.has(job.kind)) await logDay(next).catch(() => {});
@@ -182,6 +266,7 @@ async function dailyReport() {
 
 // What the automatic publishing is doing, shown in the panel.
 async function autoState(state, extra = {}) {
+  if (!PRINCIPALE) return;
   await chrome.storage.local.set({ autoStatus: { state, at: Date.now(), ...extra } });
 }
 
@@ -231,7 +316,6 @@ async function requireAccess() {
 // short, validated offline fallback when the MV3 worker restarts.
 const RECIPE_TTL = 30 * 60 * 1000;
 const RECIPE_OFFLINE_TTL = 7 * 24 * 3600 * 1000;
-let recipeCache = null;
 
 const RECIPE_LABELS = ['version', 'mark'];
 
@@ -353,40 +437,156 @@ function relaisReprise() {
   if (choisir) HTMLInputElement.prototype.showPicker = function () { if (!garder(this)) return choisir.call(this); };
 }
 
+// Reprise des « Mise en ligne interrompue » (Roosevelt, 06/11) : chaque ligne est reprise avec SON fichier du dossier, puis sa fiche
+// est remplie comme un envoi normal (titre, description, tags, miniature, monétisation, visibilité et date de KappGen), enregistrée
+// et notée publiée dans le dossier. Toutes les lignes de la page y passent l'une après l'autre ; les transferts continuent ensemble
+// dans la même page (elle n'est jamais rechargée, ni fermée : onglet « emprunté »).
 async function reprendreInterrompues() {
-  const { pending } = await chrome.storage.local.get('pending');
-  const occupes = new Set([workTabId, pending && pending.tabId].filter((x) => x != null));
+  const occupes = await ongletsOccupes();
   const onglets = (await chrome.tabs.query({ url: 'https://studio.youtube.com/*' })).filter((t) => !occupes.has(t.id));
   if (!onglets.length) throw new Error('Ouvre la liste des vidéos de la chaîne dans YouTube Studio (Contenu), puis réessaie.');
-  const scan = await folderQueue();
-  const videos = [...(scan.videos || []), ...(scan.sent || [])];
   const reprises = [];
   const introuvables = [];
   const echecs = [];
-  for (const onglet of onglets) {
-    let lignes = [];
-    try {
-      await injectScripts(onglet.id, ['studio.js']);
-      lignes = await step(onglet.id, 'interrompues', undefined, 'studio.js', { relance: false });
-    } catch { continue; }                      // onglet sans liste de vidéos (ou qui ne répond pas)
-    if (!Array.isArray(lignes) || !lignes.length) continue;
-    await chrome.scripting.executeScript({ target: { tabId: onglet.id }, world: 'MAIN', func: relaisReprise });
-    for (const { nom } of lignes) {
-      const trouve = KappReprise.cheminPour(nom, videos);
-      if (!trouve) { introuvables.push(nom); continue; }
+  const vus = new Set();
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'folder', kind: 'youtube', title: 'Reprise des mises en ligne interrompues',
+    message: 'Recherche des mises en ligne interrompues dans YouTube Studio…', startedAt: Date.now() } });
+  try {
+    for (const onglet of onglets) {
+      let relais = false;
+      // Une fenêtre d'envoi déjà ouverte avec le nom du fichier en titre (reprise faite à la main) : sa fiche est remplie d'abord.
       try {
-        // Studio n'avance que dans l'onglet affiché : l'onglet passe devant le temps de la reprise (sans toucher à la publication en cours).
-        await chrome.tabs.update(onglet.id, { active: true });
-        const src = await bridgeSource(onglet.id, trouve.path);
-        await step(onglet.id, 'reprendre', { nom, src, path: trouve.path }, 'studio.js', { relance: false });
-        reprises.push({ nom, path: trouve.path, title: trouve.title });
+        await injectScripts(onglet.id, ['studio.js']);
+        const titre = await step(onglet.id, 'titreDialogue', undefined, 'studio.js', { relance: false });
+        const scan = titre ? await folderQueue() : null;
+        const toutes = scan ? [...(scan.videos || []), ...(scan.sent || [])] : [];
+        const trouve = titre ? KappReprise.cheminPourTitre(titre, toutes) : null;
+        if (trouve) {
+          const video = toutes.find((v) => v.relative_path === trouve.path || v.vertical_path === trouve.path);
+          await setBorrowed(onglet.id, true);
+          await setJob({ title: trouve.short ? `${video.title} (Short)` : video.title, channel: video.channel_name, message: `Fiche de ${titre}…` });
+          try {
+            const youtubeId = await reprendreUne(onglet.id, titre, video, trouve, { dejaOuverte: true });
+            reprises.push({ nom: titre, path: trouve.path, title: trouve.short ? `${video.title} (Short)` : video.title, youtubeId });
+          } catch (error) {
+            echecs.push({ nom: titre, error: friendly(error) });
+          }
+        }
+      } catch { /* pas de fenêtre ouverte */ }
+      for (let tour = 0; tour < 30; tour += 1) {
+        let lignes = [];
+        try {
+          await injectScripts(onglet.id, ['studio.js']);
+          lignes = await step(onglet.id, 'interrompues', undefined, 'studio.js', { relance: false });
+        } catch { break; }                      // onglet sans liste de vidéos (ou qui ne répond pas)
+        const ligne = (Array.isArray(lignes) ? lignes : []).find((l) => l.nom && !vus.has(l.nom));
+        if (!ligne) break;
+        vus.add(ligne.nom);
+        const scan = await folderQueue();
+        const toutes = [...(scan.videos || []), ...(scan.sent || [])];
+        const trouve = KappReprise.cheminPour(ligne.nom, toutes);
+        if (!trouve) { introuvables.push(ligne.nom); continue; }
+        const video = toutes.find((v) => v.relative_path === trouve.path || v.vertical_path === trouve.path);
+        if (!relais) {
+          await chrome.scripting.executeScript({ target: { tabId: onglet.id }, world: 'MAIN', func: relaisReprise });
+          await setBorrowed(onglet.id, true);      // l'onglet de la personne : jamais fermé, ses transferts continuent
+          relais = true;
+        }
+        try {
+          await setJob({ title: trouve.short ? `${video.title} (Short)` : video.title, channel: video.channel_name,
+            message: `Reprise de ${ligne.nom}…` });
+          const youtubeId = await reprendreUne(onglet.id, ligne.nom, video, trouve);
+          reprises.push({ nom: ligne.nom, path: trouve.path, title: trouve.short ? `${video.title} (Short)` : video.title, youtubeId });
+        } catch (error) {
+          echecs.push({ nom: ligne.nom, error: friendly(error) });
+          await step(onglet.id, 'closeDialog', undefined, 'studio.js', { relance: false }).catch(() => {});
+        }
         await sleep(2000);
-      } catch (error) {
-        echecs.push({ nom, error: friendly(error) });
       }
     }
+    const message = `${reprises.length} reprise(s) terminée(s)${echecs.length ? `, ${echecs.length} échec(s)` : ''}${introuvables.length ? `, ${introuvables.length} fichier(s) introuvable(s)` : ''}.`;
+    await setJob({ running: false, done: true, error: null, message, ...(echecs.length || introuvables.length ? { warning: message } : {}) });
+  } catch (error) {
+    await setJob({ running: false, done: false, error: friendly(error), message: friendly(error) });
+    throw error;
   }
   return { reprises, introuvables, echecs };
+}
+
+// Une ligne : le fichier repart, puis la fiche du dossier est appliquée et enregistrée. Rend le lien YouTube.
+async function reprendreUne(tabId, nom, video, trouve, { dejaOuverte = false } = {}) {
+  const settings = await folderSettings();
+  const own = ownOf(settings, video);
+  const monetization = own.monetization || 'on';
+  let visibility = 'PUBLIC';
+  let scheduleAt = null;
+  if (trouve.short) {
+    visibility = channelVisibility(own) === 'SCHEDULE' ? 'PUBLIC' : channelVisibility(own);   // le Short suit sa vidéo, déjà sortie
+  } else {
+    const choix = KappVisibilite.choisir({ demandee: 'CHANNEL', fichier: video.channel_config && video.channel_config.visibility,
+      canal: channelVisibility(own), plannedAt: video.planned_at ?? null, scheduleAt: video.schedule_at || null, now: Date.now() });
+    visibility = choix.visibility === 'CHANNEL' ? 'PUBLIC' : choix.visibility;
+    if (visibility === 'SCHEDULE') scheduleAt = choix.scheduleAt || await nextSlot(video.channel_key, own.times);
+  }
+  const titre = trouve.short ? `${video.title} — Short` : video.title;
+  let youtubeId = null;
+  let miniatureEnvoyee = !video.thumbnail_path;
+  await whileShown(tabId, async () => {
+    if (!dejaOuverte) {
+      const src = await bridgeSource(tabId, trouve.path);
+      await step(tabId, 'reprendre', { nom, src, path: trouve.path }, 'studio.js', { relance: false });
+    }
+    await setJob({ message: `${nom} : titre et description…` });
+    await step(tabId, 'fillDetails', { title: titre, description: video.description });
+    if (video.tags && video.tags.length) await step(tabId, 'fillTags', { tags: video.tags }).catch(() => {});
+    if (!trouve.short && video.thumbnail_path) {
+      await setJob({ message: `${nom} : miniature…` });
+      const picker = await step(tabId, 'waitForThumbnailPicker').then(() => true, () => false);
+      if (picker) {
+        const srcMini = await bridgeSource(tabId, video.thumbnail_path);
+        miniatureEnvoyee = await step(tabId, 'receiveFile', { selector: 'thumbInput', src: srcMini, path: video.thumbnail_path }).then(() => true, () => false);
+      }
+      // Pas prise ici : notée « miniature à compléter », elle est appliquée toute seule ensuite sur la page de la vidéo (autoPass).
+      if (!miniatureEnvoyee) await setJob({ warning: `${nom} : miniature pas encore sur YouTube, elle sera appliquée toute seule juste après.` });
+    }
+    youtubeId = await earlyLink(tabId);
+    if (youtubeId) {
+      await folder('mark', { path: video.relative_path, status: 'published', data: trouve.short ? { shortYoutubeId: youtubeId }
+        : { youtubeId, visibility, channel: video.channel_key, hash: video.hash, draft: true, ...(miniatureEnvoyee ? {} : { thumbPending: true }) } });
+    }
+    await setJob({ message: `${nom} : visibilité…` });
+    let surLaPage = false;
+    try {
+      await chooseVisibilityStep(tabId, { visibility, monetization, scheduleAt });
+    } catch (error) {
+      // Reprise : Studio ouvre parfois directement la page de la vidéo (/video/ID/edit) au lieu de la fenêtre d'envoi
+      // (Ballon Viral, 06/11, « La fenêtre d'envoi s'est fermée avant Visibilité »). La fiche est alors finie sur cette page,
+      // sans la recharger : le transfert continue.
+      if (!error.fenetrePerdue) throw error;
+      surLaPage = true;
+    }
+    if (!youtubeId) youtubeId = (await step(tabId, 'progress')).youtubeId || null;
+    if (surLaPage) {
+      if (!youtubeId) throw new Error('La fenêtre d’envoi de Studio s’est fermée et la page de la vidéo ne donne pas son lien : termine-la dans Studio.');
+      await setJob({ message: `${nom} : fiche réglée depuis la page de la vidéo…` });
+      await step(tabId, 'editDetails', { title: titre, description: video.description, tags: video.tags });
+      await step(tabId, 'setVisibilityOnEdit', { visibility, ...(scheduleAt ? { scheduleAt } : {}) });
+    } else {
+      await setJob({ message: `${nom} : enregistrement…` });
+      const enregistre = await saveUntilClosed(tabId);
+      if (!enregistre) throw new Error('Studio n’a pas fini d’enregistrer la fiche : vérifie-la dans Studio.');
+    }
+  });
+  if (!youtubeId) throw new Error('YouTube n’a pas donné de lien pour la vidéo reprise.');
+  if (scheduleAt) await rememberSlot(video.channel_key, scheduleAt);
+  if (!trouve.short) {
+    await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeId, visibility, channel: video.channel_key, hash: video.hash,
+      ...(scheduleAt ? { scheduleAt } : {}), ...(miniatureEnvoyee ? {} : { thumbPending: true }) } });
+  }
+  // Fin du transfert suivie à part ; l'onglet n'est pas fermé (emprunté) et les autres reprises continuent dans la même page.
+  await addTransfer(youtubeId, { tabId, title: titre, path: video.relative_path, source: 'folder', social: !!trouve.short, startedAt: Date.now() });
+  followTransfer(tabId).catch(() => {});
+  return youtubeId;
 }
 
 async function recipeSelector(network, key) {
@@ -398,9 +598,7 @@ async function recipeSelector(network, key) {
 
 // ------------------------------------------------------------ folder source
 
-const AUTO_EVERY_MINUTES = 5;
 
-let creatingOffscreen = null;
 async function offscreenExists() {
   if (typeof chrome.offscreen.hasDocument === 'function') return chrome.offscreen.hasDocument();
   if (typeof chrome.runtime.getContexts === 'function') {
@@ -588,7 +786,11 @@ async function postStep(tabId, name, args) {
   try {
     return await step(tabId, name, args, 'facebook.js');
   } catch (error) {
-    if (!/impossible\.$/.test(String(error.message))) throw error;
+    // Page rechargée pendant « sendPost » (Ballon Viral, 06/11) : Facebook recharge souvent juste APRÈS la publication.
+    // Si « Publier » a été cliqué, on vérifie sur la Page au lieu de noter un échec (un « Réessayer » publiait en double).
+    const recharge = /a été rechargée pendant l’étape/.test(String(error.message)) || KappMajVideo.pageRechargee(error);
+    if (!recharge && !/impossible\.$/.test(String(error.message))) throw error;
+    if (recharge) await waitTabComplete(tabId, 30000);
     await sleep(4000);
     const [{ result } = {}] = await chrome.scripting.executeScript({ target: { tabId },
       func: () => { try { return JSON.parse(sessionStorage.getItem('kappgenPublishAttempt') || 'null'); } catch { return null; } } }).catch(() => [{}]);
@@ -689,7 +891,7 @@ async function borrowedTabs() {
   return new Set(borrowed || []);
 }
 
-async function setBorrowed(tabId, on) {
+async function setBorrowedSeul(tabId, on) {
   const tabs = await borrowedTabs();
   if (on) tabs.add(tabId); else tabs.delete(tabId);
   await chrome.storage.session.set({ borrowed: [...tabs] });
@@ -702,13 +904,13 @@ async function ownTabs() {
   const { ownTabs: own } = await chrome.storage.session.get(OWN_TABS_KEY);
   return own || {};
 }
-async function setOwnTab(tabId, on) {
+async function setOwnTabSeul(tabId, on) {
   const own = await ownTabs();
   if (on) own[tabId] = Date.now(); else delete own[tabId];
   await chrome.storage.session.set({ [OWN_TABS_KEY]: own });
 }
 async function createWorkTab(url) {
-  const tab = await chrome.tabs.create({ url, active: false });
+  const tab = await ongletDansMaFenetre(url);
   await setOwnTab(tab.id, true);
   return tab;
 }
@@ -742,7 +944,7 @@ async function sweepOwnTabs({ minAge = 60000 } = {}) {
   let kept = false;
   for (const [id, since] of Object.entries(own)) {
     const tabId = Number(id);
-    if (tabId === workTabId || borrowed.has(tabId) || enTransfert.has(tabId) || Date.now() - since < minAge) continue;
+    if (ongletsDeTravail().has(tabId) || borrowed.has(tabId) || enTransfert.has(tabId) || Date.now() - since < minAge) continue;
     if (Date.now() - since < KEEP_UPLOADING_MAX && await uploadingInTab(tabId)) { kept = true; continue; }
     await chrome.tabs.remove(tabId).catch(() => {});
     await setOwnTab(tabId, false);
@@ -764,7 +966,9 @@ async function closeStudioTab(tabId, { evenUploading = false } = {}) {
 // An already open tab of the site is used (the one in front first, then one
 // of the current window, then any window); a new tab only when there is none.
 async function tabToReuse(pattern, patterns, exclude = new Set()) {
-  const ok = (tab) => tab && !exclude.has(tab.id);
+  if (!PRINCIPALE) return null;                    // les autres voies travaillent dans leur fenêtre, jamais dans un onglet de la personne
+  const interdits = await ongletsDesAutres(VOIE);
+  const ok = (tab) => tab && !exclude.has(tab.id) && !interdits.has(tab.id);
   const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
   if (ok(active) && pattern.test(active.url || '')) return active;
   const here = (await chrome.tabs.query({ url: patterns, lastFocusedWindow: true }).catch(() => [])).filter(ok);
@@ -812,7 +1016,7 @@ async function openStudioUpload(channelId, active = true, { reuse = false } = {}
     : await createWorkTab(url);
   workTabId = tab.id;
   await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
-  if (reuse || active) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  if (PRINCIPALE && (reuse || active)) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
   const start = Date.now();
   let surConnexion = null;   // depuis quand l'onglet est sur accounts.google.com (souvent un simple passage : on attend 20 s)
   while (Date.now() - start < 90000) {
@@ -863,6 +1067,49 @@ async function setLocalFile(tabId, key, path) {
 // The tab a publication is working in, so « Annuler » can stop it.
 let workTabId = null;
 let cancelRequested = false;
+// La fenêtre de la voie : ses onglets de travail y sont ouverts, au premier plan DANS cette fenêtre (Studio n'avance que dans
+// l'onglet affiché), sans prendre celui que la personne regarde.
+const CLE_FENETRE = `fenetre:${VOIE}`;
+async function fenetre() {
+  const { [CLE_FENETRE]: id } = await chrome.storage.session.get(CLE_FENETRE);
+  if (!id) return null;
+  return (await chrome.windows.get(id).catch(() => null)) ? id : null;
+}
+async function ongletDansMaFenetre(url) {
+  const id = await fenetre();
+  if (id) return chrome.tabs.create({ windowId: id, url, active: true });
+  const w = await chrome.windows.create({ url, focused: false, type: 'normal', width: 1280, height: 900 });
+  await chrome.storage.session.set({ [CLE_FENETRE]: w.id });
+  return w.tabs[0];
+}
+// Un passage automatique à la fois dans la voie ; demandé pendant un passage, il est refait juste après.
+let enPassage = false;
+let encore = false;
+async function passe() {
+  if (enPassage) { encore = true; return; }
+  enPassage = true;
+  try {
+    do {
+      encore = false;
+      try { await autoPass(); } catch (error) { console.warn(`Passage automatique (${VOIE}) :`, error); }
+    } while (encore);
+  } finally {
+    enPassage = false;
+  }
+}
+// Réservée par l'aiguillage le temps qu'une commande du panneau démarre son envoi.
+let reserveeJusqua = 0;
+function exportsDeLaVoie() {
+  return {
+    VOIE, ROLE, PRINCIPALE, CLE_JOB, CLE_PENDING,
+    passe, planNextDue, resume, sweepOwnTabs, closeOldKeeper, folderSettings, askAccess, folder, dailyReport, commandes, fenetre,
+    ongletDeTravail: () => workTabId,
+    enPassage: () => enPassage,
+    reservee: () => Date.now() < reserveeJusqua,
+    reserver: (ms) => { reserveeJusqua = Date.now() + ms; },
+    jobCourant: async () => (await chrome.storage.session.get(CLE_JOB))[CLE_JOB] || null,
+  };
+}
 function ensureNotCancelled() {
   if (cancelRequested) throw new Error('Publication annulée.');
 }
@@ -875,8 +1122,10 @@ async function publicationSleep(ms) {
   ensureNotCancelled();
 }
 chrome.tabs.onRemoved.addListener((tabId) => {
-  setBorrowed(tabId, false).catch(() => {});
-  setOwnTab(tabId, false).catch(() => {});
+  if (PRINCIPALE) {
+    setBorrowed(tabId, false).catch(() => {});
+    setOwnTab(tabId, false).catch(() => {});
+  }
   if (workTabId === tabId) workTabId = null;
 });
 async function whileShown(tabId, fn) {
@@ -927,15 +1176,11 @@ const fileFor = (video, own, net, prefer = 'courte') => {
 };
 
 function ownOf(settings, video) {
-  const { facebook, ...panel } = (settings.channels || {})[video.channel_key] || {};
+  // Visibilité et heures : seulement celles de KappGen (dossier de la chaîne, heure de chaque vidéo). Les anciens réglages du panneau
+  // (visibilité, « heures fixes ») ne sont plus lus (Roosevelt, 06/11 : trop de vidéos parties « non répertoriées »).
+  const { facebook, visibility: _visibilitePanneau, times: _heuresPanneau, ...panel } = (settings.channels || {})[video.channel_key] || {};
   const own = { ...panel, ...((video && video.channel_config) || {}) };
   if (!own.facebookPageUrl && settings.facebookPageUrl) own.facebookPageUrl = settings.facebookPageUrl;
-  // Panel-wide YouTube settings (one Chrome profile = one channel): used when
-  // the channel has none of its own.
-  if (!own.visibility && (settings.visibility || settings.schedule === 'times')) {
-    own.visibility = settings.schedule === 'times' ? 'SCHEDULE' : settings.visibility;
-  }
-  if (!own.times && settings.times) own.times = settings.times;
   // YouTube videos and Shorts also go to the Facebook Page (panel switch,
   // on by default, for videos published from the moment it was switched on),
   // unless the channel's own folder settings say otherwise.
@@ -952,9 +1197,9 @@ function ownOf(settings, video) {
 
 const VISIBILITIES = ['UNLISTED', 'PUBLIC', 'PRIVATE', 'SCHEDULE'];
 const PLANNED_GAP_MS = 20 * 60000;      // vidéos programmées en retard : une par marque toutes les 20 min au plus
-const channelVisibility = (own) => (VISIBILITIES.includes(own.visibility) ? own.visibility : 'UNLISTED');
+const channelVisibility = (own) => (VISIBILITIES.includes(own.visibility) ? own.visibility : 'PUBLIC');   // sans réglage KappGen : publique
 
-async function rememberChannel(channelKey, youtubeChannelId) {
+async function rememberChannelSeul(channelKey, youtubeChannelId) {
   const settings = await folderSettings();
   const own = settings.channels[channelKey] || {};
   if (own.youtubeChannelId === youtubeChannelId) return;
@@ -977,7 +1222,7 @@ async function nextSlot(channelKey, timesText) {
   return slot;
 }
 
-async function rememberSlot(channelKey, time) {
+async function rememberSlotSeul(channelKey, time) {
   const { scheduled } = await chrome.storage.local.get('scheduled');
   const all = scheduled || {};
   all[channelKey] = [...(all[channelKey] || []).filter((t) => t > Date.now()), time];
@@ -1106,7 +1351,7 @@ async function publishFacebookReel(video, channelName, pageUrl, filePath = video
 // « Adéquation publicitaire » questionnaire; before 1.18.1 Shorts always stopped there).
 async function publishShortYouTube(video, channelId, visibility, { reuse = false, monetization = 'on' } = {}) {
   const tabId = await openStudioUpload(channelId, false, { reuse });
-  const shortVisibility = visibility === 'SCHEDULE' ? 'UNLISTED' : visibility;
+  const shortVisibility = visibility === 'SCHEDULE' ? 'PUBLIC' : visibility;   // le Short suit sa vidéo, déjà sortie
   const job = { source: 'folder', social: true, videoId: video.id, tabId,
     visibility: shortVisibility, stage: 'filling',
     video: { title: `${video.title} — Short`, description: video.description, tags: video.tags,
@@ -1114,7 +1359,7 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
       relative_path: video.relative_path, hash: video.hash } };
   try {
     await injectScripts(tabId, ['studio.js']);
-    await chrome.storage.local.set({ pending: job });
+    await chrome.storage.local.set({ [CLE_PENDING]: job });
     await whileShown(tabId, async () => {
       await step(tabId, 'waitForFilePicker');
       await step(tabId, 'receiveFile', {
@@ -1130,7 +1375,7 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
   } catch (error) {
     // 1.18.2 : sans ça, la marque « envoi en cours » restait et bloquait toute
     // la file (posts Facebook compris) jusqu'à 8 h après un Short raté.
-    await chrome.storage.local.remove('pending');
+    await chrome.storage.local.remove(CLE_PENDING);
     closeStudioTab(tabId);
     throw error;
   }
@@ -1141,7 +1386,7 @@ async function publishShortYouTube(video, channelId, visibility, { reuse = false
 // before their vertical version existed get it from here (button, or
 // automatically for channels in automatic mode).
 async function publishShortOnly(relativePath, { auto = false } = {}) {
-  await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'short', path: relativePath, auto, message: 'Préparation du Short YouTube…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'folder', kind: 'short', path: relativePath, auto, message: 'Préparation du Short YouTube…', startedAt: Date.now() } });
   let video = null;
   let attempted = false;
   try {
@@ -1170,7 +1415,7 @@ async function publishShortOnly(relativePath, { auto = false } = {}) {
 // upload waits for it (Studio tab in front, a notification, a banner on Studio)
 // and goes on by itself once it is made, instead of stopping as a failure.
 const PERSON_WAIT_MS = 20 * 60000;
-const PERSON_NOTICE = 'kappgen-studio-choix';
+const AVIS_PERSONNE = `${PERSON_NOTICE}:${VOIE}`;   // une notification par voie : le clic mène au bon onglet
 const PERSON_WHAT = {
   monetisation: 'la monétisation (Activée ou Désactivée, puis OK)',
   annonces: 'le questionnaire « Éligibilité aux annonces » (puis « Envoyer la classification »)',
@@ -1181,7 +1426,7 @@ async function chooseVisibilityStep(tabId, args) {
   let asked = '';
   while (result && (result.attente || result.fenetrePerdue)) {
     if (result.fenetrePerdue) {
-      if (asked) chrome.notifications.clear(PERSON_NOTICE, () => void chrome.runtime.lastError);
+      if (asked) chrome.notifications.clear(AVIS_PERSONNE, () => void chrome.runtime.lastError);
       const error = new Error(`La fenêtre d’envoi de YouTube Studio s’est fermée avant l’étape « Visibilité ».${result.detail || ''}`);
       error.fenetrePerdue = true;
       throw error;
@@ -1190,14 +1435,14 @@ async function chooseVisibilityStep(tabId, args) {
     if (asked !== result.attente) {
       asked = result.attente;
       await setJob({ message: `YouTube Studio attend ton choix : ${what}. La publication continue toute seule dès que c’est fait.` });
-      chrome.notifications.create(PERSON_NOTICE, {
+      chrome.notifications.create(AVIS_PERSONNE, {
         type: 'basic', iconUrl: 'icons/icon128.png', priority: 2, requireInteraction: true,
         title: 'KappGen Publish attend ton choix dans YouTube Studio',
         message: `Choisis ${what} dans l’onglet YouTube Studio : la publication continue toute seule ensuite.`,
       }, () => void chrome.runtime.lastError);
     }
     if (Date.now() - start > PERSON_WAIT_MS) {
-      chrome.notifications.clear(PERSON_NOTICE, () => void chrome.runtime.lastError);
+      chrome.notifications.clear(AVIS_PERSONNE, () => void chrome.runtime.lastError);
       throw new Error(`YouTube Studio attendait ${what} : rien n’a été choisi en 20 minutes.${result.detail ? ` (${result.detail})` : ''}`);
     }
     await sleep(4000);
@@ -1205,7 +1450,7 @@ async function chooseVisibilityStep(tabId, args) {
     result = await step(tabId, 'chooseVisibility', { ...args, waitPerson: result.attente });
   }
   if (asked) {
-    chrome.notifications.clear(PERSON_NOTICE, () => void chrome.runtime.lastError);
+    chrome.notifications.clear(AVIS_PERSONNE, () => void chrome.runtime.lastError);
     await setJob({ message: 'Choix fait, la publication continue…' });
   }
   return result;
@@ -1224,8 +1469,21 @@ async function profileId() {
 const ALIVE_EVERY_MS = 2 * 60000; // le verrou d'un envoi est rafraîchi toutes les 2 min (frais 10 min : lib/dossier.js)
 
 // Same steps for both sources; only where the video comes from differs.
-async function publish(source, videoId, visibility, { auto = false } = {}) {
-  await chrome.storage.session.set({ job: { running: true, source, kind: 'youtube', path: videoId, videoId, auto, message: 'Préparation…', startedAt: Date.now() } });
+async function publish(source, videoId, visibility, options = {}) {
+  const cle = clePrise(source, videoId);
+  if (!revendiquer(cle, VOIE)) {
+    const message = 'Cette vidéo est déjà en cours d’envoi dans une autre fenêtre.';
+    await chrome.storage.session.set({ [CLE_JOB]: { running: false, done: false, error: message, message, updatedAt: Date.now() } });
+    return;
+  }
+  try {
+    return await publishDansLaVoie(source, videoId, visibility, options);
+  } finally {
+    liberer(cle, VOIE);
+  }
+}
+async function publishDansLaVoie(source, videoId, visibility, { auto = false } = {}) {
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source, kind: 'youtube', path: videoId, videoId, auto, message: 'Préparation…', startedAt: Date.now() } });
   let video;
   let channelId = null;
   let monetization = 'on';
@@ -1283,7 +1541,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
         channel_name: video.channel_name, channel_key: video.channel_key, relative_path: video.relative_path,
         hash: video.hash, vertical_path: video.vertical_path, comment: video.comment || null },
       scheduleAt, commentDelay: source === 'folder' ? Number(ownOf(await folderSettings(), video).commentDelay) : NaN };
-    await chrome.storage.local.set({ pending: job });
+    await chrome.storage.local.set({ [CLE_PENDING]: job });
     await whileShown(tabId, async () => {
       await step(tabId, 'waitForFilePicker');
       await setJob({ message: 'Sélection du fichier vidéo…' });
@@ -1330,7 +1588,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       }
       if (source === 'folder' && KappMajVideo.miniatureAComplete({ kind: video.kind, thumbnailPath: video.thumbnail_path, previewPath: video.preview_path, envoyee: thumbSent })) {
         job = { ...job, thumbPending: true };
-        await chrome.storage.local.set({ pending: job });
+        await chrome.storage.local.set({ [CLE_PENDING]: job });
         await setJob({ warning: `Miniature pas encore sur YouTube (${thumbWhy || 'refusée par Studio'}) : elle sera appliquée toute seule sur la vidéo juste après son envoi.` });
       } else if (!thumbSent && video.thumbnail_path) {
         await setJob({ warning: `Miniature non envoyée (${thumbWhy}) : utilise « Mettre à jour la miniature » une fois la vidéo en ligne.` });
@@ -1345,7 +1603,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
         if (alive) { clearInterval(alive); alive = null; } // plus de verrou : la vidéo est notée avec son lien
         linkedYoutubeId = early;
         job = { ...job, youtubeId: early };
-        await chrome.storage.local.set({ pending: job });
+        await chrome.storage.local.set({ [CLE_PENDING]: job });
         if (source === 'folder') {
           await folder('mark', { path: video.relative_path, status: 'published', data: { youtubeId: early, visibility, channel: video.channel_key, hash: video.hash, draft: true,
             ...(job.thumbPending ? { thumbPending: true } : {}) } });
@@ -1362,7 +1620,7 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
         // le brouillon est terminé depuis sa page, après le transfert, au lieu d'attendre qu'on le finisse à la main.
         if (!error.fenetrePerdue || !early) throw error;
         job = { ...job, stage: 'saved', youtubeId: early, saveStuck: true, dialogLost: true };
-        await chrome.storage.local.set({ pending: job });
+        await chrome.storage.local.set({ [CLE_PENDING]: job });
         await setJob({ message: 'La fenêtre d’envoi de Studio s’est fermée : la vidéo sera terminée depuis sa page dès la fin du transfert…' });
       }
     });
@@ -1378,13 +1636,13 @@ async function publish(source, videoId, visibility, { auto = false } = {}) {
       if (marked) await folder('mark', { path: video.relative_path, status: 'release' }).catch(() => {});
       const note = `${friendly(error)} La vidéo n’est pas notée en échec : elle reste en attente pour un profil connecté à la chaîne. Les envois YouTube automatiques de ce profil s’arrêtent 6 h (« Publier maintenant » réessaie tout de suite).`;
       await setJob({ running: false, done: false, error: note, message: note });
-      await chrome.storage.local.remove('pending');
+      await chrome.storage.local.remove(CLE_PENDING);
       return;
     }
     const message = friendly(error);
     const draftNote = linkedYoutubeId ? ` Le brouillon existe déjà sur YouTube (https://studio.youtube.com/video/${linkedYoutubeId}/edit) : termine-le là ou utilise « Mettre à jour », sans renvoyer la vidéo.` : '';
     await setJob({ running: false, done: false, error: message + draftNote, message: message + draftNote });
-    await chrome.storage.local.remove('pending');
+    await chrome.storage.local.remove(CLE_PENDING);
     if (source === 'folder' && !(job && job.social)) {
       if (marked && !linkedYoutubeId) await folder('mark', { path: video.relative_path, status: 'failed', data: { error: message } }).catch(() => {});
       // Draft left in Studio: never « published » in silence. Its error shows in
@@ -1422,12 +1680,12 @@ async function transfers() {
   const { transfers: t } = await chrome.storage.local.get('transfers');
   return t && typeof t === 'object' ? t : {};
 }
-async function addTransfer(youtubeId, entry) {
+async function addTransferSeul(youtubeId, entry) {
   const t = await transfers();
   t[youtubeId] = entry;
   await chrome.storage.local.set({ transfers: t });
 }
-async function dropTransfersOf(tabId) {
+async function dropTransfersOfSeul(tabId) {
   const t = await transfers();
   const gone = Object.entries(t).filter(([, e]) => e.tabId === tabId);
   for (const [id] of gone) delete t[id];
@@ -1439,7 +1697,6 @@ async function transferTabs() {
 }
 // Un suivi par onglet : il attend que plus rien ne s'importe dans l'onglet (toutes ses vidéos), puis le ferme. Jamais pendant qu'une
 // publication remplit une nouvelle vidéo dans ce même onglet.
-const followed = new Set();
 async function followTransfer(tabId) {
   if (followed.has(tabId)) return;
   followed.add(tabId);
@@ -1451,8 +1708,7 @@ async function followTransfer(tabId) {
     while (calm < 3 && Date.now() < deadline) {
       const tab = await chrome.tabs.get(tabId).catch(() => null);
       if (!tab || !(tab.url || '').startsWith('https://studio.youtube.com')) throw new Error('Transfert interrompu : l’onglet YouTube Studio a été fermé avant la fin. Reprends l’importation dans Studio.');
-      const { pending } = await chrome.storage.local.get('pending');
-      let busy = !!(pending && pending.tabId === tabId);
+      let busy = await ongletRempli(tabId);
       if (!busy) {
         try {
           await injectScripts(tabId, ['studio.js']);
@@ -1488,6 +1744,8 @@ async function followAllTransfers() {
 }
 // Un onglet Studio de la même chaîne qui transfère déjà : la vidéo suivante y est importée sans recharger (Créer › Importer des vidéos).
 async function uploadInTransferTab(channelId) {
+  // Avec plusieurs voies, chaque vidéo a son onglet dans la fenêtre de sa voie : remplir l'onglet d'une autre voie la gênerait.
+  if (voies.size > 1) return null;
   for (const tabId of await transferTabs()) {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab || !(tab.url || '').startsWith('https://studio.youtube.com') || (channelId && !(tab.url || '').includes(channelId))) continue;
@@ -1531,7 +1789,7 @@ async function finishUpload(job) {
     }
     const saved = await saveUntilClosed(tabId);
     job = { ...job, stage: 'saved', youtubeId, saveStuck: !saved };
-    await chrome.storage.local.set({ pending: job });
+    await chrome.storage.local.set({ [CLE_PENDING]: job });
   }
   if (!job.saveStuck) {
     // Enregistrée proprement : la fin du transfert est suivie à part (followTransfer), la publication continue sans l'attendre.
@@ -1583,7 +1841,7 @@ async function finishUpload(job) {
     await applyVisibilityFromEdit(tabId, youtubeId, visibility);
   }
   if (job.saveStuck) await closeStudioTab(tabId);
-  await chrome.storage.local.remove('pending');
+  await chrome.storage.local.remove(CLE_PENDING);
   // A Short is a nested step: publishShortOnly() or the long video's social
   // chain owns the final job state. Marking the job done here would re-enable
   // every publish button while Facebook distribution is still running.
@@ -1704,7 +1962,7 @@ let resuming = false;
 async function resume() {
   followAllTransfers().catch(() => {});        // transferts laissés en arrière-plan avant le redémarrage
   if (resuming) return;
-  const { pending } = await chrome.storage.local.get('pending');
+  const { [CLE_PENDING]: pending } = await chrome.storage.local.get(CLE_PENDING);
   if (!pending) return;
   resuming = true;
   try {
@@ -1714,7 +1972,7 @@ async function resume() {
     // deliberate check/retry. If its link was already known, its draft record
     // remains the source of truth and prevents a duplicate upload.
     if (pending.stage !== 'saved') {
-      await chrome.storage.local.remove('pending');
+      await chrome.storage.local.remove(CLE_PENDING);
       const kind = pending.social ? 'Short' : 'Envoi';
       const message = `${kind} interrompu avant l’enregistrement dans Studio : vérifie l’onglet resté ouvert avant de relancer.`;
       if (pending.source === 'folder' && pending.video && pending.video.relative_path) {
@@ -1733,14 +1991,14 @@ async function resume() {
     }
     const tab = await chrome.tabs.get(pending.tabId).catch(() => null);
     if (!tab || !(tab.url || '').startsWith('https://studio.youtube.com')) {
-      await chrome.storage.local.remove('pending');
+      await chrome.storage.local.remove(CLE_PENDING);
       if (pending.stage !== 'saved' && pending.source === 'folder') {
         await folder('mark', { path: pending.video.relative_path, status: 'failed', data: { error: 'Envoi interrompu (onglet Studio fermé).' } }).catch(() => {});
       }
       await setJob({ running: false, done: false, error: 'Envoi interrompu : l’onglet YouTube Studio a été fermé.', message: 'Envoi interrompu.' });
       return;
     }
-    await chrome.storage.session.set({ job: { running: true, source: pending.source, videoId: pending.videoId, title: pending.video.title,
+    await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: pending.source, videoId: pending.videoId, title: pending.video.title,
       channel: pending.video.channel_name, message: 'Reprise du suivi de l’envoi en cours…', startedAt: Date.now() } });
     try {
       await injectScripts(pending.tabId, ['studio.js']); // no-op if already there
@@ -1748,7 +2006,7 @@ async function resume() {
     } catch (error) {
       const message = friendly(error);
       await setJob({ running: false, done: false, error: message, message });
-      await chrome.storage.local.remove('pending');
+      await chrome.storage.local.remove(CLE_PENDING);
     }
   } finally {
     resuming = false;
@@ -1762,7 +2020,7 @@ async function resume() {
 const CHAMP_NOMS = { thumbnail: 'Miniature', title: 'Titre', description: 'Description' };
 async function updateVideo(relativePath, auto = false, champs = null) {
   const seul = Array.isArray(champs) && champs.length === 1 ? champs[0] : null;
-  await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'update', path: relativePath, auto, message: 'Préparation de la mise à jour…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'folder', kind: 'update', path: relativePath, auto, message: 'Préparation de la mise à jour…', startedAt: Date.now() } });
   let tabId = null;
   let sentHash = null;
   let thumbApplied = false;
@@ -1855,7 +2113,7 @@ async function updateVideo(relativePath, auto = false, champs = null) {
 // A YouTube video on the Facebook Page: `as` "video" = the long video as a
 // video post, "reel" = its Short (vertical version) as a Reel.
 async function publishFacebookOnly(relativePath, { auto = false, as = null } = {}) {
-  await chrome.storage.session.set({ job: { running: true, source: 'folder', kind: 'facebook', path: relativePath, auto, message: 'Préparation de la publication Facebook…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'folder', kind: 'facebook', path: relativePath, auto, message: 'Préparation de la publication Facebook…', startedAt: Date.now() } });
   let reel = as === 'reel';
   let video = null;
   let attempted = false;
@@ -1911,7 +2169,7 @@ async function openTikTok({ reuse = true } = {}) {
 
 // One vertical video to TikTok with its caption.
 async function sendToTikTok({ filePath, caption, title, channel, path, auto = false }) {
-  await chrome.storage.session.set({ job: { running: true, source: 'tiktok', kind: 'tiktok', path, title, channel, message: 'Ouverture de TikTok Studio…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'tiktok', kind: 'tiktok', path, title, channel, message: 'Ouverture de TikTok Studio…', startedAt: Date.now() } });
   const tabId = await openTikTok({ reuse: !auto });
   try {
     await whileShown(tabId, async () => {
@@ -1990,7 +2248,7 @@ function xText(text, link = '') {
 }
 
 async function sendToX({ text, mediaPath, title, channel, path, auto = false }) {
-  await chrome.storage.session.set({ job: { running: true, source: 'x', kind: 'x', path, title, channel, message: 'Ouverture de X…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'x', kind: 'x', path, title, channel, message: 'Ouverture de X…', startedAt: Date.now() } });
   const tabId = await openX({ reuse: !auto });
   try { await whileShown(tabId, async () => {
     await setJob({ message: 'Texte du post…' });
@@ -2086,7 +2344,7 @@ async function openLinkedin({ reuse = true, page = '' } = {}) {
 }
 
 async function sendToLinkedin({ text, mediaPath, title, channel, path, auto = false, page = '' }) {
-  await chrome.storage.session.set({ job: { running: true, source: 'linkedin', kind: 'linkedin', path, title, channel, message: 'Ouverture de LinkedIn…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'linkedin', kind: 'linkedin', path, title, channel, message: 'Ouverture de LinkedIn…', startedAt: Date.now() } });
   const tabId = await openLinkedin({ reuse: !auto, page });
   try { await whileShown(tabId, async () => {
     await stepIn(tabId, '__kappgenLinkedin', 'openComposer');
@@ -2167,7 +2425,7 @@ async function openInstagram({ reuse = true } = {}) {
 
 // One vertical video to Instagram (it becomes a Reel) with its caption.
 async function sendToInstagram({ filePath, caption, title, channel, path, auto = false }) {
-  await chrome.storage.session.set({ job: { running: true, source: 'instagram', kind: 'instagram', path, title, channel, message: 'Ouverture d’Instagram…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'instagram', kind: 'instagram', path, title, channel, message: 'Ouverture d’Instagram…', startedAt: Date.now() } });
   const tabId = await openInstagram({ reuse: !auto });
   try { await whileShown(tabId, async () => {
     await stepIn(tabId, '__kappgenInstagram', 'openComposer');
@@ -2254,7 +2512,7 @@ async function openSnapchat({ reuse = true } = {}) {
 
 // One vertical video (5 to 60 s) to Snapchat : Spotlight and/or Story, with its description.
 async function sendToSnapchat({ filePath, caption, title, channel, path, auto = false }) {
-  await chrome.storage.session.set({ job: { running: true, source: 'snapchat', kind: 'snapchat', path, title, channel, message: 'Ouverture de Snapchat…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'snapchat', kind: 'snapchat', path, title, channel, message: 'Ouverture de Snapchat…', startedAt: Date.now() } });
   const settings = await folderSettings();
   const dest = settings.snapchatDestination || 'spotlight';
   const tabId = await openSnapchat({ reuse: !auto });
@@ -2356,7 +2614,7 @@ async function openPinterest({ reuse = true } = {}) {
 
 // One vertical pin (image or video) to Pinterest, with its title and description.
 async function sendToPinterest({ filePath, title, description, channel, path, auto = false }) {
-  await chrome.storage.session.set({ job: { running: true, source: 'pinterest', kind: 'pinterest', path, title, channel, message: 'Ouverture de Pinterest…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'pinterest', kind: 'pinterest', path, title, channel, message: 'Ouverture de Pinterest…', startedAt: Date.now() } });
   const tabId = await openPinterest({ reuse: !auto });
   try { await whileShown(tabId, async () => {
     await setJob({ message: 'Envoi de l’épingle à Pinterest…' });
@@ -2408,7 +2666,7 @@ async function publishFacebookPost(post, { auto = false } = {}) {
   requireValidPost(post);
   const page = await postPage(post);
   if (!page) throw new Error(`${post.channel_name} : lien de la page Facebook à renseigner (planning.json ou reglages-publication.json).`);
-  await chrome.storage.session.set({ job: { running: true, source: 'facebook', kind: 'post', path: post.path, auto, title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', channel: post.channel_name, message: 'Ouverture de Facebook…', startedAt: Date.now() } });
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'facebook', kind: 'post', path: post.path, auto, title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', channel: post.channel_name, message: 'Ouverture de Facebook…', startedAt: Date.now() } });
   await folder('markPost', { path: post.path, patch: { statut: 'en_cours', started_at: new Date().toISOString() } });
   let tabId = null;
   try {
@@ -2742,20 +3000,33 @@ async function nextDuePost() {
   if (!ready.length) { await chrome.storage.local.remove('catchUp'); return null; }
   const now = Date.now();
   const late = ready.length > 1 || (ready[0].due_at && now - ready[0].due_at > ON_TIME_MS);
-  if (late) {
-    const gap = catchUpGap(posts, await folderSettings());
-    const { lastAutoPostAt } = await chrome.storage.local.get('lastAutoPostAt');
-    const next = (lastAutoPostAt || 0) + gap;
-    await chrome.storage.local.set({ catchUp: { count: ready.length, gap, next: Math.max(now, next) } });
-    if (now < next) return null; // the precise alarm wakes up at `next`
-  } else {
+  if (!late) {
     await chrome.storage.local.remove('catchUp');
+    return ready[0];
   }
-  return ready[0];
+  // Retards réinsérés dans le planning (lib/rattrapage.js) : les posts arrivés à leur heure et ceux à venir gardent leur heure,
+  // les retards prennent les trous entre eux ; le panneau affiche ce même plan (catchUp.plan).
+  const reglages = await folderSettings();
+  // Écart du plan : celui du rattrapage, et jamais moins que celui du rythme de publication (Réglages) : « le plus vite possible »
+  // n'en impose aucun, « intervalle » le sien, les autres modes leur écart minimum.
+  const rythme = KappPace.normalize(reglages && reglages.pace);
+  const ecartRythme = rythme.mode === 'asap' ? 0 : (rythme.mode === 'interval' ? rythme.intervalMinutes : rythme.minGapMinutes) * 60000;
+  const gap = Math.max(catchUpGap(posts, reglages), ecartRythme || 0);
+  const { lastAutoPostAt, paceNext } = await chrome.storage.local.get(['lastAutoPostAt', 'paceNext']);
+  const enRetard = ready.filter((p) => p.due_at && now - p.due_at > ON_TIME_MS);
+  const retards = enRetard.length ? enRetard : ready;
+  const aLHeure = enRetard.length ? ready.filter((p) => !enRetard.includes(p)) : [];
+  const aVenir = posts.filter((p) => p.statut === 'a_publier' && !p.configuration_error && p.due_at && p.due_at > now);
+  const plan = KappRattrapage.planifier({ retards, prevus: [...aLHeure, ...aVenir], maintenant: now, depart: Math.max(now, (lastAutoPostAt || 0) + gap, paceNext || 0), ecart: gap });
+  const premier = plan[0];
+  await chrome.storage.local.set({ catchUp: { count: retards.length, gap, next: premier.at,
+    // Retards, et posts programmés décalés par le plan (un post déjà dû part maintenant) : l'heure que le panneau affiche.
+    plan: plan.filter((e) => e.retard || e.at - (e.post.due_at || 0) >= 60000).map((e) => [e.post.path, e.at]) } });
+  return premier.at <= now ? premier.post : null; // sinon l'alarme précise réveille à premier.at
 }
 
 // Last uploads of this profile, shown in the popup.
-async function remember(entry) {
+async function rememberSeul(entry) {
   const { history } = await chrome.storage.local.get('history');
   await chrome.storage.local.set({ history: [entry, ...(history || [])].slice(0, 30) });
 }
@@ -2807,7 +3078,7 @@ async function planNextDue() {
 // « Rythme du rattrapage » changed in Réglages: the next late post moves at once
 // (the wake-up already planned could be up to 30 min away).
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes.folder) return;
+  if (!PRINCIPALE || area !== 'local' || !changes.folder) return;
   const before = chosenCatchUpMs(changes.folder.oldValue);
   const after = chosenCatchUpMs(changes.folder.newValue);
   if (before === after) return;
@@ -2823,18 +3094,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // « Rythme de publication » changed in Réglages: the new rule applies at once.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes.folder) return;
+  if (!PRINCIPALE || area !== 'local' || !changes.folder) return;
   const was = JSON.stringify((changes.folder.oldValue || {}).pace || null);
   const now = JSON.stringify((changes.folder.newValue || {}).pace || null);
   if (was !== now) autoTick();
 });
 
-async function autoTick() {
-  try {
-    await autoPass();
-  } finally {
-    await planNextDue().catch(() => {});
-  }
+// Passage automatique : toutes les voies regardent ce qu'elles ont à faire (tickGlobal, après le modèle).
+function autoTick() {
+  return tickGlobal();
 }
 
 const isPaused = async () => !!(await chrome.storage.local.get('autoPaused')).autoPaused;
@@ -2842,7 +3110,7 @@ const isPaused = async () => !!(await chrome.storage.local.get('autoPaused')).au
 // After a publication that went well, straight on to the next step (the
 // same publication on the next network). After a failure, the regular pass.
 async function chainIfDone(since) {
-  const { job } = await chrome.storage.session.get('job');
+  const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
   if (job && job.done && !job.error && (job.startedAt || 0) >= since) autoTick();
 }
 
@@ -2853,7 +3121,7 @@ async function chainIfDone(since) {
 // on its own after a failure (the panel shows « Réessayer »).
 // Écrit UNE valeur dans les réglages en relisant ceux du moment : réécrire tout l'objet lu au début du passage effaçait un choix fait
 // pendant ce temps dans le panneau (Roosevelt, 19/10 : la visibilité « Publique » revenait à « Non répertoriée »).
-async function mergeFolderSetting(patch) {
+async function mergeFolderSettingSeul(patch) {
   const { folder } = await chrome.storage.local.get('folder');
   await chrome.storage.local.set({ folder: { ...(folder || {}), ...patch } });
 }
@@ -2993,6 +3261,7 @@ async function ownPostNext(settings) {
 
 // Bridge with the KappGen software (see lib/dossier.js exportState): state written in the shared folder.
 async function exportState(etat) {
+  if (!PRINCIPALE) return;
   const { lastExport } = await chrome.storage.session.get('lastExport');
   if (lastExport && lastExport.etat === etat && Date.now() - lastExport.at < 4 * 60 * 1000) return;
   const settings = await folderSettings();
@@ -3000,7 +3269,7 @@ async function exportState(etat) {
   const state = {
     source: 'KappGen Publish', version: chrome.runtime.getManifest().version, maj: new Date().toISOString(), etat,
     pause: await isPaused(), reseaux: Object.fromEntries(['youtube', 'facebook', 'tiktok', 'instagram', 'snapchat', 'x', 'linkedin'].map((n) => [n, networkOn(settings, n)])),
-    youtube: { visibilite: settings.visibility || 'UNLISTED', programmation: settings.schedule === 'times' ? 'heures' : 'tout-de-suite', heures: settings.times || '' },
+    youtube: { visibilite: 'PUBLIC', programmation: 'heure-kappgen', heures: '' },   // l'heure de chaque vidéo vient de KappGen
     chaines: settings.channels || {}, dernier_passage: lastAutoTick || null, dernier_post: lastAutoPostAt || null,
     // Rythme de publication (commun à toutes les marques et à tous les réseaux) : KappGen prévient quand ses marques en demandent plus.
     rythme: (() => { const p = KappPace.normalize(settings.pace); return { mode: p.mode, par_jour: p.perDay, de: p.from, a: p.to, ecart_min: p.minGapMinutes, intervalle_min: p.intervalMinutes }; })(),
@@ -3019,7 +3288,7 @@ const COMMENT_DELAY_MIN = 2;
 const COMMENT_TRIES = 4;
 const commentQueue = async () => (await chrome.storage.local.get('commentQueue')).commentQueue || [];
 const saveCommentQueue = (queue) => chrome.storage.local.set({ commentQueue: queue });
-async function queueComment(item) {
+async function queueCommentSeul(item) {
   if (!item.text || !String(item.text).trim()) return;
   const queue = (await commentQueue()).filter((c) => c.id !== item.id);
   queue.push({ tries: 0, ...item, text: String(item.text).trim().slice(0, 8000) });
@@ -3070,9 +3339,9 @@ async function commentNext() {
   const now = Date.now();
   const item = (await commentQueue()).find((c) => c.due <= now);
   if (!item) return false;
-  await chrome.storage.session.set({ job: { running: true, source: item.network, kind: 'comment', path: item.path, auto: true,
+  await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: item.network, kind: 'comment', path: item.path, auto: true,
     title: item.title || 'Commentaire', channel: item.channel || '', message: `Commentaire sous le post ${item.network === 'facebook' ? 'Facebook' : 'YouTube'}…`, startedAt: now } });
-  const remove = async () => saveCommentQueue((await commentQueue()).filter((c) => c.id !== item.id));
+  const remove = () => enSerie(async () => saveCommentQueue((await commentQueue()).filter((c) => c.id !== item.id)));
   try {
     const result = item.network === 'facebook' ? await postFacebookComment(item) : await postYoutubeComment(item);
     await remove();
@@ -3100,9 +3369,11 @@ async function commentNext() {
       await setJob({ running: false, done: false, error: `Commentaire non publié : ${message}`, message: `Commentaire non publié : ${message}` });
     } else {
       // Not out yet (video still processing, page slow…): again a little later.
-      const queue = await commentQueue();
-      const kept = queue.find((c) => c.id === item.id);
-      if (kept) { kept.tries += 1; kept.due = Date.now() + 10 * 60000 * kept.tries; await saveCommentQueue(queue); }
+      await enSerie(async () => {
+        const queue = await commentQueue();
+        const kept = queue.find((c) => c.id === item.id);
+        if (kept) { kept.tries += 1; kept.due = Date.now() + 10 * 60000 * kept.tries; await saveCommentQueue(queue); }
+      });
       await setJob({ running: false, done: true, error: null, warning: `Commentaire pas encore publié (${message}) : nouvel essai dans quelques minutes.`, message: 'Commentaire reporté.' });
     }
   }
@@ -3127,7 +3398,9 @@ async function paceGate(settings) {
   await chrome.storage.local.set({ pacePlans: plans, paceNext: result.ok ? null : result.next });
   return result;
 }
-async function paceRecord() {
+async function paceRecord(options) { return enSerie(() => paceRecordSeul(options)); }
+async function paceRecordSeul({ horsRythme = false } = {}) {
+  if (horsRythme) { await chrome.storage.local.set({ lastAutoPostAt: Date.now() }); return; }   // post à son heure : hors quota du rythme
   const { paceLog } = await chrome.storage.local.get('paceLog');
   await chrome.storage.local.set({ paceLog: [...(paceLog || []), Date.now()].slice(-300), lastAutoPostAt: Date.now() });
 }
@@ -3144,12 +3417,17 @@ async function ensureWindow() {
 
 // Prochaine vidéo de la file d'attente (lancées à la main pendant une autre publication). Rend true si une est partie.
 async function fileAttenteSuivante() {
-  const { job } = await chrome.storage.session.get('job');
+  if (ROLE !== 'youtube') return false;
+  const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
   if (job && job.running) return false;
-  const { fileAttente } = await chrome.storage.local.get('fileAttente');
-  const { item, file } = KappFileAttente.prendre(fileAttente);
+  const item = await enSerie(async () => {
+    const { fileAttente } = await chrome.storage.local.get('fileAttente');
+    const pris = KappFileAttente.prendre(fileAttente);
+    if (pris.item) await chrome.storage.local.set({ fileAttente: pris.file });
+    return pris.item;
+  });
   if (!item) return false;
-  await chrome.storage.local.set({ fileAttente: file });
+  autoTick();   // la vidéo suivante de la file part tout de suite dans une autre voie libre
   await publish(item.source, item.videoId, item.visibility);
   return true;
 }
@@ -3160,13 +3438,13 @@ async function autoPass() {
   if (await fileAttenteSuivante()) { autoTick(); return; }
   // « Pause » in the panel: nothing goes out on its own until « Reprendre ».
   if (await isPaused()) { await autoState('paused'); exportState('pause').catch(() => {}); return; }
-  const { job } = await chrome.storage.session.get('job');
+  const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
   if (job && job.running) {
-    const { pending } = await chrome.storage.local.get('pending');
+    const { [CLE_PENDING]: pending } = await chrome.storage.local.get(CLE_PENDING);
     const quiet = Date.now() - (job.updatedAt || job.startedAt || 0);
     if (pending || resuming || quiet < STALE_JOB_MS) { await autoState('busy', { title: job.title || null }); return; }
     const message = 'Publication interrompue (sans nouvelles depuis 30 min) : vérifie sur le réseau si elle est partie.';
-    await chrome.storage.session.set({ job: { ...job, running: false, done: false, error: message, message, updatedAt: Date.now() } });
+    await chrome.storage.session.set({ [CLE_JOB]: { ...job, running: false, done: false, error: message, message, updatedAt: Date.now() } });
   }
   if (!(await publishAccess()).active) {
     chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
@@ -3177,7 +3455,7 @@ async function autoPass() {
   await ensureWindow();
   const settings = await folderSettings();
   const access = await folder('access').catch(() => ({ state: 'none' }));
-  if (access.state === 'prompt') await askAccess().catch(() => {});
+  if (PRINCIPALE && access.state === 'prompt') await askAccess().catch(() => {});   // une seule petite fenêtre, pas une par voie
   // No folder chosen yet: nothing to reopen, the panel's first step says what to do.
   if (access.state === 'none') { await autoState('nofolder'); return; }
   if (access.state !== 'granted') {
@@ -3207,30 +3485,15 @@ async function autoPass() {
   await autoState('ok');
   exportState('ok').catch(() => {});
   await chrome.storage.session.remove('permissionNotified');
-  if ((await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
+  if (PRINCIPALE && (await folder('fbAccess').catch(() => ({}))).state === 'prompt') await askAccess().catch(() => {});
   const { videos, sent } = await folderQueue();
   const own = await ownFolders();
   const passAt = Date.now();
-  // A comment whose time has come goes under its post/video first.
-  const commentAt = Date.now();
-  if (await commentNext()) { await chainIfDone(commentAt); return; }
   // Pace chosen in Réglages: outside the allowed moments nothing is published (comments and the sheet updates below still go).
   const gate = await paceGate(settings);
   const paced = !gate.ok;
   if (paced) await autoState('paced', { next: gate.next });
-  // What is already out somewhere goes on to the other networks first: one
-  // publication on all its networks, then the next one.
-  if (!paced && await spreadNext(settings, sent, own)) { await paceRecord(); await chainIfDone(passAt); return; }
-  // A post whose time has come: it has a time, a new video has not.
-  const duePost = !paced && networkOn(settings, 'facebook') ? await nextDuePost() : null;
-  if (duePost) {
-    await paceRecord();
-    await publishFacebookPost(duePost, { auto: true });
-    await chainIfDone(passAt); // then the same post on the other networks
-    return;
-  }
-  // Each network's own posts (its folder, or <NETWORK>/A-PUBLIER), at their time.
-  if (!paced && await ownPostNext(settings)) { await paceRecord(); await chainIfDone(passAt); return; }
+  if (ROLE === 'reseaux') { if (VOIE === VOIE_RESEAUX) await passeReseaux(settings, sent, own, passAt, paced); return; }
   let next = null;
   const pleins = Object.keys(await transfers()).length >= MAX_TRANSFERTS;      // assez de transferts en cours : la suivante attend
   // Prochaine vidéo programmée par KappGen : l'extension se réveille à son heure (planNextDue).
@@ -3239,6 +3502,7 @@ async function autoPass() {
   // Vidéos programmées : la plus ancienne heure d'abord. Après une absence (Chrome fermé), une seule par marque toutes les 20 min,
   // jamais toutes en même temps (KappGen redonne de lui-même un créneau libre à celles qui ont trop de retard).
   const recentes = new Set(sent.filter((s) => s.published_at && Date.now() - s.published_at < PLANNED_GAP_MS).map((s) => s.channel_key));
+  for (const p of prises.values()) if (p.voie !== VOIE && p.chaine) recentes.add(p.chaine);   // en cours d'envoi dans une autre voie
   const parHeure = videos.filter((v) => v.auto_ok).sort((a, b) => (a.planned_at || 0) - (b.planned_at || 0));
   // Profil sans accès à YouTube Studio constaté il y a moins de 6 h : ses vidéos restent pour un profil connecté à la chaîne.
   const { youtubeSansAcces } = await chrome.storage.local.get('youtubeSansAcces');
@@ -3246,10 +3510,12 @@ async function autoPass() {
   if (youtubeBloque) await autoState('noaccess', { message: youtubeSansAcces.message || PAS_CONNECTE_YOUTUBE });
   for (const candidate of !paced && !pleins && !youtubeBloque && networkOn(settings, 'youtube') ? parHeure : []) {
     if (candidate.planned_at && recentes.has(candidate.channel_key)) continue;
+    if (priseParUneAutre(clePrise('folder', candidate.id), VOIE)) continue;   // déjà en route dans une autre voie
     if (await alreadyOnChannel(candidate, ownOf(settings, candidate))) {
       await folder('mark', { path: candidate.relative_path, status: 'ignored', data: { reason: 'déjà sur la chaîne (même titre)' } }).catch(() => {});
       continue;
     }
+    if (!revendiquer(clePrise('folder', candidate.id), VOIE, candidate.channel_key)) continue;
     next = candidate;
     break;
   }
@@ -3257,11 +3523,17 @@ async function autoPass() {
     // Vidéo programmée par KappGen dont l'heure est arrivée : publique maintenant (jamais reprogrammée plus loin par YouTube).
     const visibility = 'CHANNEL';   // choisie dans publish() (lib/visibilite.js) : date KappGen, réglages de la chaîne, panneau
     await paceRecord();
-    await publish('folder', next.id, visibility, { auto: true });
+    autoTick();   // les autres voies YouTube prennent tout de suite la vidéo suivante (celle-ci est prise : revendiquer)
+    try {
+      await publish('folder', next.id, visibility, { auto: true });
+    } finally {
+      liberer(clePrise('folder', next.id), VOIE);
+    }
     autoTick(); // more may be waiting
     return;
   }
-  // Nothing to send: keep the sent videos in line with their sheet and thumbnail.
+  // Nothing to send: keep the sent videos in line with their sheet and thumbnail (voie principale seulement : une mise à jour à la fois).
+  if (!PRINCIPALE) return;
   let stale = null;
   let thumbOnly = null;
   const enTransfert = await transfers(); // fichier encore en route vers YouTube : la miniature attend la fin du transfert
@@ -3297,6 +3569,30 @@ async function autoPass() {
   autoTick();
 }
 
+// Voie des réseaux : commentaires, puis ce qui est déjà sorti part sur les autres réseaux, puis les posts à leur heure.
+async function passeReseaux(settings, sent, own, passAt, paced) {
+  // A comment whose time has come goes under its post/video first.
+  const commentAt = Date.now();
+  if (await commentNext()) { await chainIfDone(commentAt); return; }
+  // What is already out somewhere goes on to the other networks first: one
+  // publication on all its networks, then the next one.
+  if (!paced && await spreadNext(settings, sent, own)) { await paceRecord(); await chainIfDone(passAt); return; }
+  // A post whose time has come: it has a time, a new video has not.
+  // Calculé même en pause (rythme de publication) : le panneau affiche toujours le calendrier à jour du rattrapage.
+  const duePost = networkOn(settings, 'facebook') ? await nextDuePost() : null;
+  // Un post à son heure part à son heure (Roosevelt, 06/11 : « oui, à leur heure ») : le rythme de publication ne retient que les
+  // retards et les vidéos, et un post à l'heure n'entame pas son quota.
+  const aLHeure = !!(duePost && duePost.due_at && Date.now() - duePost.due_at <= ON_TIME_MS);
+  if (duePost && (!paced || aLHeure)) {
+    await paceRecord({ horsRythme: aLHeure });
+    await publishFacebookPost(duePost, { auto: true });
+    await chainIfDone(passAt); // then the same post on the other networks
+    return;
+  }
+  // Each network's own posts (its folder, or <NETWORK>/A-PUBLIER), at their time.
+  if (!paced && await ownPostNext(settings)) { await paceRecord(); await chainIfDone(passAt); }
+}
+
 async function verifyThumb(v) {
   const { ecart } = await folder('thumbCheck', { path: v.thumbnail_path, youtubeId: v.youtube_id });
   // Rien de comparable (miniature pas en 16:9) : on ne revient pas dessus tant que le fichier ne change pas.
@@ -3309,114 +3605,10 @@ async function verifyThumb(v) {
     error: retry ? null : 'Miniature toujours absente sur YouTube après 3 essais : mets-la à la main dans Studio (⋮ › Mettre à jour la miniature).' } });
 }
 
-// "Chrome connecté" in the app: check in with KappGen every minute.
-async function heartbeat() {
-  api('/studio-upload/status').catch(() => {});
-  dailyReport().catch(() => {}); // tried again next minute if the server did not answer
-  // Safety net: the automatic pass must run even if its alarm went missing.
-  await ensureAlarms();
-  const { lastAutoTick } = await chrome.storage.local.get('lastAutoTick');
-  if (!lastAutoTick || Date.now() - lastAutoTick > (AUTO_EVERY_MINUTES + 1) * 60000) autoTick().catch(() => {});
-}
 
-// chrome.alarms.create replaces an alarm of the same name and restarts its
-// countdown. The worker wakes every minute (heartbeat), so recreating 'auto'
-// (every 5 min) at each wake meant it never fired: only create what is missing.
-async function ensureAlarms() {
-  const wanted = { heartbeat: 1, auto: AUTO_EVERY_MINUTES };
-  for (const [name, period] of Object.entries(wanted)) {
-    const alarm = await chrome.alarms.get(name);
-    if (!alarm || alarm.periodInMinutes !== period) await chrome.alarms.create(name, { periodInMinutes: period });
-  }
-}
-
-// YouTube → Facebook switch: on by default, for videos published from now on
-// (never the whole older catalogue at once).
-(async () => {
-  const settings = await folderSettings().catch(() => null);
-  if (settings && !settings.facebookFromYoutubeSince) {
-    settings.facebookFromYoutubeSince = Date.now();
-    await chrome.storage.local.set({ folder: settings });
-  }
-})();
-ensureAlarms().catch(() => {});
-// ------------------------------------------------------- automatic updates
-// Chrome installs a downloaded version only when the extension is idle, and this
-// one never is: without help, users kept the old version until Chrome was closed.
-// Now it asks the Chrome Web Store every 3 h and restarts itself on the new
-// version between two publications. Decision: lib/mise-a-jour.js.
-async function applyUpdate() {
-  const { updateWaiting, pending } = await chrome.storage.local.get(['updateWaiting', 'pending']);
-  if (!updateWaiting) return;
-  // Already on that version (installed by a Chrome restart): nothing to do, and no reload loop.
-  if (updateWaiting.version === chrome.runtime.getManifest().version) { await chrome.storage.local.remove('updateWaiting'); return; }
-  const { job } = await chrome.storage.session.get('job');
-  const verdict = KappUpdate.canReload({ job, pending, now: Date.now() });
-  if (!verdict.ok) { chrome.alarms.create('maj', { delayInMinutes: KappUpdate.RETRY_MINUTES }); return; }
-  chrome.runtime.reload();
-}
-
-async function checkUpdate() {
-  const answer = await chrome.runtime.requestUpdateCheck().catch((error) => ({ status: 'error', error: String(error && error.message || error) }));
-  const result = { status: answer.status, version: answer.version || null, at: Date.now() };
-  await chrome.storage.local.set({ updateCheck: result });
-  return result;
-}
-
-chrome.runtime.onUpdateAvailable.addListener(async (details) => {
-  await chrome.storage.local.set({ updateWaiting: { version: details.version, since: Date.now() } });
-  applyUpdate().catch(() => {});
-});
-
-// The periodic check, created once: re-creating it on every service-worker wake
-// would push it back each time and it would never fire.
-chrome.alarms.get('verif-maj').then((alarm) => {
-  if (!alarm) chrome.alarms.create('verif-maj', { delayInMinutes: 5, periodInMinutes: KappUpdate.CHECK_MINUTES });
-}).catch(() => {});
-// A version downloaded before a restart of the service worker installs as soon as possible.
-chrome.storage.local.get('updateWaiting').then(({ updateWaiting }) => {
-  if (updateWaiting && updateWaiting.version !== chrome.runtime.getManifest().version) chrome.alarms.create('maj', { delayInMinutes: 1 });
-}).catch(() => {});
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'maj') applyUpdate().catch(() => {});
-  if (alarm.name === 'verif-maj') checkUpdate().catch(() => {});
-  if (alarm.name === 'heartbeat') heartbeat();
-  if (alarm.name === 'onglets') sweepOwnTabs({ minAge: 15000 }).catch(() => {});
-  if (alarm.name === 'auto' || alarm.name === 'due' || alarm.name === 'comment') autoTick().catch(() => {});
-});
-// Clicking the icon opens the side panel: everything happens there.
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
-// Clicking the "re-authorize" notification should land the creator straight
-// on the panel instead of just dismissing a toast — same one-click re-grant
-// as clicking the extension icon itself.
-chrome.notifications.onClicked.addListener(async (id) => {
-  if (id === PERSON_NOTICE) {
-    // Straight to the Studio tab that waits for the choice.
-    if (workTabId) {
-      const tab = await chrome.tabs.update(workTabId, { active: true }).catch(() => null);
-      if (tab) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-    }
-    chrome.notifications.clear(id, () => void chrome.runtime.lastError);
-    return;
-  }
-  if (id !== 'kappgen-folder-access') return;
-  await askAccess({ force: true }).catch(() => {});
-});
-chrome.runtime.onStartup.addListener(() => { heartbeat(); resume(); });
-chrome.runtime.onInstalled.addListener((details) => {
-  heartbeat(); resume(); closeOldKeeper();
-  if (details && details.reason === 'update') {
-    const version = chrome.runtime.getManifest().version;
-    chrome.storage.local.remove('updateWaiting').catch(() => {});
-    if (details.previousVersion !== version) chrome.storage.local.set({ justUpdated: { version, from: details.previousVersion || null, at: Date.now() } }).catch(() => {});
-  }
-});
-resume(); // service worker restarted while an upload was being followed
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || message.target === 'offscreen') return false;
-  const handlers = {
+// Commandes du panneau, exécutées dans CETTE voie (aiguillage : commandesPour).
+function commandes(message, sender) {
+  return {
     consumeBridgeGrant: () => consumeBridgeGrant(message.token, sender),
     account: () => api('/auth/session').catch((error) => { if (error.status === 401) return null; throw error; }),
     login: () => api('/auth/login', { method: 'POST', body: JSON.stringify({ email: message.email, password: message.password }) }),
@@ -3438,7 +3630,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // A long upload in progress (Facebook): the publication is alive, the
     // panel shows how far it is (and it is not taken for dead after 30 min).
     uploadProgress: async () => {
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (!job || !job.running || !sender.tab || sender.tab.id !== workTabId) return false;
       const percent = Number.isFinite(message.percent) ? `${Math.round(message.percent)} %` : 'en cours';
       const minutes = Math.round((Number(message.elapsedMs) || 0) / 60000);
@@ -3451,12 +3643,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // The groups where an already published post failed (or new ones).
     shareGroups: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       const post = (await postsList()).find((p) => p.path === message.path);
       requireValidPost(post);
       for (const [url, state] of Object.entries(post.groups_shared || {})) if (state.statut === 'echec') delete post.groups_shared[url];
-      await chrome.storage.session.set({ job: { running: true, source: 'facebook', kind: 'groups', path: post.path,
+      await chrome.storage.session.set({ [CLE_JOB]: { running: true, source: 'facebook', kind: 'groups', path: post.path,
         title: post.text.split('\n')[0].slice(0, 80) || 'Post Facebook', message: 'Partage dans les groupes Facebook…', startedAt: Date.now() } });
       shareInGroups(post).then(
         (r) => setJob({ running: false, done: true, error: null,
@@ -3466,7 +3658,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     postNow: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       const post = (await postsList()).find((p) => p.path === message.path);
       requireValidPost(post);
@@ -3503,15 +3695,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     publish: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       const source = message.source || 'app';
       if (job && job.running) {
         // Une publication tourne déjà : celle-ci attend son tour dans la file et part juste après (Roosevelt, 05/11).
         if (job.videoId === message.videoId && job.source === source) throw new Error('Cette vidéo est déjà en cours d’envoi.');
-        const { fileAttente } = await chrome.storage.local.get('fileAttente');
-        const { file, position } = KappFileAttente.ajouter(fileAttente, { source, videoId: message.videoId, visibility: message.visibility });
+        const position = await enSerie(async () => {
+          const { fileAttente } = await chrome.storage.local.get('fileAttente');
+          const ajout = KappFileAttente.ajouter(fileAttente, { source, videoId: message.videoId, visibility: message.visibility });
+          if (ajout.position) await chrome.storage.local.set({ fileAttente: ajout.file });
+          return ajout.position;
+        });
         if (!position) throw new Error(`La file d’attente est pleine (${KappFileAttente.MAX_FILE} vidéos) : attends qu’une partie soit envoyée.`);
-        await chrome.storage.local.set({ fileAttente: file });
         return { queued: true, position };
       }
       // runs on; the popup follows chrome.storage
@@ -3523,13 +3718,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return reprendreInterrompues();
     },
     unqueue: async () => {
-      const { fileAttente } = await chrome.storage.local.get('fileAttente');
-      await chrome.storage.local.set({ fileAttente: KappFileAttente.retirer(fileAttente, message.source || 'app', message.videoId) });
+      await enSerie(async () => {
+        const { fileAttente } = await chrome.storage.local.get('fileAttente');
+        await chrome.storage.local.set({ fileAttente: KappFileAttente.retirer(fileAttente, message.source || 'app', message.videoId) });
+      });
       return { ok: true };
     },
     update: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       // message.champs : ['thumbnail'] | ['title'] | ['description'] (menu ⋮ de « Déjà publiés ») ; absent = tout.
       const champs = Array.isArray(message.champs) ? message.champs.filter((c) => KappMajVideo.CHAMPS.includes(c)) : null;
@@ -3538,7 +3735,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     facebook: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       const { sent } = await folderQueue();
       const video = sent.find((item) => item.relative_path === message.path);
@@ -3550,14 +3747,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     x: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       publishXVideo(message.path).catch(() => {});
       return { started: true };
     },
     xPost: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishXPost(message.path).catch(() => {});
@@ -3565,14 +3762,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     linkedin: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       publishLinkedinVideo(message.path).catch(() => {});
       return { started: true };
     },
     linkedinPost: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishLinkedinPost(message.path).catch(() => {});
@@ -3582,28 +3779,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     folders: async () => folder('folders'),
     tiktok: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       publishTikTokVideo(message.path, { long: !!message.long }).catch(() => {});
       return { started: true };
     },
     shortYoutube: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       publishShortOnly(message.path).catch(() => {});
       return { started: true };
     },
     instagram: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       publishInstagramVideo(message.path).catch(() => {});
       return { started: true };
     },
     instagramPost: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishInstagramPost(message.path).catch(() => {});
@@ -3611,14 +3808,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     snapchat: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       publishSnapchatVideo(message.path).catch(() => {});
       return { started: true };
     },
     snapchatPost: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishSnapchatPost(message.path).catch(() => {});
@@ -3626,7 +3823,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     pinterestPost: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishPinterestPost(message.path).catch(() => {});
@@ -3641,7 +3838,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     },
     tiktokPost: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Une publication est déjà en cours.');
       requireValidPost(await findPost(message.path));
       publishTikTokPost(message.path).catch(() => {});
@@ -3659,7 +3856,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Send the video again, with the sheet and thumbnail of the folder.
     republish: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       await folder('mark', { path: message.path, status: 'reset' });
       publish('folder', message.path, 'CHANNEL');
@@ -3669,7 +3866,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // to YouTube again; networks already done (Facebook…) are not posted twice.
     resendYoutube: async () => {
       await requireAccess();
-      const { job } = await chrome.storage.session.get('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
       if (job && job.running) throw new Error('Un envoi est déjà en cours.');
       await folder('mark', { path: message.path, status: 'resetYoutube' });
       publish('folder', message.path, 'CHANNEL');
@@ -3695,26 +3892,349 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if ((await borrowedTabs()).has(workTabId)) await chrome.tabs.reload(workTabId).catch(() => {});
         else await chrome.tabs.remove(workTabId).catch(() => {});
       }
-      await chrome.storage.local.remove('pending');
+      await chrome.storage.local.remove(CLE_PENDING);
       // Safety net: a step that does not end by itself is closed after 15 s.
       setTimeout(async () => {
-        const { job } = await chrome.storage.session.get('job');
+        const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
         if (job && job.running) await setJob({ running: false, done: false, error: 'Publication annulée.', message: 'Publication annulée.' });
         cancelRequested = false;
       }, 15000);
       return {};
     },
     unblockJob: async () => {
-      await chrome.storage.session.set({ job: { running: false, done: false, error: 'Envoi arrêté à la main. Vérifie sur le réseau concerné s’il est parti avant de relancer.', message: 'Envoi arrêté à la main. Vérifie sur le réseau concerné s’il est parti avant de relancer.' } });
+      await chrome.storage.session.set({ [CLE_JOB]: { running: false, done: false, error: 'Envoi arrêté à la main. Vérifie sur le réseau concerné s’il est parti avant de relancer.', message: 'Envoi arrêté à la main. Vérifie sur le réseau concerné s’il est parti avant de relancer.' } });
       return {};
     },
     // Panel opened: look for a newer version (at most once every 15 min).
     clearJob: async () => {
-      const { job } = await chrome.storage.session.get('job');
-      if (!job || !job.running) await chrome.storage.session.remove('job');
+      const { [CLE_JOB]: job } = await chrome.storage.session.get(CLE_JOB);
+      if (!job || !job.running) await chrome.storage.session.remove(CLE_JOB);
       return {};
     },
   };
+}
+// Écritures dans la mémoire commune de l'extension : une voie à la fois (lire puis réécrire sans perdre celle d'une autre).
+const setOwnTab = (...a) => enSerie(() => setOwnTabSeul(...a));
+const setBorrowed = (...a) => enSerie(() => setBorrowedSeul(...a));
+const addTransfer = (...a) => enSerie(() => addTransferSeul(...a));
+const dropTransfersOf = (...a) => enSerie(() => dropTransfersOfSeul(...a));
+const remember = (...a) => enSerie(() => rememberSeul(...a));
+const mergeFolderSetting = (...a) => enSerie(() => mergeFolderSettingSeul(...a));
+const rememberSlot = (...a) => enSerie(() => rememberSlotSeul(...a));
+const rememberChannel = (...a) => enSerie(() => rememberChannelSeul(...a));
+const queueComment = (...a) => enSerie(() => queueCommentSeul(...a));
+
+// ---- fin du modèle de voie
+return exportsDeLaVoie();
+}
+
+for (const id of IDS_VOIES) voies.set(id, creerVoie(id));
+const principale = voies.get(VOIE_PRINCIPALE);
+
+// Passage automatique : chaque voie libre prend ce qui l'attend (une voie occupée refait son passage juste après).
+function tickGlobal() {
+  const passages = [...voies.values()].map((v) => v.passe());
+  return Promise.all(passages).finally(() => principale.planNextDue().catch(() => {}));
+}
+
+// Commandes du panneau → la voie qui les fait. Un envoi YouTube va dans une voie YouTube libre (toutes occupées : la principale
+// le met dans la file d'attente) ; Facebook et les autres réseaux dans la leur ; « Annuler » dans la voie de la publication.
+const TYPES_YOUTUBE = new Set(['publish', 'update', 'shortYoutube', 'republish', 'resendYoutube', 'resumeInterrupted']);
+const TYPES_RESEAUX = new Set(['shareGroups', 'postNow', 'facebook', 'x', 'xPost', 'linkedin', 'linkedinPost', 'tiktok', 'tiktokPost',
+  'instagram', 'instagramPost', 'snapchat', 'snapchatPost', 'pinterestPost']);
+const TYPES_DE_LA_VOIE = new Set(['cancelJob', 'unblockJob', 'clearJob']);
+// « Voir » sur la carte « En cours » (Roosevelt, 06/11 : « il ne voit pas où ça part ») : met devant la fenêtre et l'onglet où
+// la voie travaille. Plus d'onglet ni de fenêtre : le dit, pour qu'on annule au lieu d'attendre une publication fantôme.
+async function montrerVoie(voie) {
+  const v = voies.get(voie) || principale;
+  const job = await v.jobCourant();
+  const ids = [v.ongletDeTravail(), job && job.tabId].filter((id) => id != null);
+  for (const id of ids) {
+    const tab = await chrome.tabs.get(id).catch(() => null);
+    if (!tab) continue;
+    await chrome.windows.update(tab.windowId, { focused: true, state: 'normal' }).catch(() => {});
+    await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+    return { ok: true };
+  }
+  const fen = await v.fenetre();
+  if (fen) { await chrome.windows.update(fen, { focused: true, state: 'normal' }).catch(() => {}); return { ok: true }; }
+  return { ok: false, perdu: true };
+}
+async function voieYoutubeLibre(sansRepli = false) {
+  const etats = await Promise.all([...voies.values()].filter((v) => v.ROLE === 'youtube')
+    .map(async (v) => ({ v, job: await v.jobCourant() })));
+  const libres = etats.filter((e) => !(e.job && e.job.running) && !e.v.reservee());
+  const choisie = libres.find((e) => !e.v.enPassage()) || libres[0];
+  return choisie ? choisie.v : (sansRepli ? null : principale);
+}
+
+// Short, mise à jour, renvoi demandés quand les 3 fenêtres YouTube travaillent : ils attendent ici qu'une fenêtre se libère au lieu
+// de répondre « Un envoi est déjà en cours » (Roosevelt, 06/11). Les envois de vidéo ont déjà leur file (fileAttente).
+const attenteDeVoie = [];
+let servirEnCours = null;
+function servirAttente() {
+  if (servirEnCours) return servirEnCours;
+  servirEnCours = (async () => {
+    while (attenteDeVoie.length) {
+      const voie = await enRoutage(async () => {
+        const v = await voieYoutubeLibre(true);
+        if (v) v.reserver(60000);
+        return v;
+      });
+      if (!voie) { await new Promise((r) => setTimeout(r, 5000)); continue; }
+      const { message, sender } = attenteDeVoie.shift();
+      try { await voie.commandes(message, sender)[message.type](); } catch (_) { /* l'erreur s'affiche via la publication de la voie */ }
+      finally { voie.reserver(3000); }
+    }
+  })().finally(() => { servirEnCours = null; });
+  return servirEnCours;
+}
+async function dejaEnVoie(source, videoId) {
+  if (prises.has(clePrise(source, videoId))) return true;
+  for (const v of voies.values()) {
+    const job = await v.jobCourant();
+    if (job && job.running && job.source === source && (job.videoId === videoId || job.path === videoId)) return true;
+  }
+  return false;
+}
+// Posts et vidéos des réseaux demandés pendant que la voie Réseaux travaille : un à la fois, dans l'ordre des clics.
+const attenteReseaux = [];
+let servirReseauxEnCours = null;
+async function voieReseauxLibre() {
+  for (const id of IDS_RESEAUX) {
+    const v = voies.get(id);
+    const job = await v.jobCourant();
+    if (!(job && job.running) && !v.reservee() && !(id === VOIE_RESEAUX && v.enPassage())) return v;
+  }
+  return null;
+}
+async function reseauDejaEnCours(path) {
+  if (!path) return false;
+  for (const id of IDS_RESEAUX) {
+    const job = await voies.get(id).jobCourant();
+    if (job && job.running && job.path === path) return true;
+  }
+  return false;
+}
+function servirReseaux() {
+  if (servirReseauxEnCours) return servirReseauxEnCours;
+  servirReseauxEnCours = (async () => {
+    while (attenteReseaux.length) {
+      const rs = await enRoutage(async () => {
+        const v = await voieReseauxLibre();
+        if (v) v.reserver(60000);
+        return v;
+      });
+      if (!rs) { await new Promise((r) => setTimeout(r, 5000)); continue; }
+      const { message, sender } = attenteReseaux.shift();
+      // Lancé sans l'attendre : les autres fenêtres libres prennent les posts suivants en même temps.
+      Promise.resolve().then(() => rs.commandes(message, sender)[message.type]())
+        .catch(() => { /* l'erreur s'affiche sur la publication */ })
+        .finally(() => rs.reserver(3000));
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  })().finally(() => { servirReseauxEnCours = null; });
+  return servirReseauxEnCours;
+}
+function commandesPour(message, sender) {
+  const type = message.type;
+  if (TYPES_YOUTUBE.has(type)) {
+    return {
+      [type]: async () => {
+        if (type === 'publish' && await dejaEnVoie(message.source || 'app', message.videoId)) throw new Error('Cette vidéo est déjà en cours d’envoi.');
+        const voie = await enRoutage(async () => {
+          const v = await voieYoutubeLibre(type !== 'publish' && type !== 'resumeInterrupted');
+          if (v) v.reserver(60000);
+          return v;
+        });
+        if (!voie) {
+          attenteDeVoie.push({ message, sender });
+          servirAttente().catch(() => {});
+          return { queued: true, position: attenteDeVoie.length, attendFenetre: true };
+        }
+        try {
+          return await voie.commandes(message, sender)[type]();
+        } finally {
+          voie.reserver(3000);   // le temps que l'envoi écrive sa publication en cours
+        }
+      },
+    };
+  }
+  if (TYPES_RESEAUX.has(type)) {
+    return {
+      [type]: async () => {
+        if (await reseauDejaEnCours(message.path)) throw new Error('Cette publication est déjà en cours d’envoi.');
+        const rs = attenteReseaux.length ? null : await enRoutage(async () => {
+          const v = await voieReseauxLibre();
+          if (v) v.reserver(60000);
+          return v;
+        });
+        // Toutes les fenêtres Réseaux occupées : le post attend son tour au lieu de répondre « Un envoi est déjà en cours »
+        // (Roosevelt, 06/11 : « Réessayer » sur les posts en échec ne déclenchait rien).
+        if (!rs) {
+          if (!attenteReseaux.some((a) => a.message.type === type && a.message.path === message.path)) attenteReseaux.push({ message, sender });
+          servirReseaux().catch(() => {});
+          return { queued: true, position: attenteReseaux.findIndex((a) => a.message.type === type && a.message.path === message.path) + 1, attendReseaux: true };
+        }
+        try {
+          return await rs.commandes(message, sender)[type]();
+        } finally {
+          rs.reserver(3000);   // le temps que le post écrive sa publication en cours
+        }
+      },
+    };
+  }
+  if (type === 'montrerVoie') return { montrerVoie: () => montrerVoie(message.voie) };
+  if (TYPES_DE_LA_VOIE.has(type)) return (voies.get(message.voie) || principale).commandes(message, sender);
+  if (type === 'uploadProgress') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const voie = [...voies.values()].find((v) => v.ongletDeTravail() === tabId) || principale;
+    return voie.commandes(message, sender);
+  }
+  return principale.commandes(message, sender);
+}
+
+// "Chrome connecté" in the app: check in with KappGen every minute.
+// Posts restés « en cours » alors qu'aucune voie ne les publie (Roosevelt, 06/11 : « Publication en cours… » sans carte en haut,
+// après un rechargement de l'extension). La publication a été coupée, peut-être après « Publier » : le post passe « à vérifier »
+// (jamais republié tout seul) au lieu d'attendre 20 min. Fait une fois après chaque démarrage de l'extension ou de Chrome.
+const POST_COUPE = 'Publication interrompue (extension rechargée, Chrome ou sa fenêtre fermés) : regarde sur ta Page si le post est parti, puis « Déjà publié » ou « Réessayer ».';
+async function postsInterrompus() {
+  const { postsVerifies } = await chrome.storage.session.get('postsVerifies');
+  if (postsVerifies) return;
+  const vivants = new Set();
+  for (const v of voies.values()) {
+    const job = await v.jobCourant();
+    if (job && job.running && job.path) vivants.add(job.path);
+  }
+  let attente = false;
+  for (const net of ['facebook', 'instagram', 'tiktok', 'snapchat', 'x', 'linkedin', 'pinterest']) {
+    const posts = await principale.folder('posts', { net }).catch(() => []);
+    for (const p of posts) {
+      if (p.statut !== 'en_cours' || vivants.has(p.path)) continue;
+      // Tout juste lancé : sa voie écrit peut-être encore sa publication en cours ; revu au battement suivant.
+      if (p.started_at && Date.now() - Date.parse(p.started_at) < 2 * 60000) { attente = true; continue; }
+      await principale.folder('markPost', { path: p.path, patch: { statut: 'a_verifier', erreur: POST_COUPE } }).catch(() => {});
+    }
+  }
+  if (!attente) await chrome.storage.session.set({ postsVerifies: Date.now() });
+}
+
+async function heartbeat() {
+  api('/studio-upload/status').catch(() => {});
+  postsInterrompus().catch(() => {});
+  principale.dailyReport().catch(() => {}); // tried again next minute if the server did not answer
+  // Safety net: the automatic pass must run even if its alarm went missing.
+  await ensureAlarms();
+  const { lastAutoTick } = await chrome.storage.local.get('lastAutoTick');
+  if (!lastAutoTick || Date.now() - lastAutoTick > (AUTO_EVERY_MINUTES + 1) * 60000) tickGlobal().catch(() => {});
+}
+
+// chrome.alarms.create replaces an alarm of the same name and restarts its
+// countdown. The worker wakes every minute (heartbeat), so recreating 'auto'
+// (every 5 min) at each wake meant it never fired: only create what is missing.
+async function ensureAlarms() {
+  const wanted = { heartbeat: 1, auto: AUTO_EVERY_MINUTES };
+  for (const [name, period] of Object.entries(wanted)) {
+    const alarm = await chrome.alarms.get(name);
+    if (!alarm || alarm.periodInMinutes !== period) await chrome.alarms.create(name, { periodInMinutes: period });
+  }
+}
+
+// YouTube → Facebook switch: on by default, for videos published from now on
+// (never the whole older catalogue at once).
+(async () => {
+  const settings = await principale.folderSettings().catch(() => null);
+  if (settings && !settings.facebookFromYoutubeSince) {
+    settings.facebookFromYoutubeSince = Date.now();
+    await chrome.storage.local.set({ folder: settings });
+  }
+})();
+ensureAlarms().catch(() => {});
+// ------------------------------------------------------- automatic updates
+// Chrome installs a downloaded version only when the extension is idle, and this
+// one never is: without help, users kept the old version until Chrome was closed.
+// Now it asks the Chrome Web Store every 3 h and restarts itself on the new
+// version between two publications. Decision: lib/mise-a-jour.js.
+async function applyUpdate() {
+  const { updateWaiting } = await chrome.storage.local.get('updateWaiting');
+  if (!updateWaiting) return;
+  // Already on that version (installed by a Chrome restart): nothing to do, and no reload loop.
+  if (updateWaiting.version === chrome.runtime.getManifest().version) { await chrome.storage.local.remove('updateWaiting'); return; }
+  // Toutes les voies doivent être au repos (un envoi en cours dans n'importe laquelle retarde la mise à jour).
+  const enMemoire = await chrome.storage.local.get([...voies.values()].map((v) => v.CLE_PENDING));
+  const jobs = await chrome.storage.session.get([...voies.values()].map((v) => v.CLE_JOB));
+  for (const v of voies.values()) {
+    const verdict = KappUpdate.canReload({ job: jobs[v.CLE_JOB], pending: enMemoire[v.CLE_PENDING], now: Date.now() });
+    if (!verdict.ok) { chrome.alarms.create('maj', { delayInMinutes: KappUpdate.RETRY_MINUTES }); return; }
+  }
+  chrome.runtime.reload();
+}
+
+async function checkUpdate() {
+  const answer = await chrome.runtime.requestUpdateCheck().catch((error) => ({ status: 'error', error: String(error && error.message || error) }));
+  const result = { status: answer.status, version: answer.version || null, at: Date.now() };
+  await chrome.storage.local.set({ updateCheck: result });
+  return result;
+}
+
+chrome.runtime.onUpdateAvailable.addListener(async (details) => {
+  await chrome.storage.local.set({ updateWaiting: { version: details.version, since: Date.now() } });
+  applyUpdate().catch(() => {});
+});
+
+// The periodic check, created once: re-creating it on every service-worker wake
+// would push it back each time and it would never fire.
+chrome.alarms.get('verif-maj').then((alarm) => {
+  if (!alarm) chrome.alarms.create('verif-maj', { delayInMinutes: 5, periodInMinutes: KappUpdate.CHECK_MINUTES });
+}).catch(() => {});
+// A version downloaded before a restart of the service worker installs as soon as possible.
+chrome.storage.local.get('updateWaiting').then(({ updateWaiting }) => {
+  if (updateWaiting && updateWaiting.version !== chrome.runtime.getManifest().version) chrome.alarms.create('maj', { delayInMinutes: 1 });
+}).catch(() => {});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'maj') applyUpdate().catch(() => {});
+  if (alarm.name === 'verif-maj') checkUpdate().catch(() => {});
+  if (alarm.name === 'heartbeat') heartbeat();
+  if (alarm.name === 'onglets') principale.sweepOwnTabs({ minAge: 15000 }).catch(() => {});
+  if (alarm.name === 'auto' || alarm.name === 'due' || alarm.name === 'comment') tickGlobal().catch(() => {});
+});
+// Clicking the icon opens the side panel: everything happens there.
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// Clicking the "re-authorize" notification should land the creator straight
+// on the panel instead of just dismissing a toast — same one-click re-grant
+// as clicking the extension icon itself.
+chrome.notifications.onClicked.addListener(async (id) => {
+  if (id.startsWith(`${PERSON_NOTICE}:`)) {
+    // Straight to the Studio tab that waits for the choice (celui de la voie qui a envoyé la notification).
+    const voie = voies.get(id.slice(PERSON_NOTICE.length + 1));
+    const onglet = voie && voie.ongletDeTravail();
+    if (onglet) {
+      const tab = await chrome.tabs.update(onglet, { active: true }).catch(() => null);
+      if (tab) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    }
+    chrome.notifications.clear(id, () => void chrome.runtime.lastError);
+    return;
+  }
+  if (id !== 'kappgen-folder-access') return;
+  await principale.askAccess({ force: true }).catch(() => {});
+});
+const reprendreToutes = () => { for (const v of voies.values()) v.resume().catch(() => {}); };
+chrome.runtime.onStartup.addListener(() => { heartbeat(); reprendreToutes(); });
+chrome.runtime.onInstalled.addListener((details) => {
+  heartbeat(); reprendreToutes(); principale.closeOldKeeper();
+  if (details && details.reason === 'update') {
+    const version = chrome.runtime.getManifest().version;
+    chrome.storage.local.remove('updateWaiting').catch(() => {});
+    if (details.previousVersion !== version) chrome.storage.local.set({ justUpdated: { version, from: details.previousVersion || null, at: Date.now() } }).catch(() => {});
+  }
+});
+reprendreToutes(); // service worker restarted while an upload was being followed
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || message.target === 'offscreen') return false;
+  const handlers = commandesPour(message, sender);
   const handler = handlers[message.type];
   if (!handler) return false;
   handler().then((data) => sendResponse({ ok: true, data }),

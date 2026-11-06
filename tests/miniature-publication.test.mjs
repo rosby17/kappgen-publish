@@ -13,7 +13,7 @@ test('la publication attend le champ Miniature au lieu de le chercher une seule 
 });
 
 test('une miniature non envoyée est signalée, jamais avalée', () => {
-  const bloc = fond.slice(fond.indexOf("step(tabId, 'waitForThumbnailPicker')"), fond.indexOf("const early = await earlyLink"));
+  const bloc = fond.slice(fond.indexOf("step(tabId, 'waitForThumbnailPicker')", fond.indexOf('async function publishDansLaVoie')), fond.indexOf("const early = await earlyLink"));
   assert.match(bloc, /Miniature non envoyée/);
   assert.doesNotMatch(bloc, /\.catch\(\(\) => \{\}\)/);
 });

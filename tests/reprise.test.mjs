@@ -87,3 +87,45 @@ test('le panneau a le bouton de reprise et le background sait reprendre', () => 
   assert.match(bg, /'lib\/monetisation\.js', 'lib\/reprise\.js'/);
   assert.match(studio, /async reprendre\(\{ nom, src, path \}\)/);
 });
+
+test('la fiche d’une fenêtre déjà ouverte (nom du fichier en titre) est retrouvée', () => {
+  const v = rp.cheminPourTitre('2026 11 03 037 villarreal psg avant match short', VIDEOS);
+  assert.equal(v.path, VIDEOS[1].vertical_path);
+  assert.equal(v.short, true);
+  assert.equal(rp.cheminPourTitre('2026 11 03 038 jesus de miguel tenerife', VIDEOS).path, VIDEOS[0].relative_path);
+  assert.equal(rp.cheminPourTitre('Jesús de Miguel, 30 ans', VIDEOS), null, 'un vrai titre n’est pas une reprise');
+  assert.equal(rp.cheminPourTitre(null, VIDEOS), null);
+});
+
+test('après la reprise, la fiche du dossier est remplie, enregistrée et notée publiée', () => {
+  const bloc = bg.slice(bg.indexOf('async function reprendreUne'), bg.indexOf('async function recipeSelector'));
+  for (const attendu of [/'fillDetails', \{ title: titre, description: video\.description \}/, /'fillTags'/, /'waitForThumbnailPicker'/,
+    /chooseVisibilityStep\(tabId, \{ visibility, monetization, scheduleAt \}\)/, /saveUntilClosed\(tabId\)/, /status: 'published'/, /addTransfer\(youtubeId/]) {
+    assert.match(bloc, attendu);
+  }
+  assert.match(bloc, /KappVisibilite\.choisir/, 'même date et visibilité que KappGen');
+  const boucle = bg.slice(bg.indexOf('async function reprendreInterrompues'), bg.indexOf('async function reprendreUne'));
+  assert.match(boucle, /!vus\.has\(l\.nom\)/, 'toutes les lignes y passent, une à une');
+  assert.match(boucle, /setBorrowed\(onglet\.id, true\)/, 'l’onglet de la personne n’est jamais fermé');
+});
+
+test('le titre et la description sont vérifiés après saisie (plus de vidéo partie avec le nom du fichier)', () => {
+  assert.match(studio, /async function typeInto\(box, text\) \{[\s\S]*?return texteBon\(box, voulu\);/);
+  assert.match(studio, /YouTube Studio n’a pas gardé le titre/);
+  // Saisie dans une page factice où execCommand n'écrit rien (fenêtre en arrière-plan) : le texte est posé quand même.
+  const corps = studio.slice(studio.indexOf('const sansEspaces'), studio.indexOf('  function click(el)'));
+  const typeInto = new Function('document', 'sleep', 'InputEvent', 'Event', `${corps}; return typeInto;`)(
+    { execCommand: () => false }, async () => {}, class { constructor(t) { this.type = t; } }, class { constructor(t) { this.type = t; } });
+  const box = { textContent: '2026 11 04 041 barca villa 3 0', focus() {}, blur() {}, dispatchEvent() {} };
+  box.__defineGetter__('innerText', function () { return this.textContent; });
+  return typeInto(box, 'Lamine Yamal BAT Mbappé').then((ok) => { assert.equal(ok, true); assert.equal(box.textContent, 'Lamine Yamal BAT Mbappé'); });
+});
+
+test('reprise ouverte par Studio sur la page de la vidéo : la fiche et la visibilité y sont réglées', () => {
+  const bloc = bg.slice(bg.indexOf('async function reprendreUne'), bg.indexOf('async function recipeSelector'));
+  assert.match(bloc, /if \(!error\.fenetrePerdue\) throw error;/);
+  assert.match(bloc, /'editDetails', \{ title: titre/);
+  assert.match(bloc, /'setVisibilityOnEdit'/);
+  assert.doesNotMatch(bloc, /'UNLISTED'/, 'plus de non répertoriée par défaut');
+  assert.match(studio, /location\.pathname\.match\(\/\^\\\/video\\\//);
+});

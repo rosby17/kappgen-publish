@@ -124,15 +124,8 @@
     <button id="auto-resume" class="btn primary wide">Reprendre les publications</button>
     <p class="small muted">Dans la petite fenêtre de Chrome, choisis <strong>« Autoriser à chaque visite »</strong> : la pause ne reviendra plus.</p>
   </section>
-  <section id="job" class="job" role="status" aria-live="polite" aria-atomic="true" hidden>
-    <button id="job-clear" class="icon-close" title="Fermer" aria-label="Fermer" hidden>✕</button>
-    <strong id="job-title"></strong>
-    <p id="job-message"></p>
-    <a id="job-link" class="btn ghost" target="_blank" rel="noopener noreferrer" hidden>Ouvrir sur YouTube</a>
-    <div class="job-actions">
-      <button id="job-unblock" class="btn ghost" hidden>Annuler</button>
-    </div>
-  </section>
+  <!-- Une carte par envoi en cours (plusieurs vidéos YouTube et les réseaux partent en même temps) : sidepanel.js renderJob. -->
+  <div id="jobs" role="status" aria-live="polite"></div>
 
   <section id="setup" class="card setup-card" hidden>
     <button id="setup-close" class="icon-close" title="Fermer cette carte" aria-label="Fermer">✕</button>
@@ -144,6 +137,8 @@
   </section>
 
 
+  <!-- Réseaux et « Reprendre » sur la même ligne (Roosevelt, 06/11 : le bouton en haut, toujours sous la main). -->
+  <div class="tabs-ligne">
   <nav class="tabs" role="tablist" aria-label="Réseaux sociaux">
     <button data-tab="youtube" class="active">YouTube</button>
     <button data-tab="facebook">Facebook</button>
@@ -153,34 +148,18 @@
     <button data-tab="linkedin">LinkedIn</button>
     <button data-tab="x">X</button>
   </nav>
+    <button id="resume-interrupted" class="btn-reprise" title="Dans YouTube Studio, reprend chaque « Mise en ligne interrompue » avec le bon fichier du dossier, puis remplit sa fiche (titre, description, miniature, date)">Reprendre</button>
+  </div>
+  <p id="resume-result" class="reprise-resultat muted" hidden></p>
 
   <div id="tab-youtube" class="tab">
     <details class="card tab-settings" id="yt-settings">
       <summary>Réglages YouTube <span class="set-summary" data-for="youtube"></span></summary>
-      <div class="field">
-        <label>Visibilité sur YouTube</label>
-        <div id="yt-visibility" class="segmented" role="radiogroup" aria-label="Visibilité sur YouTube">
-          <button type="button" data-value="PUBLIC" role="radio">Publique</button>
-          <button type="button" data-value="UNLISTED" role="radio">Non répertoriée</button>
-          <button type="button" data-value="PRIVATE" role="radio">Privée</button>
-        </div>
-        <p id="yt-visibility-hint" class="small muted"></p>
-      </div>
+      <p class="small muted">Chaque vidéo part avec l’heure donnée par KappGen : publique tout de suite si son heure est passée (ou sans heure), programmée à son heure sinon.</p>
       <label class="set-row">
         <span class="set-text"><strong>Commentaire épinglé</strong><small>Posté et épinglé sous la vidéo (texte de la fiche). Ignoré si la chaîne ne peut pas encore épingler.</small></span>
         <span class="switch"><input type="checkbox" id="yt-comment"><span></span></span>
       </label>
-      <div class="field">
-        <label>Quand publier</label>
-        <div class="choice">
-          <label class="check-line"><input type="radio" name="yt-when" value="now"> Dès que la vidéo est prête</label>
-          <label class="check-line"><input type="radio" name="yt-when" value="times"> À heures fixes (une vidéo par horaire, publique à l’heure dite)</label>
-        </div>
-        <div id="yt-times-row" class="input-group" hidden>
-          <input id="yt-times" type="text" placeholder="ex. 18:00 ou 09:00, 18:00">
-          <button id="yt-times-save" class="btn secondary">Enregistrer</button>
-        </div>
-      </div>
     </details>
     <div id="yt-filters" class="filters">
       <div class="chips" role="group" aria-label="Type de vidéo">
@@ -190,10 +169,6 @@
         <button data-type="echec" class="chip">Échecs</button>
       </div>
       <button id="rescan" class="sort-btn" title="Relire le dossier maintenant" aria-label="Relire le dossier">↻</button>
-    </div>
-    <div class="reprise">
-      <button id="resume-interrupted" class="btn secondary" title="Dans YouTube Studio, reprend chaque « Mise en ligne interrompue » avec le bon fichier du dossier">Reprendre les mises en ligne interrompues</button>
-      <p id="resume-result" class="muted" hidden></p>
     </div>
     <ul id="videos"></ul>
     <p id="no-videos" class="muted" hidden>Aucune vidéo en attente : tout ce qui est dans le dossier est déjà publié (plus bas).</p>

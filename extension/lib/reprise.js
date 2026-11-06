@@ -42,7 +42,23 @@
     return null;
   }
 
-  const api = Object.freeze({ nomDemande, cheminPour });
+  // Fenêtre d'envoi déjà ouverte après une reprise faite à la main : Studio a mis le nom du fichier en titre, tirets changés
+  // en espaces (« 2026 11 03 037 villarreal psg avant match short »). Retrouve la vidéo du dossier qui porte ce nom.
+  const simple = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  function cheminPourTitre(titre, videos) {
+    const t = simple(String(titre || '').replace(EXTENSIONS, ''));
+    if (!t) return null;
+    const court = / short$/.test(t);
+    for (const v of (Array.isArray(videos) ? videos : []).filter((x) => x && x.relative_path)) {
+      const dossier = dossiers(v.relative_path).map(simple);
+      const fichier = simple(base(v.relative_path).replace(EXTENSIONS, ''));
+      if (court && v.vertical_path && dossier.some((d) => `${d} short` === t)) return { path: v.vertical_path, short: true, title: v.title || '' };
+      if (!court && (dossier.includes(t) || fichier === t)) return { path: v.relative_path, short: false, title: v.title || '' };
+    }
+    return null;
+  }
+
+  const api = Object.freeze({ nomDemande, cheminPour, cheminPourTitre });
   root.KappReprise = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

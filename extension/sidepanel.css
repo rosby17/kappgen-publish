@@ -850,6 +850,11 @@ li.row .when span.late { color: #d93025; font-weight: 600; }
 .apercu-texte { white-space: pre-wrap; font-size: 13px; line-height: 1.5; opacity: .85; max-height: 30vh; overflow: auto; }
 
 /* Reprendre les mises en ligne interrompues (06/11) */
-.reprise { margin: 0 0 10px; }
-.reprise .btn { width: 100%; }
-.reprise p { margin: 6px 0 0; font-size: 11.5px; line-height: 1.4; }
+/* Réseaux + « Reprendre » sur une ligne, collée en haut au défilement (comme l'était la barre des réseaux seule). */
+.tabs-ligne { display: flex; align-items: center; gap: 6px; margin-top: 14px; position: sticky; top: 0; z-index: 2; }
+.tabs-ligne .tabs { flex: 1; min-width: 0; margin-top: 0; position: static; }
+.btn-reprise { flex: 0 0 auto; height: 40px; padding: 0 12px; border-radius: 12px; border: 1px solid rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.1); color: var(--accent-strong); font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.btn-reprise:hover { background: rgba(var(--accent-rgb), 0.18); }
+.btn-reprise:disabled { opacity: 0.55; cursor: progress; }
+.reprise-resultat { margin: 8px 2px 0; font-size: 11.5px; line-height: 1.4; }

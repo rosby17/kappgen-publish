@@ -53,13 +53,33 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
 
   // Studio's rich text boxes ignore direct .textContent writes; typing
   // through execCommand goes through its own input handlers.
+  // Écrit dans un champ de Studio et VÉRIFIE que le texte y est (true/false). Roosevelt, 06/11 : vidéos parties avec le nom du
+  // fichier comme titre et sans description, alors que l'étape disait réussir. Dans une fenêtre en arrière-plan (autre profil
+  // devant, fenêtre d'une voie), execCommand peut ne rien écrire : le texte est alors posé directement et Studio est prévenu.
+  const sansEspaces = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+  function texteDe(box) { return sansEspaces(box.innerText || box.textContent); }
+  function texteBon(box, voulu) {
+    const lu = texteDe(box);
+    const attendu = sansEspaces(voulu);
+    return lu === attendu || (attendu.length > 100 && lu.length >= 90 && attendu.startsWith(lu));
+  }
   async function typeInto(box, text) {
+    const voulu = String(text || '');
     box.focus();
     document.execCommand('selectAll', false, null);
     document.execCommand('delete', false, null);
-    if (text) document.execCommand('insertText', false, text);
+    if (voulu) document.execCommand('insertText', false, voulu);
     box.dispatchEvent(new Event('input', { bubbles: true }));
     await sleep(300);
+    if (texteBon(box, voulu)) return true;
+    box.focus();
+    box.textContent = voulu;
+    box.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: voulu }));
+    box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: voulu }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    box.blur();
+    await sleep(600);
+    return texteBon(box, voulu);
   }
 
   function click(el) {
@@ -100,7 +120,9 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
       const m = a.href.match(X('youtubeLink'));
       if (m) return m[1];
     }
-    return null;
+    // Page de la vidéo (/video/ID/edit), ouverte par Studio à la place de la fenêtre d'envoi lors d'une reprise.
+    const page = location.pathname.match(/^\/video\/([\w-]{11})(\/|$)/);
+    return page ? page[1] : null;
   }
 
   const textOf = (node) => (node.textContent || '').replace(/\s+/g, ' ').trim();
@@ -241,7 +263,8 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
   // « Éligibilité aux annonces » / « Ad suitability » : the step badge is
   // selected, or its questionnaire (categories + « None of the above ») shows.
   const AD_STEP = /Éligibilité aux annonces|Adéquation publicitaire|Ad suitability|Idoneidad para anuncios|Adequação a anúncios|Eignung für Werbung/i;
-  const NONE_TEXT = /none of the above|aucun(e)? (des|de ces)? ?(options|propositions|[ée]l[ée]ments|contenus|situations|cas|choix)? ?ci-dessus|aucun de ces|rien de tout cela|ningun[ao] de l[ao]s|nenhuma das|keine der/i;
+  // « Aucun contenu non adapté aux annonceurs » : libellé des Shorts (Ballon Viral, 06/11), en plus de « Aucun des éléments ci-dessus ».
+  const NONE_TEXT = /aucun contenu non adapt[ée] aux annonceurs|no (ad-unsuitable|unsuitable) content|none of the above|aucun(e)? (des|de ces)? ?(options|propositions|[ée]l[ée]ments|contenus|situations|cas|choix)? ?ci-dessus|aucun de ces|rien de tout cela|ningun[ao] de l[ao]s|nenhuma das|keine der/i;
   function adStepShown() {
     const dlg = dialog();
     if (!dlg) return false;
@@ -280,7 +303,8 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
   const AD_BANNER = 'KappGen Publish attend ton choix : réponds au questionnaire « Éligibilité aux annonces » puis « Envoyer la classification ». La publication continue toute seule ensuite.';
   async function adSuitabilityStep(mode, waitPerson = false) {
     // Waiting for the creator: once Studio lets « Next » go, the questionnaire is answered.
-    if (waitPerson) {
+    // Même en attente de la personne, réessaie seul si la case est maintenant trouvée (questionnaire chargé en retard).
+    if (waitPerson && !(mode === 'on' && findNone())) {
       if (!adStepShown() || nextEnabled()) return false;
       showBanner(AD_BANNER);
       return PERSON;
@@ -297,11 +321,15 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
       return PERSON;
     }
     const SUBMIT = /^(Submit rating|Envoyer (la note|la classification|l['’][ée]valuation)|Soumettre.*|Valider.*|Enviar (clasificaci[oó]n|avalia[cç][aã]o)|Bewertung senden)$/i;
-    const findSubmit = () => findByText(S('buttons'), X('adSubmit')) || findByText(S('buttons'), SUBMIT);
+    // « Envoyer l'évaluation » grisé = évaluation déjà envoyée (Studio laisse le bouton à l'écran) : ne compte pas. Sinon
+    // l'extension le recliquait sans fin et n'appuyait jamais sur « Suivant » (Short Ballon Viral, 06/11).
+    const actif = (b) => !!b && visible(b) && ![b, b.querySelector('button')].some((n) => n && (n.hasAttribute('disabled') || n.getAttribute('aria-disabled') === 'true'));
+    const findSubmit = () => [findByText(S('buttons'), X('adSubmit')), findByText(S('buttons'), SUBMIT)].find(actif) || null;
     const box = none.matches(S('adCheckbox')) ? none : (none.querySelector(S('adCheckbox')) || none);
     const checked = () => box.getAttribute('aria-checked') === 'true' || box.hasAttribute('checked');
     // Already answered (Studio keeps the questionnaire on screen): « Next » moves on.
     if (checked() && !findSubmit()) return false;
+    if (!findSubmit() && nextEnabled()) return false;
     if (!checked()) click(none);
     await sleep(600);
     const submit = await waitFor(findSubmit, { timeout: 10000, what: 'le bouton « Envoyer la classification »' });
@@ -430,9 +458,16 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
         { timeout: 120000, what: 'le champ Titre' },
       );
       await sleep(1500); // Studio pre-fills the title from the file name.
-      await typeInto(titleBox, title);
+      // Le titre est vérifié : sans lui la vidéo partirait avec le nom du fichier. Un essai de plus après une pause.
+      if (!(await typeInto(titleBox, title))) {
+        await sleep(2000);
+        if (!(await typeInto(titleBox, title))) throw new Error(`YouTube Studio n’a pas gardé le titre (il affiche « ${texteDe(titleBox).slice(0, 60)} »).`);
+      }
       const descriptionBox = document.querySelector(S('descriptionBox'));
-      if (descriptionBox) await typeInto(descriptionBox, description || '');
+      if (descriptionBox && !(await typeInto(descriptionBox, description || ''))) {
+        await sleep(2000);
+        if (!(await typeInto(descriptionBox, description || ''))) throw new Error('YouTube Studio n’a pas gardé la description.');
+      }
       const notForKids = await waitFor(
         () => document.querySelector(S('notForKids')),
         { what: 'l’option « non conçue pour les enfants »' },
@@ -469,9 +504,9 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
     async editDetails({ title, description, tags }) {
       const titleBox = await waitFor(() => document.querySelector(S('titleBox')),
         { timeout: 60000, what: 'le champ Titre' });
-      if (title) await typeInto(titleBox, title);
+      if (title && !(await typeInto(titleBox, title))) throw new Error(`YouTube Studio n’a pas gardé le titre (il affiche « ${texteDe(titleBox).slice(0, 60)} »).`);
       const descriptionBox = document.querySelector(S('descriptionBox'));
-      if (descriptionBox && description) await typeInto(descriptionBox, description);
+      if (descriptionBox && description && !(await typeInto(descriptionBox, description))) throw new Error('YouTube Studio n’a pas gardé la description.');
       if (tags && tags.length) await this.fillTags({ tags }).catch(() => {});
       return true;
     },
@@ -508,6 +543,10 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
       const start = Date.now();
       let stuck = 0;
       let lostSince = 0;
+      // Bulles déjà fermées : chacune n'est cliquée qu'une fois. Le bandeau « Il semble que vous êtes en train de mettre en ligne
+      // un Short » reste affiché après « Ignorer » : le recliquer sans fin empêchait de passer à « Suivant » (Ballon Viral, 06/11).
+      const bullesVues = new WeakSet();
+      let bullesFermees = 0;
       while (Date.now() - start < 180000) {
         const radio = document.querySelector(S('visibilityRadio', { name }));
         if (visible(radio)) {
@@ -536,10 +575,10 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
         hideBanner();
         // Studio's info bubbles (« Learn more / Dismiss ») sit over the dialog
         // and keep it on « Details »: close them (never the dialog itself).
-        const bubble = [...document.querySelectorAll('ytcp-uploads-dialog button, ytcp-uploads-dialog ytcp-button, ytcp-uploads-dialog [role="button"], tp-yt-paper-dialog button, tp-yt-paper-dialog [role="button"]')]
-          .find((b) => visible(b) && !b.closest('#close-button, ytcp-uploads-dialog-close-button')
+        const bubble = bullesFermees >= 6 ? null : [...document.querySelectorAll('ytcp-uploads-dialog button, ytcp-uploads-dialog ytcp-button, ytcp-uploads-dialog [role="button"], tp-yt-paper-dialog button, tp-yt-paper-dialog [role="button"]')]
+          .find((b) => visible(b) && !bullesVues.has(b) && !b.closest('#close-button, ytcp-uploads-dialog-close-button')
             && (b.id === 'action-2' || /^(dismiss|ignorer|got it|j'ai compris|compris|no thanks|non merci)$/i.test((b.textContent || '').trim())));
-        if (bubble) { click(bubble); await sleep(800); continue; }
+        if (bubble) { bullesVues.add(bubble); bullesFermees += 1; click(bubble); await sleep(800); continue; }
         const next = document.querySelector(S('nextButton'));
         const enabled = next && visible(next) && !next.hasAttribute('disabled') && next.getAttribute('aria-disabled') !== 'true';
         if (enabled) { click(next); stuck = 0; }
@@ -581,6 +620,24 @@ if (typeof module !== 'undefined') module.exports = { nomPourStudio };
         document.documentElement.removeAttribute('data-kappgen-reprise-attendue');
       }
       return this.receiveFile({ css: 'input[data-kappgen-reprise]', src, path });
+    },
+
+    // Titre de la fenêtre d'envoi ouverte (null sans fenêtre) : sert à finir une reprise faite à la main.
+    titreDialogue() {
+      const dlg = dialog();
+      if (!dlg || !visible(dlg)) return null;
+      const box = dlg.querySelector(S('titleBox'));
+      return box ? (box.innerText || box.textContent || '').trim() : null;
+    },
+
+    // Ferme la fenêtre d'envoi restée ouverte après une reprise ratée (le brouillon reste dans Studio) : la ligne suivante peut être reprise.
+    async closeDialog() {
+      const dlg = dialog();
+      if (!dlg || !visible(dlg)) return true;
+      const fermer = dlg.querySelector('#close-button, ytcp-uploads-dialog-close-button button, [aria-label="Fermer"], [aria-label="Close"]');
+      if (fermer) click(fermer);
+      await sleep(1500);
+      return !dialog() || !visible(dialog());
     },
 
     // True while Studio still shows a transfer (dialog or video list).

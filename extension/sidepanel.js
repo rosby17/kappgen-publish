@@ -394,7 +394,11 @@ async function act(item, buttonNode, message, busyText) {
   }
   const data = reply.data || {};
   if (data.queued) {
-    item.say('busy', `En file d’attente (n° ${data.position}) : elle part dès que la publication en cours est réglée dans Studio.`);
+    item.say('busy', data.attendReseaux
+      ? `En attente (n° ${data.position}) : part dès que la publication en cours sur les réseaux est finie.`
+      : data.attendFenetre
+      ? `En attente (n° ${data.position}) : part dès qu’une des fenêtres Studio a fini sa vidéo.`
+      : `En file d’attente (n° ${data.position}) : elle part dès que la publication en cours est réglée dans Studio.`);
     return data;
   }
   if (busyText) item.say('busy', busyText);
@@ -531,7 +535,7 @@ const VISIBILITY_LABELS = {
   PRIVATE: 'privée',
   SCHEDULE: 'programmée',
 };
-let defaultVisibility = 'UNLISTED';
+let defaultVisibility = 'PUBLIC';   // plus de réglage du panneau : publique, ou programmée à l'heure KappGen
 const visibilityOf = (key) => VISIBILITY_LABELS[autoVisibility.get(key)] ? autoVisibility.get(key) : defaultVisibility;
 // Channel names are only shown when the folder holds several channels.
 let showChannels = false;
@@ -562,11 +566,8 @@ function videoItem(video) {
   // sur YouTube mais reste « Programmée » jusqu'à sa date (lib/visibilite.js, 05/11) : le bouton le dit.
   const enAvance = video.planned_at != null && video.planned_at > Date.now() + 15 * 60000;
   const go = button(enAvance ? 'Envoyer (programmée)' : 'Publier maintenant', 'btn primary', async () => {
-    const config = await settings();
-    const own = config.channels[video.channel_key] || {};
-    const base = ['PUBLIC', 'UNLISTED', 'PRIVATE'].includes(own.visibility) ? own.visibility
-      : ['PUBLIC', 'UNLISTED', 'PRIVATE'].includes(config.visibility) ? config.visibility : 'UNLISTED';
-    await act(item, go, { type: 'publish', source: 'folder', videoId: video.id, visibility: base }, 'Envoi vers YouTube en cours…');
+    // Visibilité décidée par KappGen (heure de la vidéo, réglages de la chaîne) dans lib/visibilite.js : publique sinon.
+    await act(item, go, { type: 'publish', source: 'folder', videoId: video.id, visibility: 'CHANNEL' }, 'Envoi vers YouTube en cours…');
   });
   // En file d'attente (lancée pendant une autre publication) : dit sur la carte, même après un nouvel affichage du panneau.
   const rang = rangEnFile(video.id);
@@ -696,7 +697,6 @@ function channelItem(channel, panelOwn) {
   }
   const current = VISIBILITY_LABELS[own.visibility] ? own.visibility : 'UNLISTED';
   visibility.value = current;
-  autoVisibility.set(channel.key, current);
   const times = document.createElement('input');
   times.type = 'text';
   times.placeholder = 'Heures de publication, ex. 18:00 ou 9:00, 18:30';
@@ -740,7 +740,7 @@ function channelItem(channel, panelOwn) {
     control.disabled = true;
     control.title = 'Fixé par reglages-publication.json dans le dossier de la chaîne.';
   }
-  row.append(name, label, socialLabel, facebookPage, money, visibility, times);
+  row.append(name, label, socialLabel, facebookPage, money);   // visibilité et heures : celles de KappGen (06/11)
   item.append(row);
   return item;
 }
@@ -910,7 +910,7 @@ function updateEntries(video, getItem) {
     const item = getItem();
     const reply = await send({ type: 'update', path: video.relative_path, ...(champs ? { champs } : {}) });
     if (!reply || !reply.ok) item.say('warn', reply ? reply.error : 'Action impossible.');
-    else item.say('busy', busy);
+    else item.say('busy', reply.data && reply.data.queued ? 'En attente : part dès qu’une des fenêtres Studio a fini sa vidéo.' : busy);
   };
   const entries = [];
   if (video.thumbnail_path || video.preview_path) {
@@ -1176,20 +1176,6 @@ function normalizeTimes(value) {
 
 async function renderPublishSettings() {
   const config = await settings();
-  const visibility = ['UNLISTED', 'PUBLIC', 'PRIVATE'].includes(config.visibility) ? config.visibility : 'UNLISTED';
-  for (const b of $('yt-visibility').querySelectorAll('button')) {
-    b.classList.toggle('active', b.dataset.value === visibility);
-    b.setAttribute('aria-checked', String(b.dataset.value === visibility));
-  }
-  $('yt-visibility-hint').textContent = {
-    PUBLIC: 'Chaque vidéo est visible par tout le monde dès sa publication.',
-    UNLISTED: 'Seules les personnes qui ont le lien la voient : tu la passes en publique toi-même dans YouTube Studio.',
-    PRIVATE: 'Toi seul la vois.',
-  }[visibility];
-  const when = config.schedule === 'times' ? 'times' : 'now';
-  for (const radio of document.querySelectorAll('input[name="yt-when"]')) radio.checked = radio.value === when;
-  $('yt-times-row').hidden = when !== 'times';
-  $('yt-times').value = config.times || '';
   $('yt-comment').checked = config.youtubeComment === true;
 }
 
@@ -1201,25 +1187,6 @@ async function saveSetting(patch) {
   renderPublishSettings();
 }
 
-for (const b of $('yt-visibility').querySelectorAll('button')) {
-  b.addEventListener('click', async () => {
-    const value = b.dataset.value;
-    // Enregistré au clic, sans fenêtre de confirmation (Roosevelt, 19/10 : « Publique » revenait à « Non répertoriée » : Chrome bloque
-    // parfois confirm() dans ce panneau, qui répond alors « Annuler » sans rien montrer). Le texte sous les boutons dit ce que ça fait.
-    // Un ancien réglage par chaîne (plus d'interface pour le changer) ne doit plus l'emporter en silence.
-    const current = await settings();
-    for (const own of Object.values(current.channels || {})) if (own && typeof own === 'object') delete own.visibility;
-    await chrome.storage.local.set({ folder: current });
-    await saveSetting({ visibility: value });
-  });
-}
-for (const radio of document.querySelectorAll('input[name="yt-when"]')) {
-  radio.addEventListener('change', async () => {
-    $('yt-times-row').hidden = radio.value !== 'times';
-    if (radio.value === 'now' || normalizeTimes($('yt-times').value)) await saveSetting({ schedule: radio.value });
-    else $('yt-times').focus();
-  });
-}
 function timesSaver(input, key, extra = {}) {
   return async () => {
     const value = $(input).value.trim();
@@ -1233,11 +1200,6 @@ function timesSaver(input, key, extra = {}) {
     await saveSetting({ [key]: normalized, ...extra });
     renderPosts();
   };
-}
-$('yt-times-save').addEventListener('click', timesSaver('yt-times', 'times', { schedule: 'times' }));
-for (const id of ['yt-times']) {
-  $(id).addEventListener('input', () => $(id).setCustomValidity(''));
-  $(id).addEventListener('keydown', (event) => { if (event.key === 'Enter') $(`${id}-save`).click(); });
 }
 
 // ------------------------------------------------------ Facebook posts
@@ -1285,9 +1247,13 @@ function postRow(post) {
   what.append(el('div', 't', post.text.split('\n')[0] || '(sans texte)'));
   const live = liveRegion();
   const due = post.due_at && post.due_at > Date.now();
+  // « En cours » sans aucune publication vivante dans les voies : coupé (extension rechargée, fenêtre fermée…). On le dit, et le
+  // menu ⋯ propose « Déjà publié », « Archiver » et « Supprimer » (Roosevelt, 06/11 : on ne pouvait que le modifier).
+  const coupe = post.statut === 'en_cours' && ![...jobs.values()].some((j) => j && j.running && j.path === post.path);
   const states = {
     a_publier: due ? pillIcon('neutral', 'Programmé', 'clock') : pill('neutral', 'En retard'),
-    en_cours: pill('busy', 'Publication en cours…'),
+    en_cours: coupe ? pill('warn', 'Publication interrompue : regarde sur ta Page s’il est parti, puis ⋯ « Déjà publié », ou « Archiver ».')
+      : pill('busy', 'Publication en cours…'),
     publie: pill('ok', 'Publié'),
     echec: pill('warn', post.error || 'Échec de la publication.'),
     a_verifier: pill('warn', post.error || 'Vérifie sur Facebook avant toute nouvelle tentative.'),
@@ -1347,7 +1313,11 @@ function postRow(post) {
   }
   if (!post.history) {
     // « Modifier le post » est toujours dans le menu ⋯ ; les posts qui n'en avaient pas (publié, à vérifier…) en reçoivent un.
-    if (!acts.querySelector('.more')) acts.append(moreMenu(post.statut === 'en_cours' ? [editEntry(item, post)] : [editEntry(item, post), eraseEntry(item, post)]));
+    if (!acts.querySelector('.more')) {
+      acts.append(moreMenu(post.statut === 'en_cours' && !coupe ? [editEntry(item, post)]
+        : coupe ? [editEntry(item, post), alreadyDone(() => item, () => markPostManual(post.path, 'facebook')), archiveEntry(item, post), eraseEntry(item, post)]
+          : [editEntry(item, post), eraseEntry(item, post)]));
+    }
     what.classList.add('clickable');
     what.title = 'Cliquer pour ouvrir le post';
     what.addEventListener('click', (event) => { if (!event.target.closest('button, a')) toggleEditor(item, post); });
@@ -1844,6 +1814,11 @@ function estimateLate(posts, catchUp) {
   const late = posts.filter((p) => p.statut === 'a_publier' && p.due_at && p.due_at <= now).sort((a, b) => a.due_at - b.due_at);
   const map = new Map();
   if (!late.length) return map;
+  // Plan calculé par l'envoi automatique (retards réinsérés entre les posts programmés, heures croissantes) : affiché tel quel.
+  if (catchUp && Array.isArray(catchUp.plan) && catchUp.plan.length) {
+    for (const [path, at] of catchUp.plan) map.set(path, at);
+    return map;
+  }
   const times = posts.map((p) => p.due_at).filter(Boolean).sort((a, b) => a - b);
   const gaps = [];
   for (let i = 1; i < times.length; i += 1) { const g = times[i] - times[i - 1]; if (g > 0 && g <= 86400000) gaps.push(g); }
@@ -1906,8 +1881,11 @@ async function renderPostsOnce() {
   const missingPage = posts.some((p) => p.statut === 'a_publier' && !pageOf(p));
   const rank = { en_cours: 0, a_verifier: 1, echec: 2, a_publier: 3 };
   const archived = posts.filter((p) => p.statut === RETIRED);
+  // Heure réelle de départ : celle du rattrapage pour un post replanifié (Roosevelt, 06/11 : « le post de 9 h devait venir avant le
+  // post rattrapé de 9 h 11 »). La liste et ses jours suivent cette heure, donc elle se lit dans l'ordre chronologique.
+  const heureDe = (p) => (p.statut === 'a_publier' && lateEta.has(p.path) ? lateEta.get(p.path) : p.due_at) || 0;
   const toCome = posts.filter((p) => p.statut !== 'publie' && p.statut !== RETIRED)
-    .sort((a, b) => (rank[a.statut] ?? 3) - (rank[b.statut] ?? 3) || (a.due_at || 0) - (b.due_at || 0) || a.path.localeCompare(b.path));
+    .sort((a, b) => (rank[a.statut] ?? 3) - (rank[b.statut] ?? 3) || heureDe(a) - heureDe(b) || a.path.localeCompare(b.path));
   // Published: what the folder still holds, then the extension's own history.
   await loadHistory();
   backfillHistory(postHistoryItems(posts)).catch(() => {});
@@ -1927,8 +1905,8 @@ async function renderPostsOnce() {
   }
   const shown = (p) => !postFilter || (postFilter === 'echec' ? p.statut === 'echec' : p.type === postFilter);
   const upcoming = toCome.filter(shown);
-  if (postSort === 'desc') upcoming.sort((a, b) => (b.due_at || 0) - (a.due_at || 0));
-  $('fb-days').replaceChildren(...dayGroups(upcoming, (p) => p.due_at, 'come', { openToday: true }));
+  if (postSort === 'desc') upcoming.sort((a, b) => heureDe(b) - heureDe(a));
+  $('fb-days').replaceChildren(...dayGroups(upcoming, (p) => heureDe(p) || p.due_at, 'come', { openToday: true }));
   // « Déjà publiés » follows the chosen filter too; the latest day is open.
   const doneShown = done.filter(shown);
   $('fb-done-box').hidden = !doneShown.length;
@@ -2064,15 +2042,12 @@ async function renderFolderOnce() {
     return;
   }
   lastScan = data;
-  defaultVisibility = config.schedule === 'times' ? 'SCHEDULE' : (VISIBILITY_LABELS[config.visibility] ? config.visibility : 'UNLISTED');
   showChannels = new Set([...data.videos, ...data.sent].map((v) => v.channel_key)).size > 1;
-  for (const [key, own] of Object.entries(config.channels)) autoVisibility.set(key, own.visibility);
   const { scheduled } = await chrome.storage.local.get('scheduled');
   plannedAt = KappSchedule.plan(data.videos, (v) => {
     if (!v.auto_ok || v.planned_at) return null;
-    const own = { ...(config.channels[v.channel_key] || {}), ...(v.channel_config || {}) };
-    const vis = own.visibility || (config.schedule === 'times' ? 'SCHEDULE' : config.visibility);
-    return vis === 'SCHEDULE' ? (own.times || config.times || '18:00') : null;
+    const own = v.channel_config || {};   // seules les heures fixées par KappGen (dossier de la chaîne) comptent
+    return own.visibility === 'SCHEDULE' ? (own.times || '18:00') : null;
   }, scheduled || {});
   const order = (v) => (v.planned_at ? v.planned_at : v.schedule_at && v.schedule_at > Date.now() ? v.schedule_at : v.auto_ok ? Date.now() : Infinity);
   const shortsWaiting = data.sent.filter((v) => v.youtube_id && v.vertical_path && !v.short_youtube_id).map(shortItem);
@@ -2775,14 +2750,14 @@ $('resume-interrupted').addEventListener('click', async () => {
   const sortie = $('resume-result');
   bouton.disabled = true;
   sortie.hidden = false;
-  sortie.textContent = 'Recherche des mises en ligne interrompues dans YouTube Studio…';
+  sortie.textContent = 'Reprise des mises en ligne interrompues : chaque vidéo repart avec sa fiche du dossier (quelques minutes par vidéo)…';
   const reply = await send({ type: 'resumeInterrupted' });
   bouton.disabled = false;
   if (!reply || !reply.ok) { sortie.textContent = (reply && reply.error) || 'La reprise n’a pas pu se faire.'; return; }
   const { reprises = [], introuvables = [], echecs = [] } = reply.data || {};
   const lignes = [];
   if (!reprises.length && !introuvables.length && !echecs.length) lignes.push('Aucune mise en ligne interrompue dans les onglets YouTube Studio ouverts (ouvre la liste Contenu de la chaîne).');
-  if (reprises.length) lignes.push(`${reprises.length} reprise${reprises.length > 1 ? 's' : ''} : ${reprises.map((r) => r.title || r.path.split('/').slice(-3, -2)[0] || r.nom).join(', ')}. Garde l’onglet Studio ouvert jusqu’à la fin du transfert.`);
+  if (reprises.length) lignes.push(`${reprises.length} reprise${reprises.length > 1 ? 's' : ''} avec titre, description et miniature du dossier : ${reprises.map((r) => r.title || r.path.split('/').slice(-3, -2)[0] || r.nom).join(', ')}. Garde l’onglet Studio ouvert jusqu’à la fin des transferts.`);
   if (introuvables.length) lignes.push(`Fichier introuvable dans le dossier : ${introuvables.join(', ')}.`);
   for (const e of echecs) lignes.push(`${e.nom} : ${e.error}`);
   sortie.textContent = lignes.join(' ');
@@ -3133,15 +3108,16 @@ async function renderApp() {
     info.append(el('div', 'title', video.title), el('div', 'meta', [video.channel_name, size(video.size_bytes)].filter(Boolean).join(' · ')), live);
     item.say = (kind, text) => live.replaceChildren(pill(kind, text));
     if (video.last_error) item.say('warn', video.last_error);
-    const go = button('Envoyer (non répertoriée)', 'btn primary', () => act(
+    // Visibilité décidée par KappGen (heure de publication), jamais « non répertoriée » par défaut (Roosevelt, 06/11).
+    const go = button('Envoyer', 'btn primary', () => act(
       item,
       go,
-      { type: 'publish', source: 'app', videoId: video.id, visibility: 'UNLISTED' },
+      { type: 'publish', source: 'app', videoId: video.id, visibility: 'CHANNEL' },
       'Envoi vers YouTube Studio…',
     ));
     go.dataset.publish = '1';
     go.dataset.publishAvailable = video.file_path ? '1' : '0';
-    go.disabled = jobRunning || !video.file_path;
+    go.disabled = !video.file_path;
     item.append(info, go);
     return item;
   }));
@@ -3149,77 +3125,119 @@ async function renderApp() {
 
 // ------------------------------------------------------------- the job
 
-let currentJob = null;
-let jobHideTimer = null;
+// Une publication en cours par voie (chrome.storage.session : « job » pour la voie principale, « job:<voie> » pour les autres).
+const jobs = new Map();
+const jobHideTimers = new Map();
+const voieDeCle = (cle) => (cle === 'job' ? 'yt1' : cle.startsWith('job:') ? cle.slice(4) : null);
 
-// The running job, on its own card (and the other publish buttons wait).
+// Les nouvelles de chaque publication sur sa carte. Les boutons restent cliquables : une autre vidéo part dans une autre fenêtre
+// (ou attend son tour dans la file quand toutes sont occupées).
 function applyJob() {
-  const job = currentJob;
-  for (const node of document.querySelectorAll('[data-publish]')) {
-    // « Publier maintenant » d'une vidéo YouTube reste cliquable pendant une publication : elle entre dans la file d'attente.
-    const enFile = node.dataset.publish === 'file';
-    node.disabled = (!enFile && !!(job && job.running)) || node.dataset.publishAvailable === '0';
-  }
-  if (!job || !job.path) return;
+  for (const node of document.querySelectorAll('[data-publish]')) node.disabled = node.dataset.publishAvailable === '0';
   // A job's news shows on its own network's tab only (a YouTube failure is
   // not the Facebook Reel's state).
   const tabOf = { facebook: 'facebook', post: 'facebook', image: 'facebook', groups: 'facebook', x: 'x', linkedin: 'linkedin', tiktok: 'tiktok', instagram: 'instagram', snapchat: 'snapchat' };
-  const jobTab = `tab-${tabOf[job.kind] || 'youtube'}`;
-  for (const item of document.querySelectorAll('li.item, li.row')) {
-    if (item.dataset.path !== String(job.path) || !item.say) continue;
-    const tab = item.closest('.tab');
-    if (tab && tab.id !== jobTab) continue;
-    if (job.running) item.say('busy', job.message || 'En cours…');
-    else if (job.error || job.warning) item.say('warn', job.error || job.warning);
-    else if (job.done) item.say('ok', job.message || 'Terminé.');
+  for (const job of jobs.values()) {
+    if (!job || !job.path) continue;
+    const jobTab = `tab-${tabOf[job.kind] || 'youtube'}`;
+    for (const item of document.querySelectorAll('li.item, li.row')) {
+      if (item.dataset.path !== String(job.path) || !item.say) continue;
+      const tab = item.closest('.tab');
+      if (tab && tab.id !== jobTab) continue;
+      if (job.running) item.say('busy', job.message || 'En cours…');
+      else if (job.error || job.warning) item.say('warn', job.error || job.warning);
+      else if (job.done) item.say('ok', job.message || 'Terminé.');
+    }
   }
 }
 
-function renderJob(job) {
-  const box = $('job');
+function jobCard(voie) {
+  let box = document.querySelector(`#jobs [data-voie="${voie}"]`);
+  if (box) return box;
+  box = document.createElement('section');
+  box.className = 'job';
+  box.dataset.voie = voie;
+  const clear = Object.assign(document.createElement('button'), { className: 'icon-close job-clear', title: 'Fermer', textContent: '✕' });
+  clear.setAttribute('aria-label', 'Fermer');
+  clear.addEventListener('click', async () => { await send({ type: 'clearJob', voie }); renderJob(null, voie); });
+  const title = document.createElement('strong');
+  const message = document.createElement('p');
+  const link = Object.assign(document.createElement('a'), { className: 'btn ghost job-link', target: '_blank', rel: 'noopener noreferrer', textContent: 'Ouvrir sur YouTube' });
+  const actions = Object.assign(document.createElement('div'), { className: 'job-actions' });
+  const cancel = Object.assign(document.createElement('button'), { className: 'btn ghost job-unblock', textContent: 'Annuler' });
+  cancel.addEventListener('click', async () => {
+    if (!confirm('Annuler cette publication ? Elle s’arrête tout de suite et ne repartira pas toute seule (bouton « Réessayer » ensuite).')) return;
+    await send({ type: 'cancelJob', voie });
+  });
+  // « Voir » : met devant la fenêtre où cette publication travaille (chaque voie a la sienne, souvent derrière les autres).
+  const voir = Object.assign(document.createElement('button'), { className: 'btn ghost job-voir', textContent: 'Voir' });
+  voir.title = 'Afficher la fenêtre où cette publication est en train de partir';
+  voir.addEventListener('click', async () => {
+    const reply = await send({ type: 'montrerVoie', voie });
+    if (reply && reply.ok && reply.data && reply.data.perdu) {
+      message.textContent = 'La fenêtre de cette publication n’existe plus : rien ne part. Clique « Annuler », puis « Réessayer » sur la publication.';
+    }
+  });
+  actions.append(voir, cancel);
+  box.append(clear, title, message, link, actions);
+  // La voie principale d'abord, puis les autres dans l'ordre.
+  const apres = [...$('jobs').children].find((c) => c.dataset.voie > voie);
+  $('jobs').insertBefore(box, apres || null);
+  return box;
+}
+
+let cheminsVivants = '';
+function renderJob(job, voie = 'yt1') {
   const wasRunning = jobRunning;
-  currentJob = job || null;
-  jobRunning = !!(job && job.running);
-  box.hidden = !job;
-  if (job) {
-    box.className = `job ${job.running ? 'running' : job.error ? 'error' : job.warning ? 'warning' : 'done'}`;
-    $('job-title').textContent = job.running ? `En cours : ${job.title || 'publication'}`
+  if (job) jobs.set(voie, job); else jobs.delete(voie);
+  jobRunning = [...jobs.values()].some((j) => j && j.running);
+  // Les posts « en cours » se lisent d'après les publications vivantes (interrompu ou non) : la liste suit quand elles changent.
+  const vivants = [...jobs.values()].filter((j) => j && j.running && j.path).map((j) => j.path).sort().join('|');
+  if (vivants !== cheminsVivants) { cheminsVivants = vivants; renderPosts(); }
+  const box = job ? jobCard(voie) : document.querySelector(`#jobs [data-voie="${voie}"]`);
+  if (!job) { if (box) box.remove(); }
+  else {
+    const running = !!job.running;
+    box.className = `job ${running ? 'running' : job.error ? 'error' : job.warning ? 'warning' : 'done'}`;
+    box.querySelector('strong').textContent = running ? `En cours : ${job.title || 'publication'}`
       : job.error ? 'Échec' : job.warning ? 'Terminé avec avertissement' : 'Terminé';
     const jobDetails = [job.channel, job.message].filter(Boolean);
     if (job.warning && !String(job.message || '').includes(job.warning)) jobDetails.push(job.warning);
-    $('job-message').textContent = jobDetails.join(' — ')
-      + (job.running ? ' Tu peux lancer d’autres vidéos YouTube : elles se mettent en file et partent l’une après l’autre.' : '');
-    $('job-link').hidden = !job.youtubeUrl;
-    if (job.youtubeUrl) $('job-link').href = job.youtubeUrl;
-    $('job-clear').hidden = jobRunning;
-    // Stuck for more than 5 minutes without news: offer to unblock.
-    const quiet = Date.now() - (job.updatedAt || job.startedAt || Date.now());
-    $('job-unblock').hidden = !job.running; // « Annuler »: always there while it runs
-    void quiet;
+    box.querySelector('p').textContent = jobDetails.join(', ');
+    const link = box.querySelector('.job-link');
+    link.hidden = !job.youtubeUrl;
+    if (job.youtubeUrl) link.href = job.youtubeUrl;
+    box.querySelector('.job-clear').hidden = running;
+    box.querySelector('.job-unblock').hidden = !running; // « Annuler »: always there while it runs
+    box.querySelector('.job-voir').hidden = !running;
   }
   applyJob();
-  clearTimeout(jobHideTimer);
+  clearTimeout(jobHideTimers.get(voie));
   if (job && job.done && !job.error && !job.warning && !job.running) {
-    jobHideTimer = setTimeout(async () => { await send({ type: 'clearJob' }); renderJob(null); }, 6000);
+    jobHideTimers.set(voie, setTimeout(async () => { await send({ type: 'clearJob', voie }); renderJob(null, voie); }, 6000));
   }
   if (wasRunning && !jobRunning) { renderFolder(); renderApp(); renderPosts(); }
 }
 
-$('job-unblock').addEventListener('click', async () => {
-  if (!confirm('Annuler cette publication ? Elle s’arrête tout de suite et ne repartira pas toute seule (bouton « Réessayer » ensuite).')) return;
-  await send({ type: 'cancelJob' });
-});
-setInterval(() => { if (currentJob && currentJob.running) renderJob(currentJob); }, 30000);
+async function renderJobs() {
+  const tout = await chrome.storage.session.get(null);
+  for (const [cle, job] of Object.entries(tout)) {
+    const voie = voieDeCle(cle);
+    if (voie) renderJob(job, voie);
+  }
+}
+
+setInterval(() => { for (const [voie, job] of jobs) if (job && job.running) renderJob(job, voie); }, 30000);
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'session' && changes.job) renderJob(changes.job.newValue);
+  if (area === 'session') {
+    for (const [cle, change] of Object.entries(changes)) {
+      const voie = voieDeCle(cle);
+      if (voie) renderJob(change.newValue, voie);
+    }
+  }
   // Une vidéo entre dans la file d'attente ou en sort : les cartes le disent (pendant un envoi, la fin de l'envoi réaffiche tout).
   if (area === 'local' && changes.fileAttente && !jobRunning) renderFolder();
-});
-
-$('job-clear').addEventListener('click', async () => {
-  await send({ type: 'clearJob' });
-  renderJob(null);
 });
 
 // Version: a downloaded update shows « v1.21.17 → v1.21.18 » until it installs
@@ -3413,8 +3431,7 @@ function start() {
 async function startOnce() {
   if (!(await renderAccount())) { watchLogin(); return; }
   if (!(await renderSubscription({ fresh: true }))) return;
-  const { job } = await chrome.storage.session.get('job');
-  renderJob(job);
+  await renderJobs();
   renderPublishSettings();
   renderNetworks();
   applyNetworks();
@@ -3474,12 +3491,7 @@ function renderSettingSummaries() {
     const net = box.dataset.for;
     const chips = [];
     if (net === 'youtube') {
-      const vis = document.querySelector('#yt-visibility button.active, #yt-visibility [aria-checked="true"]');
-      const visText = vis ? vis.textContent.trim() : 'Non répertoriée';
-      chips.push(sumChip('eye', visText, true, `Visibilité : ${visText}`));
-      const when = document.querySelector('input[name="yt-when"]:checked');
-      const fixed = when && when.value === 'times';
-      chips.push(sumChip(fixed ? 'clock' : 'bolt', fixed ? 'Heures fixes' : 'Dès que prêt', true, fixed ? 'Publication à heures fixes' : 'Publication dès que c’est prêt'));
+      chips.push(sumChip('clock', 'Heure KappGen', true, 'Publique à l’heure donnée par KappGen (tout de suite si elle est passée)'));
       chips.push(sumChip('comment', 'Épinglé', checkedOf('#yt-comment'), 'Commentaire épinglé'));
     } else if (net === 'facebook') {
       chips.push(sumChip('play', 'YouTube', checkedOf('#fb-from-yt'), 'Mes vidéos YouTube sur ma Page'));
