@@ -37,11 +37,13 @@ test('« privée » l’emporte toujours', () => {
   assert.equal(choisir({ demandee: 'PRIVATE', plannedAt: at(12, 8), now: at(5, 8) }).visibility, 'PRIVATE');
 });
 
-test('sans date KappGen : heure du panneau, puis réglages de la chaîne avant le panneau (NORME-PUBLICATION.md)', () => {
+test('sans date KappGen : heure choisie pour la vidéo, puis réglages de la chaîne, sinon publique', () => {
   assert.deepEqual(choisir({ demandee: 'CHANNEL', canal: 'UNLISTED', scheduleAt: at(7, 9), now: at(5, 9) }), { visibility: 'SCHEDULE', scheduleAt: at(7, 9) });
   assert.deepEqual(choisir({ demandee: 'CHANNEL', fichier: 'SCHEDULE', canal: 'UNLISTED', now: at(5, 9) }), { visibility: 'SCHEDULE', scheduleAt: null });
   assert.deepEqual(choisir({ demandee: 'CHANNEL', canal: 'PUBLIC', now: at(5, 9) }), { visibility: 'PUBLIC', scheduleAt: null });
-  assert.deepEqual(choisir({ demandee: 'CHANNEL', now: at(5, 9) }), { visibility: 'UNLISTED', scheduleAt: null });
+  // 06/11 : plus de réglage du panneau ; sans réglage KappGen, publique (jamais « non répertoriée » par défaut).
+  assert.deepEqual(choisir({ demandee: 'CHANNEL', canal: 'UNLISTED', now: at(5, 9) }), { visibility: 'PUBLIC', scheduleAt: null });
+  assert.deepEqual(choisir({ demandee: 'CHANNEL', now: at(5, 9) }), { visibility: 'PUBLIC', scheduleAt: null });
   // « Publier maintenant » : le choix de la personne, sauf réglage de chaîne explicite (autre que « programmée »)
   assert.equal(choisir({ demandee: 'UNLISTED', fichier: 'PUBLIC', now: at(5, 9) }).visibility, 'PUBLIC');
   assert.equal(choisir({ demandee: 'PUBLIC', fichier: 'SCHEDULE', now: at(5, 9) }).visibility, 'PUBLIC');

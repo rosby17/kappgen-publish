@@ -107,7 +107,7 @@ test('miniature contrôlée sur YouTube : même image ou pas', () => {
 
 test('le passage automatique contrôle la miniature sans ouvrir Studio', () => {
   assert.match(fond, /KappMajVideo\.miniatureAVerifier\(v, Date\.now\(\)\)/);
-  const bloc = fond.slice(fond.indexOf('async function verifyThumb'), fond.indexOf('// "Chrome connecté"'));
+  const bloc = fond.slice(fond.indexOf('async function verifyThumb'), fond.indexOf('// Commandes du panneau, exécutées dans CETTE voie'));
   assert.match(bloc, /folder\('thumbCheck'/);
   assert.match(bloc, /status: 'thumbCheck'/);
   assert.doesNotMatch(bloc, /studio\.js|chrome\.tabs|injectScripts/);

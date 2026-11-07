@@ -802,3 +802,18 @@ test('profil sans accès à la chaîne : la vidéo est rendue (release), ni en �
   const kept = await KappDossier.mark(path, 'release');
   assert.equal(kept.status, 'published');
 });
+
+test('les extraits du dossier sources/ ne sont pas des vidéos à publier', async () => {
+  const { KappDossier } = library();
+  const disk = new MemoryDirectory('BALLON-VIRAL');
+  const doc = disk.dir('doc-01-cristiano-ronaldo');
+  doc.file('doc-01.mp4', '', { size: 60 * 1024 * 1024, lastModified: 1 });
+  doc.file('publication.md', '## Titre\nLe maillot 7\n');
+  const extraits = doc.dir('sources').dir('videos');
+  extraits.file('01d-madere-rues.mp4', '', { size: 22 * 1024 * 1024, lastModified: 1 });
+  extraits.file('02b-sporting-premier-but.mp4', '', { size: 7 * 1024 * 1024, lastModified: 1 });
+  KappDossier._setTestRoot(disk);
+  const queue = await KappDossier.scan({ now: 10_000_000 });
+  assert.equal(queue.videos.map((item) => item.relative_path.split('/').pop()).join(','), 'doc-01.mp4');
+  assert.equal(queue.videos[0].title, 'Le maillot 7');
+});
