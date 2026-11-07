@@ -8,7 +8,7 @@
 // How a folder is understood, whatever tool made the videos:
 //   - a video is an .mp4 / .m4v of at least 5 MB;
 //   - folders starting with "." or "_" and work folders (build, tournage,
-//     flow, sprites, images, scripts...) are skipped;
+//     flow, sprites, images, scripts, sources...) are skipped;
 //   - renders/, export/, final/... : the heaviest video of the folder is the
 //     project's video; its sheet sits in that folder or in the project folder;
 //   - a folder holding a sheet (publication.md, youtube.md, metadata.json...)
@@ -54,7 +54,9 @@ const KappDossier = (() => {
   // Technical folders only (work files, caches, raw footage); any other
   // folder, whatever its name, is looked into.
   const SKIP = new Set(['node modules', 'build', 'flow', 'neuves', 'sprites', 'src', 'wav', 'cache',
-    'tmp', 'temp', 'captures', 'frames', 'proxy', 'proxies', 'rushes', 'brut', 'raw', 'library', 'bibliotheque']);
+    'tmp', 'temp', 'captures', 'frames', 'proxy', 'proxies', 'rushes', 'brut', 'raw', 'library', 'bibliotheque',
+    // extraits téléchargés pour monter une vidéo (Ballon Viral doc-01/sources/videos : 74 cartes « sans miniature », 07/11)
+    'source', 'sources']);
   // Text files that are never the text of a publication.
   const NOT_A_SHEET = /^(deja publiee|readme|lisez|prompt|script|journal|notes?|chapitres?|timing|transcri|sous titres?|subtitles?|modele|template|images a generer|planning|voix|sources?)\b/;
   const FALLBACK_MAX = 12000; // a description, not a script
