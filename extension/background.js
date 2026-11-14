@@ -84,8 +84,16 @@ async function isLocalApp() {
   return host === 'localhost' || host === '127.0.0.1';
 }
 
+// Jeton propre à CET appareil (1.28.0, Roosevelt 14/11) : l'extension se connecte une fois et le reste, même quand on se
+// déconnecte du site ou qu'on rafraîchit la page. Gardé dans chrome.storage.local, envoyé dans l'en-tête X-KappGen-Appareil.
+const CLE_JETON = 'kgAppareil';
+async function jetonAppareil() {
+  try { return (await localGet(CLE_JETON))[CLE_JETON] || ''; } catch { return ''; }
+}
+
 async function api(path, options = {}) {
   const base = await appUrl();
+  const jeton = await jetonAppareil();
   let response;
   let data;
   const controller = new AbortController();
@@ -93,7 +101,7 @@ async function api(path, options = {}) {
   try {
     response = await fetch(`${base}/api${path}`, {
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(jeton ? { 'X-KappGen-Appareil': jeton } : {}) },
       ...options,
       signal: options.signal || controller.signal,
     });
@@ -3606,15 +3614,45 @@ async function verifyThumb(v) {
 }
 
 
+// Compte connecté. Avec un jeton d'appareil, c'est lui qui compte ; sans jeton mais connecté sur le site (Google ou mot de passe),
+// l'extension en demande un, une fois : elle restera connectée même après une déconnexion du site.
+async function compteConnecte() {
+  const avant = await jetonAppareil();
+  let compte;
+  try {
+    compte = await api('/auth/session');
+  } catch (error) {
+    if (error.status !== 401) throw error;
+    if (avant) await chrome.storage.local.remove(CLE_JETON);   // jeton révoqué (mot de passe changé…) : on retente avec le site
+    if (!avant) return null;
+    try { compte = await api('/auth/session'); } catch (e) { if (e.status === 401) return null; throw e; }
+  }
+  if (!(await jetonAppareil())) {
+    try {
+      const r = await api('/auth/appareil', { method: 'POST' });
+      if (r && r.jeton) await chrome.storage.local.set({ [CLE_JETON]: r.jeton });
+    } catch { /* serveur plus ancien : on reste sur le cookie du site */ }
+  }
+  return compte;
+}
+
 // Commandes du panneau, exécutées dans CETTE voie (aiguillage : commandesPour).
 function commandes(message, sender) {
   return {
     consumeBridgeGrant: () => consumeBridgeGrant(message.token, sender),
-    account: () => api('/auth/session').catch((error) => { if (error.status === 401) return null; throw error; }),
-    login: () => api('/auth/login', { method: 'POST', body: JSON.stringify({ email: message.email, password: message.password }) }),
+    account: () => compteConnecte(),
+    login: async () => {
+      const reponse = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email: message.email, password: message.password, appareil: true }) });
+      if (reponse && reponse.jeton) await chrome.storage.local.set({ [CLE_JETON]: reponse.jeton });
+      return reponse;
+    },
     // Thème choisi dans l'extension : enregistré aussi sur le compte KappGen (« » = automatique), comme sur le site et le logiciel.
     setTheme: () => api('/profil/theme', { method: 'POST', body: JSON.stringify({ theme: ['clair', 'sombre'].includes(message.theme) ? message.theme : '' }) }),
-    logout: async () => { await chrome.storage.local.remove(['publishAccess', 'pendingOrder']); return api('/auth/logout', { method: 'POST' }); },
+    logout: async () => {
+      const reponse = await api('/auth/logout', { method: 'POST' }).catch(() => ({ ok: true }));
+      await chrome.storage.local.remove(['publishAccess', 'pendingOrder', CLE_JETON]);
+      return reponse;
+    },
     status: () => api('/studio-upload/status'),
     queue: async () => (await isLocalApp() ? api('/studio-upload/queue') : { videos: [], host_storage_configured: false }),
     folderQueue: () => folderQueue(),

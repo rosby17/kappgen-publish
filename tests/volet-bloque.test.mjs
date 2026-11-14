@@ -14,10 +14,12 @@ const extraire = (source, debut) => {
   return source.slice(i, source.indexOf('\n}\n', i) + 2);
 };
 const jamais = () => new Promise(() => {});
+const envoi = (source) => [source.slice(source.indexOf('const SERVICE_ENDORMI'), source.indexOf('\n', source.indexOf('const SERVICE_ENDORMI'))),
+  extraire(source, 'function sendOnce('), extraire(source, 'async function send(')].join('\n');
 
 test('le panneau abandonne un service qui ne répond jamais et le dit (stuck)', { timeout: 2000 }, async () => {
   const chrome = { runtime: { sendMessage: () => {}, lastError: null } };   // aucune réponse, jamais
-  const send = new Function('chrome', `${extraire(panneau, 'function send(')}; return send;`)(chrome);
+  const send = new Function('chrome', `${envoi(panneau)}; return send;`)(chrome);
   const reponse = await send({ type: 'account' }, { timeout: 30 });
   assert.equal(reponse.ok, false);
   assert.equal(reponse.stuck, true);
@@ -25,7 +27,7 @@ test('le panneau abandonne un service qui ne répond jamais et le dit (stuck)', 
 
 test('une réponse arrivée à temps passe telle quelle', async () => {
   const chrome = { runtime: { sendMessage: (_m, rappel) => setTimeout(() => rappel({ ok: true, data: { email: 'a@b.c' } }), 5), lastError: null } };
-  const send = new Function('chrome', `${extraire(panneau, 'function send(')}; return send;`)(chrome);
+  const send = new Function('chrome', `${envoi(panneau)}; return send;`)(chrome);
   assert.deepEqual(await send({ type: 'account' }, { timeout: 200 }), { ok: true, data: { email: 'a@b.c' } });
 });
 
