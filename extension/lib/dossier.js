@@ -98,8 +98,15 @@ const KappDossier = (() => {
     });
   }
 
-  const saveRoot = (handle) => kv('readwrite', (store) => store.put(handle, 'root'));
-  const loadRoot = () => kv('readonly', (store) => store.get('root'));
+  // Un dossier choisi dans Chrome remplace la marque prêtée par KappGen (et inversement : voir KappDistant.choisir).
+  const distant = typeof KappDistant !== 'undefined' ? KappDistant : null;
+  const saveRoot = async (handle) => {
+    if (handle && handle.distant) return undefined;
+    if (distant) await distant.oublier();
+    return kv('readwrite', (store) => store.put(handle, 'root'));
+  };
+  // Marque prêtée par KappGen (lib/kappgen-distant.js) d'abord : plus de dossier à choisir dans Chrome.
+  const loadRoot = async () => (distant && await distant.racine().catch(() => null)) || kv('readonly', (store) => store.get('root'));
 
   // The main folder ("root") serves every network. Each network may have its
   // own folder instead: YouTube (its videos), Facebook (posts and Reels,
@@ -126,7 +133,7 @@ const KappDossier = (() => {
   async function stateOf(handle) {
     if (!handle) return { state: 'none' };
     const testing = handle === testRoot || Object.values(testNets).includes(handle);
-    return { state: testing ? 'granted' : await handle.queryPermission({ mode: 'readwrite' }), name: handle.name };
+    return { state: testing ? 'granted' : await handle.queryPermission({ mode: 'readwrite' }), name: handle.name, distant: !!handle.distant };
   }
 
   // Every folder in use: { main, youtube, facebook, … }, each { state, name,
@@ -201,7 +208,8 @@ const KappDossier = (() => {
     const parts = inside.split('/').filter(Boolean);
     const name = parts.pop();
     for (const part of parts) dir = await dir.getDirectoryHandle(part);
-    return (await dir.getFileHandle(name)).getFile();
+    const handle = await dir.getFileHandle(name);
+    return handle.fichierComplet ? handle.fichierComplet() : handle.getFile();   // marque prêtée par KappGen : le vrai fichier
   }
 
   async function readTrackingFile(dir, name) {

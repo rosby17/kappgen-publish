@@ -519,6 +519,18 @@ function showFolder(prefix, access) {
   status.textContent = access.state === 'prompt'
     ? `« ${access.name} » : Chrome redemande l’accès. Clique « Autoriser l’accès » puis « Autoriser à chaque visite ».`
     : '';
+  if (!prefix) {
+    // Marque prêtée par KappGen : rien à autoriser dans Chrome ; seulement KappGen à garder ouvert.
+    $('folder-chosen').querySelector('.ft-meta').lastChild.textContent = access.distant
+      ? 'Donnée par KappGen · utilisée par tous tes réseaux' : 'Accès autorisé · utilisé par tous tes réseaux';
+    if (access.distant && !granted) {
+      status.hidden = false;
+      status.textContent = `« ${access.name} » : KappGen ne répond pas. Ouvre KappGen sur cet ordinateur : il donne les vidéos de ta marque à l’extension.`;
+      $('grant').hidden = true;
+      $('pick').hidden = false;
+    }
+    $('folder-marques-box').hidden = granted || !(kappgenLocal && kappgenLocal.fichiers);
+  }
 }
 
 async function renderAccess() {
@@ -2510,6 +2522,48 @@ async function renderKappgenLocal() {
   $('folder-kappgen-path').textContent = kappgenLocal.dossier;
   $('pick').textContent = 'Choisir le dossier de mes marques';
   $('folder-hint').hidden = true;
+  renderMarquesKappgen();
+}
+
+// KappGen prête les fichiers de ses marques (lib/kappgen-distant.js) : la personne choisit sa marque dans une liste, sans choisir de
+// dossier dans Chrome. Le choix du dossier reste possible en dessous (KappGen fermé, autre organisation).
+async function renderMarquesKappgen() {
+  const box = $('folder-marques-box');
+  const liste = $('folder-marques');
+  const marques = kappgenLocal && kappgenLocal.fichiers ? await KappDistant.marques(kappgenLocal.port) : null;
+  liste.textContent = '';
+  if (!marques || !marques.length) { box.hidden = true; return; }
+  box.hidden = !$('folder-chosen').hidden;
+  const actuelle = await KappDistant.reglage();
+  for (const m of marques) {
+    const bouton = document.createElement('button');
+    bouton.type = 'button';
+    bouton.className = `btn ${actuelle && actuelle.id === m.id ? 'primary' : 'secondary'}`;
+    bouton.textContent = m.nom;
+    bouton.title = m.dossier;
+    bouton.addEventListener('click', () => choisirMarqueKappgen(m));
+    liste.append(bouton);
+  }
+}
+
+async function choisirMarqueKappgen(m) {
+  await KappDistant.choisir({ id: m.id, nom: m.nom, dossier: m.dossier, nomDossier: m.nom_dossier, port: kappgenLocal.port });
+  rootHandle = await KappDossier.loadRoot().catch(() => null);
+  const etat = rootHandle ? await rootHandle.queryPermission() : 'denied';
+  $('folder-status').hidden = false;
+  $('folder-status').className = etat === 'granted' ? 'status' : 'status error';
+  $('folder-status').textContent = etat === 'granted'
+    ? `« ${m.nom} » : KappGen donne ses vidéos et ses posts à l’extension. Ce qui est déjà prêt attend ton clic ; la suite part toute seule.`
+    : `« ${m.nom} » : KappGen ne répond pas. Ouvre KappGen sur cet ordinateur.`;
+  if (etat !== 'granted') return;
+  // Comme un dossier choisi : la surveillance commence maintenant, ce qui est déjà dans la marque attend un clic.
+  const current = await settings();
+  current.watchSince = Date.now();
+  await chrome.storage.local.set({ folder: current });
+  await dossierChoisi();
+  send({ type: 'autoNow' });
+  renderFolder();
+  renderPosts();
 }
 $('folder-kappgen-copy').addEventListener('click', async () => {
   if (!kappgenLocal) return;
@@ -2518,7 +2572,28 @@ $('folder-kappgen-copy').addEventListener('click', async () => {
 });
 renderKappgenLocal();
 
+// Dans le panneau latéral, Chrome (Windows) ne peut pas afficher sa question « Modifier les fichiers ? » : il annule le choix du
+// dossier sans rien dire (AbortError, rien n'est enregistré ; Roosevelt, 14/11). La même page ouverte dans un onglet, elle, affiche
+// la question. Donc : quand le panneau n'obtient pas l'accès, on rouvre la page dans un onglet, sur la carte du dossier.
+const EN_ONGLET = new URLSearchParams(location.search).has('onglet');
+function choisirDansUnOnglet(raison) {
+  $('folder-status').hidden = false;
+  $('folder-status').className = 'status';
+  $('folder-status').textContent = `${raison} On continue dans un onglet : clique « Choisir le dossier de mes marques » puis « Modifier les fichiers ».`;
+  chrome.tabs.create({ url: chrome.runtime.getURL('sidepanel.html?onglet=1') });
+}
+// Le dossier vient d'être choisi ou autorisé (ici ou dans l'onglet) : les autres pages ouvertes de l'extension se remettent à jour.
+const dossierChoisi = () => chrome.storage.local.set({ dossierChoisi: Date.now() });
+function fermerOngletApresChoix() {
+  if (!EN_ONGLET) return;
+  $('folder-status').hidden = false;
+  $('folder-status').className = 'status';
+  $('folder-status').textContent = 'C’est fait : le panneau KappGen Publish a ton dossier. Cet onglet se ferme tout seul.';
+  setTimeout(() => window.close(), 3000);
+}
+
 async function pickFolder() {
+  const debut = Date.now();
   try {
     const choisi = await window.showDirectoryPicker({ id: 'kappgen-videos', mode: 'readwrite', startIn: 'documents' });
     // Dossier choisi au-dessus des marques (Documents, Motion…) : on se place sur la racine des marques posée par KappGen.
@@ -2532,6 +2607,8 @@ async function pickFolder() {
     const avant = await KappDossier.loadRoot().catch(() => null);
     const meme = avant && (await avant.isSameEntry(rootHandle).catch(() => false));
     await KappDossier.saveRoot(rootHandle);
+    await dossierChoisi();
+    fermerOngletApresChoix();
     if (meme) { renderFolder(); renderPosts(); return; }   // même dossier choisi de nouveau : rien ne repart de zéro
     // Watching starts now: what is already in the folder waits for a click.
     const current = await settings();
@@ -2539,6 +2616,12 @@ async function pickFolder() {
     await chrome.storage.local.set({ folder: current });
     send({ type: 'autoNow' }); // a chosen folder is published right away
   } catch (error) {
+    // Annulé par Chrome lui-même (panneau latéral) ou par la personne : impossible de les distinguer. Au-delà d'une seconde la
+    // fenêtre de choix s'est ouverte ; dans le panneau on passe alors par un onglet, où Chrome peut poser sa question.
+    if (error && error.name === 'AbortError' && !EN_ONGLET && Date.now() - debut > 1000) {
+      choisirDansUnOnglet('Chrome n’a pas pu demander l’accès au dossier depuis le panneau.');
+      return;
+    }
     if (!error || error.name !== 'AbortError') {
       $('folder-status').hidden = false;
       $('folder-status').textContent = String((error && error.message) || error);
@@ -2548,7 +2631,19 @@ async function pickFolder() {
   renderPosts();
 }
 $('pick').addEventListener('click', pickFolder);
-$('pick-change').addEventListener('click', pickFolder);
+$('pick-change').addEventListener('click', async () => {
+  // Marque prêtée par KappGen : « Changer » rouvre la liste des marques (et le choix d'un dossier en dessous).
+  if (rootHandle && rootHandle.distant) {
+    await KappDistant.oublier();
+    rootHandle = await KappDossier.loadRoot().catch(() => null);
+    await dossierChoisi();
+    renderFolder();
+    renderPosts();
+    renderMarquesKappgen();
+    return;
+  }
+  pickFolder();
+});
 
 // One folder per network (Réglages → Dossiers): by default the main one.
 const FOLDER_NETS = [
@@ -2737,7 +2832,9 @@ KappDossier.loadRoot().then((handle) => { rootHandle = handle; }).catch(() => {}
 
 $('grant').addEventListener('click', async () => {
   const handle = rootHandle || await KappDossier.loadRoot();
-  if (handle) await handle.requestPermission({ mode: 'readwrite' }).catch(() => {});
+  const etat = handle ? await handle.requestPermission({ mode: 'readwrite' }).catch(() => 'denied') : 'none';
+  if (etat === 'granted') { await dossierChoisi(); fermerOngletApresChoix(); }
+  else if (handle && !handle.distant && !EN_ONGLET) { choisirDansUnOnglet('Chrome n’a pas pu redonner l’accès depuis le panneau.'); return; }
   renderFolder();
   send({ type: 'autoNow' });
 });
@@ -3331,8 +3428,15 @@ $('auto-resume').addEventListener('click', async () => {
     return;
   }
   const state = await main.requestPermission({ mode: 'readwrite' }).catch(() => 'denied');
+  if (state !== 'granted' && !main.distant && !EN_ONGLET) {
+    $('paused').hidden = true;
+    document.querySelector('.topbar [data-tab="settings"]').click();
+    choisirDansUnOnglet('Chrome n’a pas pu redonner l’accès depuis le panneau.');
+    return;
+  }
+  if (state === 'granted') await dossierChoisi();
   if (state !== 'granted') {
-    $('auto-resume').textContent = 'Accès refusé : clique de nouveau puis « Autoriser à chaque visite »';
+    $('auto-resume').textContent = main.distant ? 'KappGen ne répond pas : ouvre KappGen sur cet ordinateur' : 'Accès refusé : clique de nouveau puis « Autoriser à chaque visite »';
     setTimeout(() => { $('auto-resume').textContent = 'Reprendre les publications'; }, 6000);
     return;
   }
@@ -3348,6 +3452,25 @@ $('auto-resume').addEventListener('click', async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && (changes.autoStatus || changes.lastAutoTick || changes.nextDueAt || changes.catchUp || changes.autoPaused)) { renderAutoStatus(); renderPauseButton(); }
 });
+// Dossier choisi ou autorisé dans un onglet : le panneau reprend le nouveau dossier sans qu'on ait à le fermer et le rouvrir.
+chrome.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== 'local' || !changes.dossierChoisi) return;
+  rootHandle = await KappDossier.loadRoot().catch(() => rootHandle);
+  await loadNetHandles().catch(() => {});
+  renderFolder();
+  renderPosts();
+  renderAutoStatus();
+  renderPauseButton();
+});
+// Page ouverte en onglet pour choisir le dossier : on arrive directement sur sa carte.
+if (EN_ONGLET) {
+  window.addEventListener('load', () => {
+    document.querySelector('.topbar [data-tab="settings"]').click();
+    const carte = $('set-folder');
+    carte.scrollIntoView({ block: 'start' });
+    carte.classList.add('flash');
+  });
+}
 setInterval(() => { if (!document.hidden) renderAutoStatus(); }, 30000);
 
 // Evening summary e-mail: off unless the creator ticks it. Ticking it never
