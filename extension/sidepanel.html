@@ -379,6 +379,11 @@
         <button id="pick-change" class="btn secondary ft-change" type="button" title="Choisir un autre dossier principal"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h13l-3-3"/><path d="M20 17H7l3 3"/></svg>Changer</button>
       </div>
       <p id="folder-status" class="status" role="status" aria-live="polite" hidden></p>
+      <div id="folder-marques-box" class="folder-kappgen" hidden>
+        <p class="small"><b>Ta marque</b></p>
+        <p class="muted small">KappGen, ouvert sur cet ordinateur, donne à l’extension les vidéos et les posts de la marque choisie. Aucun dossier à choisir.</p>
+        <div id="folder-marques" class="folder-marques"></div>
+      </div>
       <div id="folder-actions" class="actions">
         <button id="pick" class="btn primary wide">Choisir le dossier principal</button>
         <button id="grant" class="btn primary wide" hidden>Autoriser l’accès</button>
@@ -634,6 +639,7 @@ Ingrédients : …</pre>
   <script src="lib/schedule.js"></script>
   <script src="lib/rythme.js"></script>
   <script src="lib/historique.js"></script>
+  <script src="lib/kappgen-distant.js"></script>
   <script src="lib/dossier.js"></script>
   <script src="lib/kappgen-local.js"></script>
   <script src="lib/mise-a-jour.js"></script>

@@ -519,6 +519,18 @@ function showFolder(prefix, access) {
   status.textContent = access.state === 'prompt'
     ? `« ${access.name} » : Chrome redemande l’accès. Clique « Autoriser l’accès » puis « Autoriser à chaque visite ».`
     : '';
+  if (!prefix) {
+    // Marque prêtée par KappGen : rien à autoriser dans Chrome ; seulement KappGen à garder ouvert.
+    $('folder-chosen').querySelector('.ft-meta').lastChild.textContent = access.distant
+      ? 'Donnée par KappGen · utilisée par tous tes réseaux' : 'Accès autorisé · utilisé par tous tes réseaux';
+    if (access.distant && !granted) {
+      status.hidden = false;
+      status.textContent = `« ${access.name} » : KappGen ne répond pas. Ouvre KappGen sur cet ordinateur : il donne les vidéos de ta marque à l’extension.`;
+      $('grant').hidden = true;
+      $('pick').hidden = false;
+    }
+    $('folder-marques-box').hidden = granted || !(kappgenLocal && kappgenLocal.fichiers);
+  }
 }
 
 async function renderAccess() {
@@ -2510,6 +2522,48 @@ async function renderKappgenLocal() {
   $('folder-kappgen-path').textContent = kappgenLocal.dossier;
   $('pick').textContent = 'Choisir le dossier de mes marques';
   $('folder-hint').hidden = true;
+  renderMarquesKappgen();
+}
+
+// KappGen prête les fichiers de ses marques (lib/kappgen-distant.js) : la personne choisit sa marque dans une liste, sans choisir de
+// dossier dans Chrome. Le choix du dossier reste possible en dessous (KappGen fermé, autre organisation).
+async function renderMarquesKappgen() {
+  const box = $('folder-marques-box');
+  const liste = $('folder-marques');
+  const marques = kappgenLocal && kappgenLocal.fichiers ? await KappDistant.marques(kappgenLocal.port) : null;
+  liste.textContent = '';
+  if (!marques || !marques.length) { box.hidden = true; return; }
+  box.hidden = !$('folder-chosen').hidden;
+  const actuelle = await KappDistant.reglage();
+  for (const m of marques) {
+    const bouton = document.createElement('button');
+    bouton.type = 'button';
+    bouton.className = `btn ${actuelle && actuelle.id === m.id ? 'primary' : 'secondary'}`;
+    bouton.textContent = m.nom;
+    bouton.title = m.dossier;
+    bouton.addEventListener('click', () => choisirMarqueKappgen(m));
+    liste.append(bouton);
+  }
+}
+
+async function choisirMarqueKappgen(m) {
+  await KappDistant.choisir({ id: m.id, nom: m.nom, dossier: m.dossier, nomDossier: m.nom_dossier, port: kappgenLocal.port });
+  rootHandle = await KappDossier.loadRoot().catch(() => null);
+  const etat = rootHandle ? await rootHandle.queryPermission() : 'denied';
+  $('folder-status').hidden = false;
+  $('folder-status').className = etat === 'granted' ? 'status' : 'status error';
+  $('folder-status').textContent = etat === 'granted'
+    ? `« ${m.nom} » : KappGen donne ses vidéos et ses posts à l’extension. Ce qui est déjà prêt attend ton clic ; la suite part toute seule.`
+    : `« ${m.nom} » : KappGen ne répond pas. Ouvre KappGen sur cet ordinateur.`;
+  if (etat !== 'granted') return;
+  // Comme un dossier choisi : la surveillance commence maintenant, ce qui est déjà dans la marque attend un clic.
+  const current = await settings();
+  current.watchSince = Date.now();
+  await chrome.storage.local.set({ folder: current });
+  await dossierChoisi();
+  send({ type: 'autoNow' });
+  renderFolder();
+  renderPosts();
 }
 $('folder-kappgen-copy').addEventListener('click', async () => {
   if (!kappgenLocal) return;
@@ -2577,7 +2631,19 @@ async function pickFolder() {
   renderPosts();
 }
 $('pick').addEventListener('click', pickFolder);
-$('pick-change').addEventListener('click', pickFolder);
+$('pick-change').addEventListener('click', async () => {
+  // Marque prêtée par KappGen : « Changer » rouvre la liste des marques (et le choix d'un dossier en dessous).
+  if (rootHandle && rootHandle.distant) {
+    await KappDistant.oublier();
+    rootHandle = await KappDossier.loadRoot().catch(() => null);
+    await dossierChoisi();
+    renderFolder();
+    renderPosts();
+    renderMarquesKappgen();
+    return;
+  }
+  pickFolder();
+});
 
 // One folder per network (Réglages → Dossiers): by default the main one.
 const FOLDER_NETS = [
@@ -2768,7 +2834,7 @@ $('grant').addEventListener('click', async () => {
   const handle = rootHandle || await KappDossier.loadRoot();
   const etat = handle ? await handle.requestPermission({ mode: 'readwrite' }).catch(() => 'denied') : 'none';
   if (etat === 'granted') { await dossierChoisi(); fermerOngletApresChoix(); }
-  else if (handle && !EN_ONGLET) { choisirDansUnOnglet('Chrome n’a pas pu redonner l’accès depuis le panneau.'); return; }
+  else if (handle && !handle.distant && !EN_ONGLET) { choisirDansUnOnglet('Chrome n’a pas pu redonner l’accès depuis le panneau.'); return; }
   renderFolder();
   send({ type: 'autoNow' });
 });
@@ -3362,7 +3428,7 @@ $('auto-resume').addEventListener('click', async () => {
     return;
   }
   const state = await main.requestPermission({ mode: 'readwrite' }).catch(() => 'denied');
-  if (state !== 'granted' && !EN_ONGLET) {
+  if (state !== 'granted' && !main.distant && !EN_ONGLET) {
     $('paused').hidden = true;
     document.querySelector('.topbar [data-tab="settings"]').click();
     choisirDansUnOnglet('Chrome n’a pas pu redonner l’accès depuis le panneau.');
@@ -3370,7 +3436,7 @@ $('auto-resume').addEventListener('click', async () => {
   }
   if (state === 'granted') await dossierChoisi();
   if (state !== 'granted') {
-    $('auto-resume').textContent = 'Accès refusé : clique de nouveau puis « Autoriser à chaque visite »';
+    $('auto-resume').textContent = main.distant ? 'KappGen ne répond pas : ouvre KappGen sur cet ordinateur' : 'Accès refusé : clique de nouveau puis « Autoriser à chaque visite »';
     setTimeout(() => { $('auto-resume').textContent = 'Reprendre les publications'; }, 6000);
     return;
   }
