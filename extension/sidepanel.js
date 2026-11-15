@@ -5,15 +5,27 @@
 const $ = (id) => document.getElementById(id);
 
 // timeout : au-delà, le service de l'extension est tenu pour bloqué (stuck) au lieu d'attendre sans fin.
-function send(message, { timeout = 0 } = {}) {
+// « Could not establish connection. Receiving end does not exist » : le service de l'extension se réveille (Chrome l'endort, ou
+// l'extension vient d'être mise à jour). Ce n'est pas une déconnexion : on réessaie quelques fois avant de parler d'erreur.
+const SERVICE_ENDORMI = /Receiving end does not exist|Could not establish connection|message port closed/i;
+function sendOnce(message, timeout) {
   return new Promise((resolve) => {
     const timer = timeout ? setTimeout(() => resolve({ ok: false, stuck: true, error: 'KappGen Publish ne répond plus.' }), timeout) : 0;
     chrome.runtime.sendMessage(message, (reply) => {
       clearTimeout(timer);
       const error = chrome.runtime.lastError;
-      resolve(error ? { ok: false, error: error.message || 'Le service KappGen Publish ne répond pas.' } : reply);
+      resolve(error ? { ok: false, asleep: SERVICE_ENDORMI.test(error.message || ''), error: error.message || 'Le service KappGen Publish ne répond pas.' } : reply);
     });
   });
+}
+async function send(message, { timeout = 0 } = {}) {
+  let reply;
+  for (let essai = 0; essai < 6; essai += 1) {
+    reply = await sendOnce(message, timeout);
+    if (!reply || !reply.asleep) return reply;
+    await new Promise((r) => setTimeout(r, 400 * (essai + 1)));
+  }
+  return { ok: false, stuck: true, error: 'KappGen Publish redémarre. Rouvre le panneau dans un instant.' };
 }
 
 const size = (bytes) => (!bytes ? '' : bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} Go` : `${Math.round(bytes / 1e6)} Mo`);
