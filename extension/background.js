@@ -189,8 +189,8 @@ async function requireAccess() {
   if (state.active) return state;
   if (state.signedOut) throw new Error('Connecte-toi à ton compte KappGen.');
   if (state.unavailable) throw new Error('Le serveur KappGen n’est pas encore à jour pour KappGen Publish.');
-  if (state.offline) throw new Error('Impossible de vérifier ton abonnement (connexion Internet ?).');
-  throw new Error('Ton abonnement KappGen Publish n’est pas actif : ouvre le panneau pour t’abonner.');
+  if (state.offline) throw new Error('Impossible de vérifier ton accès (connexion Internet ?).');
+  throw new Error('Ton accès KappGen Publish n’est pas actif : ouvre le panneau et reconnecte-toi à ton compte KappGen (c’est gratuit).');
 }
 
 // ------------------------------------------------------- publishing recipe
@@ -259,7 +259,7 @@ async function publishRecipe({ fresh = false } = {}) {
   } catch (error) {
     if (error.invalidRecipe) throw error;
     if (error.status === 401) throw new Error('Connecte-toi à ton compte KappGen.');
-    if (error.status === 402) throw new Error('Ton abonnement KappGen Publish n’est pas actif : ouvre le panneau pour t’abonner.');
+    if (error.status === 402) throw new Error('Ton accès KappGen Publish n’est pas actif : ouvre le panneau et reconnecte-toi à ton compte KappGen (c’est gratuit).');
     if (error.status === 404) throw new Error('Le serveur KappGen n’est pas encore à jour pour cette version de KappGen Publish.');
     const { publishRecipeCache: stored } = await chrome.storage.local.get('publishRecipeCache');
     const fallback = recipeCache || stored;

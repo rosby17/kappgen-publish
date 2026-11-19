@@ -2522,6 +2522,7 @@ $('rescan').addEventListener('click', () => { renderFolder(); renderApp(); rende
 
 // ---------------------------------------------------------- subscription
 
+const VENTE_ACTIVE = false; // false : KappGen Publish est gratuit, aucun écran de vente
 let paywallBack = false; // paywall opened from the menu while still subscribed
 
 // Main screen only with an active subscription (or the trial); otherwise the
@@ -2530,6 +2531,9 @@ async function renderSubscription({ fresh = false } = {}) {
   const reply = await send({ type: 'access', fresh });
   const state = reply && reply.ok ? reply.data : { active: false, offline: true };
   const active = !!state.active;
+  // KappGen Publish est gratuit pour tout le monde (08/10/2026) : jamais d'écran d'abonnement, de formule ni de pastille.
+  const free = active && (state.free || state.kind === 'free');
+  if (free) paywallBack = false;
   $('main').hidden = !active || paywallBack;
   $('paywall').hidden = active && !paywallBack;
   $('pw-trial').hidden = !state.trial_available;
@@ -2544,23 +2548,29 @@ async function renderSubscription({ fresh = false } = {}) {
   $('pw-subscribe').hidden = active && forever;
   applyOfferPrices(state.offers);
   renderOffers();
+  // Vente arrêtée (KappGen Publish gratuit, 08/10/2026) : l'écran ne montre plus ni formules, ni essai, ni code partenaire,
+  // ni bouton « S'abonner ». Le code de vente reste en place pour pouvoir le rallumer : passer VENTE_ACTIVE à true.
+  if (!VENTE_ACTIVE) {
+    $('offers').hidden = true; $('pw-subscribe').hidden = true; $('pw-trial').hidden = true; $('pw-ref-box').hidden = true;
+  }
   const message = $('pw-message');
   message.className = 'small muted';
   message.textContent = state.unavailable ? 'Le serveur KappGen n’est pas encore à jour : réessaie un peu plus tard.'
     : state.offline ? 'Impossible de vérifier ton abonnement : vérifie ta connexion Internet.'
+      : !VENTE_ACTIVE ? 'Connecte-toi à ton compte KappGen pour utiliser KappGen Publish : c’est gratuit, à vie.'
       : state.trial_available ? `Commence par l’essai gratuit : rien à payer pendant ${trialDays} jours.`
         : waitingPayment ? 'En attente de ton paiement… KappGen Publish se débloque tout seul dès qu’il est confirmé.'
           : 'Choisis ta formule. Paiement sécurisé par carte, PayPal ou Mobile Money.';
   const until = state.expires_at ? new Date(state.expires_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '';
-  $('account-plan').textContent = !active ? 'Gratuit · aucun abonnement actif'
+  $('account-plan').textContent = free ? 'Gratuit à vie' : !active ? 'Gratuit · aucun abonnement actif'
     : forever ? 'Premium · accès à vie'
       : state.kind === 'trial' ? `Essai gratuit : ${state.days_left} jour(s) restant(s)` : `Premium · jusqu’au ${until}`;
   $('account-plan').classList.toggle('free', !active);
-  $('renew').hidden = active && forever;          // accès à vie : plus rien à payer, pas de bouton « Abonnement »
+  $('renew').hidden = free || (active && forever);          // gratuit ou accès à vie : plus rien à payer, pas de bouton « Abonnement »
   if (active && waitingPayment) { waitingPayment = false; stopPaymentWatch(); }
   // Small badge on the title line: the trial, or a subscription ending soon.
   const pill = $('plan-pill');
-  pill.hidden = !(active && state.kind !== 'lifetime' && state.kind !== 'unlimited' && (state.kind === 'trial' || state.days_left <= 3));
+  pill.hidden = free || !(active && state.kind !== 'lifetime' && state.kind !== 'unlimited' && (state.kind === 'trial' || (state.days_left != null && state.days_left <= 3)));
   pill.className = `plan-pill${state.days_left <= 1 ? ' urgent' : ''}`;
   pill.textContent = state.kind === 'trial' ? `Essai gratuit · ${state.days_left} j` : `Abonnement · ${state.days_left} j`;
   $('plan-banner').hidden = true;
