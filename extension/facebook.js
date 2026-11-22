@@ -133,9 +133,13 @@
   // composer is not sufficient: « Enregistrer » closes it too, but creates a
   // draft.  The attempt snapshot survives a Facebook reload and lets the
   // service worker verify that a new matching item appeared in the feed.
-  const snippetOf = (value) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80).toLowerCase();
+  // Compared on letters and digits only: Facebook shows an emoji (🚨) as an image whose
+  // text is absent from the feed, and « 𝗚𝗿𝗮𝘀 » Unicode letters become plain ones with NFKC.
+  // Without this, a post starting with an emoji was never found and stayed « à vérifier ».
+  const plainText = (value) => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const snippetOf = (value) => plainText(value).slice(0, 80);
   const matchingArticles = (snippet) => !snippet ? [] : [...document.querySelectorAll('[role="article"], [aria-posinset]')]
-    .filter(visible).filter((node) => textOf(node).toLowerCase().includes(snippet));
+    .filter(visible).filter((node) => plainText(textOf(node)).includes(snippet));
   const liveNotices = (pattern) => [...document.querySelectorAll('[role="alert"], [role="status"], [aria-live="assertive"], [aria-live="polite"]')]
     .filter(visible).map(textOf).filter((text) => text && text.length <= 500 && pattern.test(text));
   // « Booster la publication » is a PAID action, and Facebook now arrives with
